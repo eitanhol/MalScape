@@ -14,6 +14,10 @@ import logging
 import os
 from scipy.cluster.hierarchy import linkage, to_tree
 
+import cProfile
+import pstats
+import io
+
 global_df = None
 global_start_time = None
 global_end_time = None
@@ -902,8 +906,12 @@ def get_cluster_table():
 # Endpoint to process CSV data: parses, processes, and stores in global_df.
 @app.route('/process_csv', methods=['POST'])
 def process_csv_endpoint():
-    """ Endpoint to process uploaded CSV data. """
     global global_df, global_start_time, global_end_time, global_duration_seconds
+    
+    # --- PROFILING CODE START (for local testing only) ---
+    profiler = cProfile.Profile()
+    profiler.enable()
+    # --- PROFILING CODE END ---
 
     try:
         data = request.get_json()
@@ -916,61 +924,58 @@ def process_csv_endpoint():
             logging.warning("Process CSV request received empty 'csv_text'.")
             return jsonify({"error": "CSV data is empty."}), 400
 
-        df = process_csv_to_df(csv_text)
-        global_df = df
-        logging.info(f"CSV processed into DataFrame with shape: {global_df.shape}")
+        # This is the function call you want to profile
+        df = process_csv_to_df(csv_text) 
+        
+        if df is None or df.empty:
+            logging.error("CSV processing resulted in an empty or None DataFrame.")
+            # Clear global vars if df is bad
+            global_df = None
+            global_start_time = None
+            global_end_time = None
+            global_duration_seconds = None
+            return jsonify({"error": "Failed to process CSV data into a valid structure."}), 500
+        
+        global_df = df # Assign to global
 
-        # ---- START ADDED DEBUG LOGS ----
-        if global_df is not None and not global_df.empty:
-            logging.info(f"global_df populated. Shape: {global_df.shape}")
-            logging.info(f"global_df columns: {global_df.columns.tolist()}")
-            logging.info(f"dtypes of global_df: \n{global_df.dtypes}") # Corrected log message
-            if "ClusterID" in global_df.columns:
-                logging.info(f"Unique ClusterIDs in global_df: {global_df['ClusterID'].nunique(dropna=False)}") # Added dropna=False
-                logging.info(f"Top 5 ClusterID value counts in global_df: \n{global_df['ClusterID'].value_counts(dropna=False).head()}") # Added dropna=False
-            else:
-                logging.warning("Column 'ClusterID' not found in global_df.")
-            if "Anomaly" in global_df.columns:
-                logging.info(f"Anomaly counts in global_df: \n{global_df['Anomaly'].value_counts(dropna=False)}")
-            else:
-                logging.warning("Column 'Anomaly' not found in global_df.")
-            if "ClusterAnomaly" in global_df.columns:
-                logging.info(f"ClusterAnomaly counts in global_df: \n{global_df['ClusterAnomaly'].value_counts(dropna=False)}")
-            else:
-                logging.warning("Column 'ClusterAnomaly' not found in global_df.")
-            # Log a sample of the data
-            logging.info(f"global_df head (first 3 rows): \n{global_df.head(3).to_string()}")
-        else:
-            logging.warning("global_df is None or empty after CSV processing.")
-        # ---- END ADDED DEBUG LOGS ----
-
-        global_start_time = None
-        global_end_time = None
-        global_duration_seconds = None
-
+        # Calculate and set global time variables from the processed df
         if "Time" in global_df.columns and pd.api.types.is_datetime64_any_dtype(global_df["Time"]):
             valid_times = global_df["Time"].dropna()
             if not valid_times.empty:
-                min_time = valid_times.min()
-                max_time = valid_times.max()
-                global_start_time = min_time.isoformat()
-                global_end_time = max_time.isoformat()
-                global_duration_seconds = (max_time - min_time).total_seconds()
+                global_start_time = valid_times.min().isoformat()
+                global_end_time = valid_times.max().isoformat()
+                global_duration_seconds = (valid_times.max() - valid_times.min()).total_seconds()
                 logging.info(f"Time info calculated: Start={global_start_time}, End={global_end_time}, Duration={global_duration_seconds}s")
             else:
-                logging.warning("Time column contains only NaT values.")
+                logging.warning("Time column in DataFrame contains only NaT values. Time info not set.")
+                global_start_time, global_end_time, global_duration_seconds = None, None, None
         else:
-            logging.warning("Time column missing, not datetime type, or could not be parsed correctly during processing.")
+            logging.warning("Time column missing or not datetime type in DataFrame. Time info not set.")
+            global_start_time, global_end_time, global_duration_seconds = None, None, None
+        
+        logging.info(f"CSV processed successfully. global_df shape: {global_df.shape}")
 
-        return jsonify({"message": f"CSV processed successfully. {len(global_df)} rows loaded."}), 200
+        # --- PROFILING CODE START (for local testing only) ---
+        profiler.disable()
+        s = io.StringIO()
+        # Sort by cumulative time spent in the function and its sub-functions
+        ps = pstats.Stats(profiler, stream=s).sort_stats('cumtime')
+        ps.print_stats(30)  # Print the top 30 time-consuming functions
+        logging.info(f"\n\nCPROFILE RESULTS FOR /process_csv:\n{s.getvalue()}\n")
+        s.close()
+        # --- PROFILING CODE END ---
 
-    except ValueError as ve:
-        logging.error(f"Value Error during CSV processing: {ve}", exc_info=True) # Added exc_info
-        global_df, global_start_time, global_end_time, global_duration_seconds = None, None, None, None
+        return jsonify({"message": f"CSV processed successfully. {len(df)} rows loaded."}), 200
+
+    except ValueError as ve: # Catch errors from process_csv_to_df or data validation
+        logging.error(f"Value Error during CSV processing: {ve}", exc_info=True)
+        global_df = None # Clear potentially inconsistent global state
+        global_start_time, global_end_time, global_duration_seconds = None, None, None
         return jsonify({"error": str(ve)}), 400
     except Exception as e:
-        logging.exception("Unexpected error processing CSV")
-        global_df, global_start_time, global_end_time, global_duration_seconds = None, None, None, None
+        logging.error(f"Unexpected error processing CSV: {e}", exc_info=True)
+        global_df = None # Clear potentially inconsistent global state
+        global_start_time, global_end_time, global_duration_seconds = None, None, None
         return jsonify({"error": "An unexpected server error occurred during CSV processing."}), 500
     
 # New endpoint for downloading the processed CSV file
