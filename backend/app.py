@@ -109,30 +109,65 @@ def compute_clusters(df, resolution=2.5):
 
     return final_partition
 
-def load_attack_data(path: str = r"backend\GroundTruth.csv") -> tuple[dict, set]:
+def load_attack_data(filename: str = "GroundTruth.csv") -> tuple[dict, set]:
+    """
+    Loads attack data from a CSV file.
+
+    Args:
+        filename (str): The name of the CSV file (e.g., "GroundTruth.csv")
+                        expected to be in the same directory as this script.
+
+    Returns:
+        tuple[dict, set]: A tuple containing:
+            - attack_details (dict): A dictionary mapping (source_ip, dest_ip) to event_type.
+            - attack_pairs (set): A set of (source_ip, dest_ip) tuples and their reverse
+                                  for quick bi-directional anomaly lookup.
+    """
     attack_details = {}
     attack_pairs = set()
+    
+    # Construct path relative to the current script's directory (app.py)
+    script_dir = os.path.dirname(os.path.abspath(__file__)) # Gets the directory of app.py
+    path = os.path.join(script_dir, filename) # Joins with the filename
+    
+    # Use logging.INFO for these messages so they appear if your Heroku logging level is INFO or DEBUG
+    logging.info(f"Attempting to load attack data from: {path}")
+
     if os.path.exists(path):
         try:
             # Ensure IPs are read as strings and handle potential NaN before stripping
-            gt = pd.read_csv(path, dtype=str)
-            if "Event Type" not in gt.columns or "Source IP" not in gt.columns or "Destination IP" not in gt.columns:
-                logging.error(f"GroundTruth.csv is missing one or more required columns: 'Event Type', 'Source IP', 'Destination IP'")
-                return {}, attack_pairs
-            for _, r in gt.iterrows():
-                s = str(r["Source IP"]).strip() if pd.notna(r["Source IP"]) and str(r["Source IP"]).strip() else None
-                d = str(r["Destination IP"]).strip() if pd.notna(r["Destination IP"]) and str(r["Destination IP"]).strip() else None
-                event_type = str(r["Event Type"]).strip() if pd.notna(r["Event Type"]) and str(r["Event Type"]).strip() else None
+            gt = pd.read_csv(path, dtype=str, keep_default_na=False) # keep_default_na=False treats empty strings as "" not NaN
+
+            required_columns = ["Event Type", "Source IP", "Destination IP"]
+            missing_columns = [col for col in required_columns if col not in gt.columns]
+
+            if missing_columns:
+                logging.error(f"File '{path}' is missing required columns: {', '.join(missing_columns)}")
+                return {}, set() # Return empty if critical columns are missing
+
+            for index, row in gt.iterrows():
+                # Strip whitespace and handle empty strings explicitly after reading as str
+                s = str(row["Source IP"]).strip()
+                d = str(row["Destination IP"]).strip()
+                event_type = str(row["Event Type"]).strip()
 
                 if s and d and event_type: # Ensure all are non-empty strings after stripping
                     attack_details[(s, d)] = event_type
                     attack_pairs.add((s, d))
                     attack_pairs.add((d, s)) # For bi-directional check
+                # else: # Optional: log if a row has missing crucial data after stripping
+                #     logging.debug(f"Skipping row {index} in '{path}' due to missing Source IP, Destination IP, or Event Type after stripping.")
+
+            logging.info(f"Successfully loaded {len(attack_details)} unique attack details and {len(attack_pairs)} attack pairs (bi-directional) from '{path}'.")
+        except pd.errors.EmptyDataError:
+            logging.error(f"File '{path}' is empty.")
+            return {}, set()
         except Exception as e:
-            logging.error(f"GroundTruth.csv read error: {e}")
+            logging.error(f"Error reading or processing file '{path}': {e}", exc_info=True) # exc_info=True logs the traceback
+            return {}, set()
     else:
-        logging.warning(f"GroundTruth.csv not found at {path}")
-    logging.info(f"Loaded {len(attack_pairs)} attack pairs (counting bi-directionals if unique) from GroundTruth.csv for anomaly detection.")
+        logging.warning(f"Attack data file not found at '{path}'. Anomaly detection will be based on an empty set of known attacks.")
+    
     return attack_details, attack_pairs
 
 attack_detail_map_cache, attack_pairs_for_anomaly_cache = load_attack_data()
