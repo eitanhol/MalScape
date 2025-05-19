@@ -1,5 +1,12 @@
 # Changelog
 
+## [2025-05-18]
+### Added
+- Working deployment for small CSVs.
+
+### Changed
+- Slight optimizations to CSV processing for faster handling.
+
 ## [2025-05-16]
 ### Fixed
 - New heatmap cells (previously gray with no metric data) now display correct metrics when high Louvain resolution is applied.
@@ -7,6 +14,9 @@
 ### Added
 - Highlights for new clusters on the heatmap.
 - Button to hide new cluster highlights.
+
+### Changed
+- Initial deployment setup started (some issues remain).
 
 ## [2025-05-15]
 ### Added
