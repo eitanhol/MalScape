@@ -736,7 +736,7 @@
 
             <div class="control-section">
                 <label for="resolutionInput">Louvain Resolution:</label>
-                <input type="number" id="resolutionInput" value="2.5" step="0.1" min="0.1" placeholder="2.5" style="margin-bottom: 0; vertical-align: middle; width: 70px; padding: 6px 8px;">
+                <input type="number" id="resolutionInput" step="0.1" min="0.1" placeholder="2.5" style="margin-bottom: 0; vertical-align: middle; width: 70px; padding: 6px 8px;">
                 <button onclick="reclusterAndRedraw()" style="padding: 6px 12px;">Apply Resolution</button>
             </div>
 
@@ -2112,13 +2112,15 @@
         }); // End calculationPromise.then()
     } // End updateLegend function
 
-    function updateHeatmap() { // Modified to return a Promise
-        return new Promise((resolve, reject) => { // Wrap function body in a Promise
-            console.log("updateHeatmap started..."); // Keep basic start log
+    function updateHeatmap() {
+        return new Promise((resolve, reject) => {
+            console.log("updateHeatmap started...");
             // showLoading(); // Consider if loading indicator is needed here or handled globally
+
             if (typeof metrics === 'undefined' || !Array.isArray(metrics)) {
                 console.error("Global 'metrics' array is not defined correctly.");
-                return reject(new Error("Global 'metrics' array is not defined correctly.")); // Reject promise
+                // hideLoading(); // Ensure loading is hidden on early exit
+                return reject(new Error("Global 'metrics' array is not defined correctly."));
             }
             window.fullHeatmapData = {};
             window.heatmapSortOrders = {};
@@ -2136,59 +2138,97 @@
                 minDestinationAmt: document.getElementById('minDestinationAmtFilter').value,
                 maxDestinationAmt: document.getElementById('maxDestinationAmtFilter').value
             };
+            // ---- START ADDED DEBUG LOG ----
+            console.log("updateHeatmap - Filter parameters:", JSON.parse(JSON.stringify(filterParamsBase)));
+            // ---- END ADDED DEBUG LOG ----
 
             Promise.all(metrics.map(m => {
                 const filterParams = { ...filterParamsBase, metric: m.value };
+                // ---- START ADDED DEBUG LOG ----
+                console.log(`Workspaceing heatmap data for metric: ${m.label} (value: ${m.value}) with params:`, JSON.parse(JSON.stringify(filterParams)));
+                // ---- END ADDED DEBUG LOG ----
                 return fetch(`${API_BASE_URL}/filter_and_aggregate`, {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify(filterParams)
                     })
-                    .then(response => response.ok ? response.json() : Promise.reject(`Failed ${m.label} (${response.status})`))
+                    .then(response => {
+                        if (!response.ok) {
+                            // ---- START ADDED DEBUG LOG ----
+                            console.error(`Failed to fetch heatmap data for metric: ${m.label}. Status: ${response.status}`);
+                            // ---- END ADDED DEBUG LOG ----
+                            return response.json().catch(() => response.text()).then(errBody => {
+                                throw new Error(`Workspace failed for ${m.label}: ${errBody.error || errBody || response.statusText}`);
+                            });
+                        }
+                        return response.json();
+                    })
                     .then(data => {
-                         return { metric: m.label, pivotData: data }
+                        // ---- START ADDED DEBUG LOG ----
+                        console.log(`Data received for metric: ${m.label}`, data ? data.slice(0, Math.min(data.length, 5)) : 'No data'); // Log first 5 items or 'No data'
+                        if (data && data.length > 0) {
+                            const values = data.map(d => d.value);
+                            const minVal = Math.min(...values);
+                            const maxVal = Math.max(...values);
+                            console.log(`Metric: ${m.label}, Min value: ${minVal}, Max value: ${maxVal}, Count: ${data.length}`);
+                        } else {
+                            console.log(`Metric: ${m.label}, No data entries received or empty array.`);
+                        }
+                        // ---- END ADDED DEBUG LOG ----
+                        return { metric: m.label, pivotData: data };
                     })
                     .catch(error => {
-                        console.error(`Error fetching ${m.label}:`, error);
-                        return { metric: m.label, pivotData: [], error: true }; // Continue processing other metrics
+                        console.error(`Error fetching or processing data for metric ${m.label}:`, error);
+                        return { metric: m.label, pivotData: [], error: true };
                     });
             }))
             .then(results => {
                 const validResults = results.filter(r => !r.error);
-                // console.log(`updateHeatmap - Got ${validResults.length} valid metric results.`); // Optional log
                 const orderOption = document.getElementById("rowOrderSelect")?.value || "descending";
-                const comparator = orderOption === "descending" ? (a, b) => (b.value ?? -Infinity) - (a.value ?? -Infinity) : (a, b) => (a.value ?? Infinity) - (b.value ?? Infinity); // Handle nulls in sort
+                const comparator = orderOption === "descending" ? (a, b) => (b.value ?? -Infinity) - (a.value ?? -Infinity) : (a, b) => (a.value ?? Infinity) - (b.value ?? Infinity);
 
                 validResults.forEach(r => {
                     const metricName = r.metric;
                     if (r.pivotData && Array.isArray(r.pivotData)) {
-                         if (r.pivotData.length > 0) {
-                             const sortedData = [...r.pivotData].sort(comparator);
-                             window.heatmapSortOrders[metricName] = sortedData.map(d => d.cluster);
-                             window.fullHeatmapData[metricName] = r.pivotData; // Store original fetched data
-                             if(metricName === 'Count') { window.heatmapCountSortOrder = sortedData.map(d => d.cluster); }
-                         } else {
-                             window.heatmapSortOrders[metricName] = [];
-                             window.fullHeatmapData[metricName] = [];
-                             if(metricName === 'Count') { window.heatmapCountSortOrder = []; }
-                         }
+                        if (r.pivotData.length > 0) {
+                            const sortedData = [...r.pivotData].sort(comparator);
+                            window.heatmapSortOrders[metricName] = sortedData.map(d => d.cluster);
+                            window.fullHeatmapData[metricName] = r.pivotData;
+                            if(metricName === 'Count') { window.heatmapCountSortOrder = sortedData.map(d => d.cluster); }
+                        } else {
+                            window.heatmapSortOrders[metricName] = [];
+                            window.fullHeatmapData[metricName] = [];
+                            if(metricName === 'Count') { window.heatmapCountSortOrder = []; }
+                            // ---- START ADDED DEBUG LOG ----
+                            console.warn(`No pivotData (or empty array) for metric: ${metricName} after fetch.`);
+                            // ---- END ADDED DEBUG LOG ----
+                        }
                     } else {
-                         console.warn(`Invalid or missing pivotData for metric: ${metricName}`);
-                         window.heatmapSortOrders[metricName] = [];
-                         window.fullHeatmapData[metricName] = [];
-                         if(metricName === 'Count') { window.heatmapCountSortOrder = []; }
+                        console.warn(`Invalid or missing pivotData structure for metric: ${metricName}`);
+                        window.heatmapSortOrders[metricName] = [];
+                        window.fullHeatmapData[metricName] = [];
+                        if(metricName === 'Count') { window.heatmapCountSortOrder = []; }
                     }
                 });
 
-                console.log("updateHeatmap completed successfully. Heatmap data fetched and stored globally.");
-                resolve(validResults); // Resolve the promise when data is processed
+                // ---- START ADDED DEBUG LOGS ----
+                console.log("updateHeatmap - All metric data fetched and processed for heatmap.");
+                console.log("window.fullHeatmapData (sample):", Object.fromEntries(Object.entries(window.fullHeatmapData).map(([k, v]) => [k, v.slice(0,3)])));
+                console.log("window.heatmapSortOrders (sample):", Object.fromEntries(Object.entries(window.heatmapSortOrders).map(([k, v]) => [k, v.slice(0,3)])));
+                if (window.heatmapCountSortOrder) {
+                    console.log("window.heatmapCountSortOrder (first 10):", window.heatmapCountSortOrder.slice(0, 10));
+                }
+                // ---- END ADDED DEBUG LOGS ----
+                // hideLoading(); // Ensure loading is hidden
+                resolve(validResults);
             })
             .catch(error => {
-                console.error("Major error fetching heatmap data:", error);
+                console.error("Major error fetching one or more heatmap data components:", error);
                 window.fullHeatmapData = {}; window.heatmapSortOrders = {}; window.heatmapCountSortOrder = [];
-                reject(error); // Reject the promise on error
+                // hideLoading(); // Ensure loading is hidden
+                reject(error);
             });
-        }); // End Promise wrapper
+        });
     }
 
     function updateRowOrderSelectState() {
@@ -2924,44 +2964,65 @@
             const cardPaddingTop = parseFloat(cardStyle.paddingTop);
             const cardPaddingBottom = parseFloat(cardStyle.paddingBottom);
             const controlsHeight = treeControls.offsetHeight;
-            const estimatedTopSectionHeight = 70;
+            const estimatedTopSectionHeight = 70; // Approx height of "Hierarchical Cluster Tree" title and spans
             const containerStyle = window.getComputedStyle(containerDiv);
-            const containerMarginBottom = parseFloat(containerStyle.marginBottom) || 10;
-            const safetyMargin = 25;
+            const containerMarginBottom = parseFloat(containerStyle.marginBottom) || 10; // Default if not set
+            const safetyMargin = 25; // General safety margin
             const spaceBelowCardTop = viewportHeight - cardTopOffset - cardMarginBottom - safetyMargin;
             const availableHeight = spaceBelowCardTop - cardPaddingTop - estimatedTopSectionHeight - containerMarginBottom - controlsHeight - cardPaddingBottom;
-            calculatedHeight = Math.max(200, availableHeight);
+            calculatedHeight = Math.max(200, availableHeight); // Minimum height of 200px
         } catch (e) {
             console.warn("Could not calculate dynamic dendrogram height, using default/previous.", e);
-            calculatedHeight = svgH;
+            calculatedHeight = svgH; // Fallback to default or last passed height
         }
         currentDendrogramHeight = calculatedHeight;
         svgH = calculatedHeight;
         containerDiv.style.height = `${svgH}px`;
 
-        if (!data || data.id === undefined || data.dist === undefined) {
-            svg.append("text").attr("x", "50%").attr("y", "50%").attr("text-anchor", "middle").attr("dominant-baseline", "central").text("No hierarchical data available or error loading.");
+        if (!data || data.id === undefined || data.dist === undefined || data.is_minimal === true || (data.children && data.children.length === 0 && data.id && data.cluster_id) ) {
+            let message = "No hierarchical data available or error loading.";
+            let infoMessage = '0 Clusters';
+
+            if (data && data.is_minimal === true) {
+                message = `Tree cannot be built: Only one cluster (${data.cluster_id || 'N/A'}) found.`;
+                infoMessage = `1 Cluster (${data.cluster_id || 'N/A'})`;
+            } else if (data && data.error) {
+                message = `Error loading tree data: ${data.error}`;
+            } else if (data && data.id && (!data.children || data.children.length === 0) && data.cluster_id) {
+                message = `Tree cannot be built: Only one cluster (${data.cluster_id}) found.`;
+                infoMessage = `1 Cluster (${data.cluster_id})`;
+            }
+
+            svg.append("text").attr("x", "50%").attr("y", "50%")
+                .attr("text-anchor", "middle").attr("dominant-baseline", "central")
+                .style("font-size", "16px").style("fill", "#555")
+                .text(message);
+
             if (treeControls) treeControls.style.display = "none";
-            if (treeInfoSpan) treeInfoSpan.textContent = '';
+            if (treeInfoSpan) treeInfoSpan.textContent = infoMessage;
+
             window.lastTreeRoot = null;
             window.lastTreeData = null;
+            console.warn("showInlineDendrogram: Not enough data to draw a tree. Displaying message:", message);
             return;
         }
 
+
         const containerWidth = containerDiv.clientWidth || 600;
-        const internalTopMargin = 15;
-        const internalBottomMargin = 20;
-        const dendrogramHeightInternal = Math.max(150, svgH - internalTopMargin - internalBottomMargin);
+        const internalTopMargin = 15; // Space for the top of the dendrogram
+        const internalBottomMargin = 20; // Space below the dendrogram before heatmap
+        const dendrogramHeightInternal = Math.max(150, svgH - internalTopMargin - internalBottomMargin); // Actual height for D3 layout
         const height = dendrogramHeightInternal;
         window.currentD3LayoutHeight = height;
+
 
         const features = (typeof metrics !== 'undefined' && Array.isArray(metrics)) ? metrics.map(m => m.label) : [];
         const numHeatmapFeatures = features.length;
         const heatmapRowHeight = 15;
-        const heatmapSpacing = 5;
-        const heatmapTotalHeight = (heatmapRowHeight * numHeatmapFeatures);
-        const heatmapStartY = height + heatmapSpacing + margin.top;
-        const heatmapEndY = heatmapStartY + heatmapTotalHeight;
+        const heatmapSpacing = 5; // Space between dendrogram and heatmap
+        const heatmapTotalHeight = (heatmapRowHeight * numHeatmapFeatures); // Total height of the heatmap rows themselves
+        const heatmapStartY = height + heatmapSpacing + margin.top; // Y position where heatmap starts
+        const heatmapEndY = heatmapStartY + heatmapTotalHeight; // Y position where heatmap ends
 
         const root = d3.hierarchy(data);
         const currentLeaves = root.leaves();
@@ -2975,51 +3036,51 @@
             }
         }
 
-        const treeLayout = d3.cluster().size([1, height]);
+        const treeLayout = d3.cluster().size([1, height]); // Use calculated internal height
         treeLayout(root);
 
         root.each(node => {
-            node.structuralY = node.y;
+            node.structuralY = node.y; // Y from d3.cluster is the "depth" scaled to height
             if (typeof node.structuralY !== 'number' || !isFinite(node.structuralY)) {
                 node.structuralY = (node.parent && typeof node.parent.structuralY === 'number' && isFinite(node.parent.structuralY)) ? node.parent.structuralY : 0;
             }
             node.finalY = node.structuralY;
         });
 
-        const structuralLeaves = [...currentLeaves].sort((a, b) => a.x - b.x);
+        const structuralLeaves = [...currentLeaves].sort((a, b) => a.x - b.x); // a.x from d3.cluster is the "breadth" scaled to 1
         const structuralClusterOrGroupIds = structuralLeaves
             .map(leaf => leaf.data?.cluster_id)
             .filter(id => id !== undefined && id !== null)
             .map(String);
 
-        const minLeafSpacingStructural = 20;
+        const minLeafSpacingStructural = 20; // Minimum pixels per leaf
         const requiredWidthStructural = structuralClusterOrGroupIds.length * minLeafSpacingStructural;
         const widthAvailableInContainer = Math.max(300, containerWidth - margin.left - margin.right);
         const structuralLayoutWidth = Math.max(requiredWidthStructural, widthAvailableInContainer);
 
         const structuralXScale = d3.scaleBand()
             .domain(structuralClusterOrGroupIds)
-            .range([margin.left, margin.left + structuralLayoutWidth])
-            .paddingInner(0);
+            .range([margin.left, margin.left + structuralLayoutWidth]) // Spread leaves across this width
+            .paddingInner(0); // No space between bands, nodes will be at center of band
 
-        root.eachAfter(node => {
+        root.eachAfter(node => { // Calculate X positions from leaves up
             if (node.children && node.children.length > 0) {
                 const validChildrenX = node.children
                     .map(c => c.structuralX)
                     .filter(x => typeof x === 'number' && isFinite(x) && x >= 0);
                 if (validChildrenX.length > 0) {
                     node.structuralX = d3.mean(validChildrenX);
-                } else { node.structuralX = (structuralLayoutWidth / 2 + margin.left); }
-            } else {
+                } else { node.structuralX = (structuralLayoutWidth / 2 + margin.left); } // Fallback if no valid children X
+            } else { // Leaf node
                 const id = node.data?.cluster_id;
                 if (id !== undefined && id !== null) {
                     const bandStart = structuralXScale(String(id));
                     if (bandStart !== undefined && typeof bandStart === 'number') {
-                        node.structuralX = bandStart + structuralXScale.bandwidth() / 2;
-                    } else { node.structuralX = -1000; }
-                } else { node.structuralX = -1000; }
+                        node.structuralX = bandStart + structuralXScale.bandwidth() / 2; // Center in the band
+                    } else { node.structuralX = -1000; } // Off-screen if ID not found
+                } else { node.structuralX = -1000; } // Off-screen if no ID
             }
-            if (typeof node.structuralX !== 'number' || !isFinite(node.structuralX)) {
+            if (typeof node.structuralX !== 'number' || !isFinite(node.structuralX)) { // Final check for NaN/Infinity
                 node.structuralX = (structuralLayoutWidth / 2 + margin.left);
             }
         });
@@ -3054,26 +3115,24 @@
                         const originalEntry = metricStore.find(entry => String(entry.cluster) === origId);
                         const value = originalEntry?.value !== undefined ? parseFloat(originalEntry.value) : null;
                         const anomaly = originalEntry?.clusterAnomaly || 'normal';
-                        let packetCount = 1;
-                        if (window.fullHeatmapData['Count']) {
+                        let packetCount = 1; // Default packet count for weighting
+                        if (window.fullHeatmapData['Count']) { // Use actual 'Count' metric if available
                             const countEntry = window.fullHeatmapData['Count'].find(entry => String(entry.cluster) === origId);
                             packetCount = countEntry ? (parseFloat(countEntry.value) || 1) : 1;
                         }
                         if (!originalDataForGroup.has(metricLabel)) {
                             originalDataForGroup.set(metricLabel, []);
                         }
-                        if (value !== null && !isNaN(value)) {
+                        if (value !== null && !isNaN(value)) { // Ensure value is numeric
                             originalDataForGroup.get(metricLabel).push({ value: value, anomaly: anomaly, count: packetCount });
-                        } else {
+                        } else { // Still push entry for anomaly status, even if value is null/non-numeric
                             originalDataForGroup.get(metricLabel).push({ value: null, anomaly: anomaly, count: packetCount });
                         }
                     });
                     if (window.fullHeatmapData['Count']) {
                         const countEntry = window.fullHeatmapData['Count'].find(entry => String(entry.cluster) === origId);
                         totalPacketCountInGroup += countEntry ? (parseFloat(countEntry.value) || 0) : 0;
-                    } else {
-                        totalPacketCountInGroup += 1;
-                    }
+                    } else { totalPacketCountInGroup += 1; } // Fallback if Count metric not found
                 });
 
                 features.forEach(metricLabel => {
@@ -3082,58 +3141,34 @@
                     let aggregatedValue = null;
                     let aggregatedAnomaly = 'normal';
 
-                    if (allEntries.some(d => d.anomaly === 'anomaly')) {
-                        aggregatedAnomaly = 'anomaly';
-                    }
+                    if (allEntries.some(d => d.anomaly === 'anomaly')) { aggregatedAnomaly = 'anomaly'; }
 
                     if (valuesAndCounts.length > 0) {
                         switch (metricLabel) {
-                            case 'Count':
-                            case 'Total Data Sent':
-                                if (metricLabel === 'Count') {
-                                    aggregatedValue = totalPacketCountInGroup;
-                                } else {
-                                    aggregatedValue = d3.sum(valuesAndCounts, d => d.value);
-                                }
-                                break;
-                            case '% SYN packets':
-                            case '% RST packets':
-                            case '% ACK packets':
-                            case '% PSH packets':
+                            case 'Count': aggregatedValue = totalPacketCountInGroup; break;
+                            case 'Total Data Sent': aggregatedValue = d3.sum(valuesAndCounts, d => d.value); break;
+                            case '% SYN packets': case '% RST packets': case '% ACK packets': case '% PSH packets':
                             case 'Average Inter-Arrival Time':
                                 const totalValueSum = d3.sum(valuesAndCounts, d => d.value * d.count);
                                 const totalWeightSum = d3.sum(valuesAndCounts, d => d.count);
                                 aggregatedValue = totalWeightSum > 0 ? totalValueSum / totalWeightSum : d3.mean(valuesAndCounts, d => d.value);
                                 break;
-                            case 'Unique IPs':
-                            case 'Unique Sources':
-                            case 'Unique Destinations':
-                                aggregatedValue = d3.sum(valuesAndCounts, d => d.value);
-                                break;
-                            case 'Payload Size Variance':
-                            case 'Packets per Second':
-                                aggregatedValue = d3.mean(valuesAndCounts, d => d.value);
-                                break;
-                            case 'Start Time':
-                                aggregatedValue = d3.min(valuesAndCounts, d => d.value);
-                                break;
-                            case 'Duration':
-                                aggregatedValue = d3.max(valuesAndCounts, d => d.value);
-                                break;
-                            case 'Length':
-                            case 'Len':
-                                aggregatedValue = d3.mean(valuesAndCounts, d => d.value);
-                                break;
-                            default:
-                                aggregatedValue = d3.mean(valuesAndCounts, d => d.value);
-                                break;
+                            case 'Unique IPs': case 'Unique Sources': case 'Unique Destinations':
+                                aggregatedValue = d3.sum(valuesAndCounts, d => d.value); break; // Sum of uniques might not be standard, usually max or new unique set
+                            case 'Payload Size Variance': case 'Packets per Second':
+                                aggregatedValue = d3.mean(valuesAndCounts, d => d.value); break;
+                            case 'Start Time': aggregatedValue = d3.min(valuesAndCounts, d => d.value); break;
+                            case 'Duration': aggregatedValue = d3.max(valuesAndCounts, d => d.value); break;
+                            case 'Length': case 'Len': // Average packet/payload length for a group
+                                aggregatedValue = d3.mean(valuesAndCounts, d => d.value); break;
+                            default: aggregatedValue = d3.mean(valuesAndCounts, d => d.value); break;
                         }
                     }
                     aggregatedLeafData.get(String(leafId))[metricLabel] = aggregatedValue;
                     aggregatedLeafData.get(String(leafId))[`${metricLabel}_anomaly`] = aggregatedAnomaly;
                 });
 
-            } else {
+            } else { // Not a group, direct lookup
                 const clusterId = String(leafId);
                 features.forEach(metricLabel => {
                     const metricStore = window.fullHeatmapData[metricLabel] || [];
@@ -3157,15 +3192,16 @@
                 const bValue = bData ? (bData[selectedMetric] ?? null) : null;
 
                 if (aValue === null && bValue === null) return 0;
-                if (aValue === null) return 1;
-                if (bValue === null) return -1;
+                if (aValue === null) return 1; // Nulls last
+                if (bValue === null) return -1; // Nulls last
 
                 const orderOption = document.getElementById("rowOrderSelect")?.value || "descending";
                 return orderOption === "descending" ? bValue - aValue : aValue - bValue;
             });
-        } else {
-            metricSortedLeaves.sort((a, b) => a.x - b.x);
+        } else { // Default structural sort
+            metricSortedLeaves.sort((a,b) => a.x - b.x);
         }
+
 
         const heatmapClusterOrGroupIds = metricSortedLeaves
             .map(leaf => leaf.data?.cluster_id)
@@ -3181,32 +3217,31 @@
             finalLayoutWidth = Math.max(requiredWidthMetric, widthAvailableInContainer);
 
             const metricXScale = d3.scaleBand()
-                .domain(heatmapClusterOrGroupIds)
+                .domain(heatmapClusterOrGroupIds) // Use the metric-sorted IDs for domain
                 .range([margin.left, margin.left + finalLayoutWidth])
                 .paddingInner(0);
 
-            root.eachAfter(node => {
+            root.eachAfter(node => { // Calculate finalX based on metric order
                 if (node.children && node.children.length > 0) {
                     const validChildrenX = node.children
-                        .map(c => c.finalX)
+                        .map(c => c.finalX) // Use finalX from children
                         .filter(x => typeof x === 'number' && isFinite(x) && x >= 0);
-                    if (validChildrenX.length > 0) {
-                        node.finalX = d3.mean(validChildrenX);
-                    } else { node.finalX = (finalLayoutWidth / 2 + margin.left); }
-                } else {
+                    if (validChildrenX.length > 0) { node.finalX = d3.mean(validChildrenX); }
+                    else { node.finalX = (finalLayoutWidth / 2 + margin.left); }
+                } else { // Leaf
                     const id = node.data?.cluster_id;
                     if (id !== undefined && id !== null) {
                         const bandStart = metricXScale(String(id));
                         if (bandStart !== undefined && typeof bandStart === 'number') {
                             node.finalX = bandStart + metricXScale.bandwidth() / 2;
-                        } else { node.finalX = -1000; }
+                        } else { node.finalX = -1000; } // Off-screen if ID not in metric scale
                     } else { node.finalX = -1000; }
                 }
                 if (typeof node.finalX !== 'number' || !isFinite(node.finalX)) {
                     node.finalX = (finalLayoutWidth / 2 + margin.left);
                 }
             });
-        } else {
+        } else { // Use structural order
             finalLayoutWidth = structuralLayoutWidth;
             root.each(node => {
                 node.finalX = node.structuralX;
@@ -3215,42 +3250,45 @@
                 }
             });
         }
-        window.currentLayoutWidth = finalLayoutWidth;
+        window.currentLayoutWidth = finalLayoutWidth; // Store the actual width being used for layout
         window.lastTreeRoot = root;
-        window.lastTreeData = data;
+        window.lastTreeData = data; // Store the raw data for potential re-renders
 
-        const heatmapContentWidth = finalLayoutWidth;
+        // --- Heatmap X Scale (always based on metricSortedLeaves for heatmap column order) ---
+        const heatmapContentWidth = finalLayoutWidth; // Heatmap width matches tree width
         const heatmapXScale = d3.scaleBand()
-            .domain(heatmapClusterOrGroupIds)
+            .domain(heatmapClusterOrGroupIds) // Heatmap columns use the (potentially) metric-sorted order
             .range([margin.left, margin.left + heatmapContentWidth])
-            .paddingInner(0);
+            .paddingInner(0); // No padding for heatmap cells
 
         const actualHeatmapHeight = (numHeatmapFeatures > 0 && heatmapClusterOrGroupIds.length > 0 && features.length > 0) ? heatmapTotalHeight + heatmapSpacing : 0;
         const totalNeededHeight = height + actualHeatmapHeight + margin.top + margin.bottom;
         const viewBoxHeight = totalNeededHeight;
-        const viewBoxWidth = finalLayoutWidth + margin.left + margin.right;
+        const viewBoxWidth = finalLayoutWidth + margin.left + margin.right; // Overall SVG width based on tree width
 
         svg.attr("viewBox", `0 0 ${viewBoxWidth} ${viewBoxHeight}`)
         .attr("preserveAspectRatio", "xMidYMid meet");
 
-        const svgContent = svg.append("g");
+        const svgContent = svg.append("g"); // Main group for all content
         const linkGroup = svgContent.append("g").attr("class", "links-group");
         const nodeDrawingGroup = svgContent.append("g").attr("class", "nodes-group");
         const heatmapCellGroup = svgContent.append("g").attr("class", "heatmap-cells-group");
         const heatmapLineGroup = svgContent.append("g").attr("class", "heatmap-lines-group");
         const heatmapLabelGroup = svgContent.append("g").attr("class", "heatmap-labels-group");
 
+
         linkGroup.selectAll(".link")
             .data(root.links())
             .join("path")
             .attr("class", "link")
-            .attr("d", d => {
-                const sourceX = d.source.finalX;
-                const sourceY = d.source.finalY + margin.top;
-                const targetX = d.target.finalX;
-                const targetY = d.target.finalY + margin.top;
+            .attr("d", d_link => {
+                const sourceX = d_link.source.finalX;
+                const sourceY = d_link.source.finalY + margin.top;
+                const targetX = d_link.target.finalX;
+                const targetY = d_link.target.finalY + margin.top;
                 if ([sourceX, sourceY, targetX, targetY].every(coord => typeof coord === 'number' && isFinite(coord))) {
                     const midY = sourceY + (targetY - sourceY) / 2;
+                    // **** CORRECTED LINE ****
                     return `M${sourceX},${sourceY} L${sourceX},${midY} L${targetX},${midY} L${targetX},${targetY}`;
                 } return "";
             })
@@ -3259,21 +3297,27 @@
             .attr("stroke-width", 1.5);
 
         const drawnNodes = nodeDrawingGroup.selectAll(".node")
-            .data(root.descendants().filter(d => typeof d.finalX === 'number' && isFinite(d.finalX) && typeof d.finalY === 'number' && isFinite(d.finalY)))
+            .data(root.descendants().filter(d_node => typeof d_node.finalX === 'number' && isFinite(d_node.finalX) && typeof d_node.finalY === 'number' && isFinite(d_node.finalY)))
             .join("g")
-            .attr("class", d => "node" + (d.children ? " node--internal" : " node--leaf") + (d.data.isGroup ? " node--group" : ""))
-            .attr("transform", d => `translate(${d.finalX},${d.finalY + margin.top})`);
+            .attr("class", d_node => "node" + (d_node.children ? " node--internal" : " node--leaf") + (d_node.data.isGroup ? " node--group" : ""))
+            // **** CORRECTED LINE ****
+            .attr("transform", d_node => `translate(${d_node.finalX},${d_node.finalY + margin.top})`);
 
         drawnNodes.append("circle")
             .attr("r", 4)
-            .style("fill", d => d.data.isGroup ? "#a0a0a0" : (d.children ? "#555" : "#999"))
-            .style("stroke", d => d.data.isGroup ? "#555" : "none")
-            .style("stroke-width", d => d.data.isGroup ? 1 : 0);
+            .style("fill", d_node => d_node.data.isGroup ? "#a0a0a0" : (d_node.children ? "#555" : "#999"))
+            .style("stroke", d_node => d_node.data.isGroup ? "#555" : "none")
+            .style("stroke-width", d_node => d_node.data.isGroup ? 1 : 0);
+
+        console.log("showInlineDendrogram - Preparing to render heatmap cells.");
+        if (features.length === 0) console.warn("No features available for heatmap.");
+        if (heatmapClusterOrGroupIds.length === 0) console.warn("No cluster/group IDs for heatmap X-axis.");
+        if (aggregatedLeafData.size === 0) console.warn("aggregatedLeafData is empty.");
 
         if (features.length > 0 && heatmapClusterOrGroupIds.length > 0 && aggregatedLeafData.size > 0) {
             const heatmapFeatureData = [];
             heatmapClusterOrGroupIds.forEach(leafId => {
-                const leafAggData = aggregatedLeafData.get(String(leafId));
+                const leafAggData = aggregatedLeafData.get(String(leafId)); // Ensure string key
                 if (leafAggData) {
                     const leafNode = currentLeaves.find(l => String(l.data?.cluster_id) === String(leafId));
                     const isGroup = leafNode?.data?.isGroup || false;
@@ -3284,7 +3328,7 @@
                         heatmapFeatureData.push({
                             cluster_id: leafId,
                             feature: metricLabel,
-                            value: leafAggData[metricLabel] ?? null,
+                            value: leafAggData[metricLabel] ?? null, // Use nullish coalescing
                             anomaly: leafAggData[`${metricLabel}_anomaly`] || 'normal',
                             isGroup: isGroup,
                             originalLeavesCount: originalLeavesCount,
@@ -3294,21 +3338,38 @@
                 }
             });
 
+            if (heatmapFeatureData.length > 0) {
+                console.log("showInlineDendrogram - First 5 heatmapFeatureData items for cell rendering:", JSON.parse(JSON.stringify(heatmapFeatureData.slice(0, 5))));
+            } else {
+                console.log("showInlineDendrogram - heatmapFeatureData is empty before cell rendering.");
+            }
+
             const colorScales = {};
             const minIntensity = 0.05;
             const customBluesInterpolator = t => d3.interpolateBlues(minIntensity + Math.max(0, Math.min(1, t)) * (1 - minIntensity));
+
             features.forEach(metricLabel => {
                 const numericValues = heatmapFeatureData
-                    .filter(d => d.feature === metricLabel && d.value !== null && typeof d.value === 'number' && isFinite(d.value))
-                    .map(d => d.value);
+                    .filter(d_filter => d_filter.feature === metricLabel && d_filter.value !== null && typeof d_filter.value === 'number' && isFinite(d_filter.value))
+                    .map(d_map => d_map.value);
                 let scale;
+
+                console.log(`showInlineDendrogram - Metric: ${metricLabel}, Number of numeric values for scale: ${numericValues.length}`);
+
                 if (numericValues.length > 0) {
                     const rowMin = d3.min(numericValues);
                     const rowMax = d3.max(numericValues);
-                    const domain = [Math.min(0, rowMin), Math.max(rowMax, rowMin + 1e-9)];
+                    const domain = [Math.min(0, rowMin), Math.max(rowMax, rowMin + 1e-9)]; // Ensure max > min slightly
                     scale = d3.scaleSequential(customBluesInterpolator).domain(domain).clamp(true);
+                    console.log(`showInlineDendrogram - Metric: ${metricLabel}, MinVal: ${rowMin}, MaxVal: ${rowMax}, Scale Domain: [${domain[0]}, ${domain[1]}]`);
+                    if(domain[0] !== domain[1]){
+                        console.log(`showInlineDendrogram - Metric: ${metricLabel}, Scale test - 0 maps to: ${scale(0)}, minVal maps to: ${scale(rowMin)}, mid maps to: ${scale((rowMin+rowMax)/2)}, maxVal maps to: ${scale(rowMax)}`);
+                    } else {
+                        console.log(`showInlineDendrogram - Metric: ${metricLabel}, Scale test - 0 maps to: ${scale(0)}, value maps to: ${scale(rowMin)} (min=max)`);
+                    }
                 } else {
                     scale = d3.scaleSequential(d3.interpolateGreys).domain([0, 1]);
+                    console.warn(`showInlineDendrogram - Metric: ${metricLabel}, No valid numeric values found. Using fallback greys scale.`);
                 }
                 colorScales[metricLabel] = scale;
             });
@@ -3316,70 +3377,75 @@
             const featureScale = d3.scaleBand()
                 .domain(features)
                 .range([heatmapStartY, heatmapEndY])
-                .paddingInner(0.1);
+                .paddingInner(0.1); // Small padding between heatmap rows
 
             if (heatmapXScale.bandwidth() > 0 && featureScale.bandwidth() > 0) {
                 const cellSelection = heatmapCellGroup.selectAll(".heatmap-cell")
-                    .data(heatmapFeatureData, d => `${d.cluster_id}-${d.feature}`)
+                    .data(heatmapFeatureData, d_data => `${d_data.cluster_id}-${d_data.feature}`)
                     .join("rect")
                     .attr("class", "heatmap-cell")
-                    .attr("x", d => {
-                        const xVal = heatmapXScale(d.cluster_id);
-                        return (typeof xVal === 'number' && isFinite(xVal)) ? xVal : -1000;
+                    .attr("x", d_attr => {
+                        const xVal = heatmapXScale(d_attr.cluster_id);
+                        return (typeof xVal === 'number' && isFinite(xVal)) ? xVal : -1000; // Off-screen if no band
                     })
                     .attr("width", heatmapXScale.bandwidth())
-                    .attr("y", d => {
-                        const yVal = featureScale(d.feature);
-                        return (typeof yVal === 'number' && isFinite(yVal)) ? yVal : -1000;
+                    .attr("y", d_attr => {
+                        const yVal = featureScale(d_attr.feature);
+                        return (typeof yVal === 'number' && isFinite(yVal)) ? yVal : -1000; // Off-screen if no band
                     })
                     .attr("height", featureScale.bandwidth());
 
-                cellSelection.filter(function() {
+                cellSelection.filter(function() { // Ensure cells with valid positions are processed
                         const x = +d3.select(this).attr("x");
                         const y = +d3.select(this).attr("y");
-                        return x >= 0 && y >= 0;
+                        return x >= 0 && y >= 0; // Check against valid screen positions
                     })
-                    .each(function(d) {
+                    .each(function(d_cell) {
                         const cell = d3.select(this);
-                        const scale = colorScales[d.feature];
+                        const scale = colorScales[d_cell.feature];
                         let originalFill;
-                        if (d.anomaly === 'anomaly') {
+                        if (d_cell.anomaly === 'anomaly') {
                             originalFill = anomalyOverrideColor;
-                        } else if (scale && d.value !== null && typeof d.value === 'number' && isFinite(d.value)) {
-                            originalFill = scale(d.value);
+                        } else if (scale && d_cell.value !== null && typeof d_cell.value === 'number' && isFinite(d_cell.value)) {
+                            originalFill = scale(d_cell.value);
                         } else {
-                            originalFill = "#eee";
+                            originalFill = "#eee"; // Fallback for null/non-numeric
                         }
                         cell.attr("data-original-fill", originalFill);
 
-                        const clusterIdStr = String(d.cluster_id);
-                        const highlightColor = clusterHighlightColors.get(clusterIdStr);
+                        const clusterIdStr = String(d_cell.cluster_id);
+                        const highlightColor = clusterHighlightColors.get(clusterIdStr); // Check if this cluster is highlighted
                         cell.attr("fill", originalFill)
                             .style("stroke", highlightColor ? highlightColor : defaultStrokeColor)
                             .style("stroke-width", highlightColor ? highlightStrokeWidth : defaultStrokeWidth);
+
+                        if (d_cell.cluster_id === heatmapClusterOrGroupIds[0] && features.indexOf(d_cell.feature) < 2) {
+                            console.log(`showInlineDendrogram - Cell Render Details - Cluster: ${d_cell.cluster_id}, Feature: ${d_cell.feature}, Value: ${d_cell.value}, Anomaly: ${d_cell.anomaly}, Scale Output: ${scale ? scale(d_cell.value) : 'N/A'}, Final Fill: ${originalFill}`);
+                        }
                     })
                     .style("cursor", "pointer")
-                    .on("click", async function(event, d) {
+                    .on("click", async function(event, d_click) {
                         event.stopPropagation();
-                        const clickedClusterOrGroupID = String(d.cluster_id);
-                        const isGroupClick = d.isGroup;
+                        const clickedClusterOrGroupID = String(d_click.cluster_id);
+                        const isGroupClick = d_click.isGroup;
 
-                        const cellsForClusterOrGroup = heatmapCellGroup.selectAll('.heatmap-cell')
+                        const cellsForClusterOrGroup = heatmapCellGroup.selectAll('.heatmap-cell') // Re-select all cells to ensure we get the right ones
                             .filter(cell_d => String(cell_d.cluster_id) === clickedClusterOrGroupID);
 
-                        if (!cellsForClusterOrGroup.empty()) { cellsForClusterOrGroup.raise(); }
+                        if (!cellsForClusterOrGroup.empty()) { cellsForClusterOrGroup.raise(); } // Bring to front
 
-                        if (clusterHighlightColors.has(clickedClusterOrGroupID)) {
+
+                        if (clusterHighlightColors.has(clickedClusterOrGroupID)) { // If already highlighted, unhighlight
                             clusterHighlightColors.delete(clickedClusterOrGroupID);
-                            addedSidebarClusters.delete(clickedClusterOrGroupID);
+                            addedSidebarClusters.delete(clickedClusterOrGroupID); // Remove from sidebar tracking
 
                             cellsForClusterOrGroup.transition().duration(100)
                                 .style('stroke', defaultStrokeColor)
                                 .style('stroke-width', defaultStrokeWidth);
 
-                            if (sidebarCy) {
+                            if (sidebarCy) { // Remove elements from sidebar graph
                                 let selectorsToRemove = [];
-                                if (isGroupClick) {
+                                if (isGroupClick) { // If it's a group, find original leaves
                                     const groupNode = currentLeaves.find(l => String(l.data?.cluster_id) === clickedClusterOrGroupID);
                                     const originalLeaves = Array.from(groupNode?.data?.originalLeaves || []);
                                     selectorsToRemove = originalLeaves.map(leafId => `[clusterID = "${leafId}"]`);
@@ -3394,24 +3460,26 @@
                                     }
                                 }
                             }
-
+                            // Update sidebar table and legend
                             if (sidebarCy && sidebarCy.elements().length > 0) {
-                                applySidebarSizeControls();
+                                applySidebarSizeControls(); // In case other elements are still there
                                 updateLegend(sidebarCy.edges());
-                                updateSidebarTableForSelectedEdges();
+                                updateSidebarTableForSelectedEdges(); // This will likely clear table if this was the last one
                             } else {
-                                clearSidebarVisualization();
-                                updateLegend();
+                                clearSidebarVisualization(); // If sidebar graph becomes empty
+                                updateLegend(); // Reset legend to global
                             }
+                            // If a node was selected that belonged to this cluster, deselect it
                             if (selectedNodeId && (!sidebarCy || !sidebarCy.getElementById(selectedNodeId)?.length)) {
                                 deselectCurrentNode();
-                                updateSidebarTableForSelectedEdges();
+                                updateSidebarTableForSelectedEdges(); // Re-evaluate table based on no selection
                             }
-                        } else {
+
+                        } else { // Not highlighted, so highlight it
                             const targetHighlightColor = generateUniqueHighlightColor();
                             clusterHighlightColors.set(clickedClusterOrGroupID, targetHighlightColor);
 
-                            if (isGroupClick) {
+                            if (isGroupClick) { // Handle group click (potentially multiple original clusters)
                                 toggleSidebar(true);
                                 const groupNode = currentLeaves.find(l => String(l.data?.cluster_id) === clickedClusterOrGroupID);
                                 const originalLeaves = Array.from(groupNode?.data?.originalLeaves || []);
@@ -3420,9 +3488,7 @@
                                     showSidebarLoading(true, false);
                                     sidebarInfoDiv.innerHTML = `Loading network for Group ${clickedClusterOrGroupID} (${originalLeaves.length} clusters)...`;
                                     sidebarInfoDiv.style.display = 'block';
-                                    let allNodesAdded = [];
-                                    let allEdgesAdded = [];
-                                    let errorOccurred = false;
+                                    let allNodesAdded = []; let allEdgesAdded = []; let errorOccurred = false;
 
                                     for (const originalLeafId of originalLeaves) {
                                         try {
@@ -3433,8 +3499,7 @@
                                             let isThisOriginalLeafAnomalous = false;
                                             if (window.fullHeatmapData && window.fullHeatmapData['Count']) {
                                                 const metricDataForOriginalLeaf = window.fullHeatmapData['Count'].find(
-                                                    entry => String(entry.cluster) === String(originalLeafId)
-                                                );
+                                                    entry => String(entry.cluster) === String(originalLeafId));
                                                 if (metricDataForOriginalLeaf && metricDataForOriginalLeaf.clusterAnomaly === 'anomaly') {
                                                     isThisOriginalLeafAnomalous = true;
                                                 }
@@ -3445,7 +3510,7 @@
                                                     group: 'nodes',
                                                     data: { ...node_item.data, clusterID: originalLeafId, Classification: node_item.data.Classification || 'Unknown' },
                                                     style: {
-                                                        'background-color': targetHighlightColor,
+                                                        'background-color': targetHighlightColor, // Color for the group
                                                         ...(isThisOriginalLeafAnomalous && { 'border-color': 'red', 'border-width': 2, 'border-style': 'solid' })
                                                     },
                                                     scratch: { _originalColor: targetHighlightColor }
@@ -3457,17 +3522,14 @@
                                                     const protocol = edge.data.Protocol || 'Unknown';
                                                     if (!protocolColorMap[protocol]) {
                                                         let randomColor;
-                                                        do { randomColor = '#' + Math.floor(Math.random() * 0xFFFFFF).toString(16).padStart(6, '0'); }
+                                                        do { randomColor = '#' + Math.floor(Math.random()*0xFFFFFF).toString(16).padStart(6, '0'); }
                                                         while (randomColor.toLowerCase() === SELECTED_EDGE_COLOR.toLowerCase());
                                                         protocolColorMap[protocol] = randomColor;
                                                     }
                                                     const edgeColor = protocolColorMap[protocol] || DEFAULT_UNKNOWN_COLOR;
-                                                    return {
-                                                        group: 'edges',
-                                                        data: { ...edge.data, clusterID: originalLeafId },
-                                                        style: { 'line-color': edgeColor, 'target-arrow-color': edgeColor },
-                                                        scratch: { _protocolColor: edgeColor }
-                                                    };
+                                                    return { group: 'edges', data: { ...edge.data, clusterID: originalLeafId },
+                                                            style: { 'line-color': edgeColor, 'target-arrow-color': edgeColor },
+                                                            scratch: { _protocolColor: edgeColor } };
                                                 });
                                                 allEdgesAdded.push(...edgesToAdd);
                                             }
@@ -3484,13 +3546,11 @@
                                     }
                                     if (allNodesAdded.length > 0 || allEdgesAdded.length > 0) {
                                         sidebarCy.add(allNodesAdded.concat(allEdgesAdded));
-                                        addedSidebarClusters.add(clickedClusterOrGroupID);
-                                        applySidebarSizeControls();
-                                        applySidebarLayout();
-                                        sidebarCy.fit(null, 30);
+                                        addedSidebarClusters.add(clickedClusterOrGroupID); // Track the group ID
+                                        applySidebarSizeControls(); applySidebarLayout(); sidebarCy.fit(null, 30);
                                         sidebarInfoDiv.style.display = 'none';
                                         updateLegend(sidebarCy.edges());
-                                        loadSidebarClusterTable(originalLeaves[0], 1);
+                                        loadSidebarClusterTable(originalLeaves[0], 1); // Load table for the first original leaf of the group
                                     } else if (!errorOccurred) {
                                         sidebarInfoDiv.innerHTML = `Group ${clickedClusterOrGroupID}: No network data found for its ${originalLeaves.length} clusters.`;
                                         addedSidebarClusters.add(clickedClusterOrGroupID);
@@ -3504,34 +3564,36 @@
                                         }
                                         loadSidebarClusterTable(originalLeaves[0], 1);
                                     }
-                                    deselectCurrentNode();
-                                } else {
+                                    deselectCurrentNode(); // Ensure no individual node is 'selected' style-wise
+                                } else { // Group has no original leaves
                                     sidebarInfoDiv.innerHTML = `Group ${clickedClusterOrGroupID}: Contains no underlying clusters.`;
                                     showSidebarLoading(false, false);
                                 }
-                            } else {
-                                const isClusterAnomalous = d.anomaly === 'anomaly';
+                            } else { // Not a group click, individual cluster cell
+                                const isClusterAnomalous = d_click.anomaly === 'anomaly';
                                 visualizeClusterInSidebar(clickedClusterOrGroupID, targetHighlightColor, isClusterAnomalous);
                             }
+                            // Visually highlight the clicked cell's column in the heatmap
                             cellsForClusterOrGroup.transition().duration(100)
                                 .style('stroke', targetHighlightColor)
                                 .style('stroke-width', highlightStrokeWidth);
                         }
+                        // Update dendrogram leaf highlights
                         highlightTreeClusters(new Set(clusterHighlightColors.keys()));
                     })
-                    .on("mouseover", function(event, d) {
+                    .on("mouseover", function(event, d_mouseover) {
                         const cell = d3.select(this);
                         cell.attr('data-hover-temp-stroke', cell.style('stroke'));
                         cell.attr('data-hover-temp-stroke-width', cell.style('stroke-width'));
-                        cell.style("stroke", "black").style("stroke-width", 1.5);
+                        cell.style("stroke", "black").style("stroke-width", 1.5); // Hover highlight
 
                         const tooltip = d3.select("#tooltip");
-                        const metricLabel = d.feature;
-                        const clusterOrGroupId = d.cluster_id;
-                        const value = d.value;
-                        const anomalyStatusCell = d.anomaly === 'anomaly' ? 'Anomaly Detected' : 'Normal';
-                        const isGroup = d.isGroup;
-                        const originalCount = d.originalLeavesCount;
+                        const metricLabel = d_mouseover.feature;
+                        const clusterOrGroupId = d_mouseover.cluster_id;
+                        const value = d_mouseover.value;
+                        const anomalyStatusCell = d_mouseover.anomaly === 'anomaly' ? 'Anomaly Detected' : 'Normal';
+                        const isGroup = d_mouseover.isGroup;
+                        const originalCount = d_mouseover.originalLeavesCount;
 
                         let displayValue = 'N/A';
                         if (value !== null && typeof value === 'number' && isFinite(value)) {
@@ -3543,7 +3605,7 @@
                         let title = isGroup ? `Group: ${clusterOrGroupId} (${originalCount} clusters)` : `Cluster: ${clusterOrGroupId}`;
                         let tooltipHtml = `${title}<br>Metric: ${metricLabel}<br>Value: ${displayValue}<br>Status: ${anomalyStatusCell}`;
                         let clusterAttackTypes = [];
-                        if (window.fullHeatmapData && window.fullHeatmapData['Count']) {
+                        if (window.fullHeatmapData && window.fullHeatmapData['Count']) { // Check if 'Count' metric data exists
                             const clusterEntry = window.fullHeatmapData['Count'].find(entry => String(entry.cluster) === String(clusterOrGroupId));
                             if (clusterEntry && clusterEntry.ClusterAttackTypes && clusterEntry.ClusterAttackTypes.length > 0) {
                                 clusterAttackTypes = clusterEntry.ClusterAttackTypes;
@@ -3554,23 +3616,24 @@
                             tooltipHtml += `<br><strong style="color:purple;">Cluster Attacks: ${clusterAttackTypes.join(', ')}</strong>`;
                         }
 
+
                         tooltip.style("display", "block")
                             .html(tooltipHtml)
                             .style("left", (event.pageX + 10) + "px")
                             .style("top", (event.pageY - 15) + "px");
                     })
-                    .on("mouseout", function(event, d) {
+                    .on("mouseout", function(event, d_mouseout) {
                         d3.select("#tooltip").style("display", "none");
                         const cell = d3.select(this);
                         const originalStroke = cell.attr('data-hover-temp-stroke');
                         const originalStrokeWidth = cell.attr('data-hover-temp-stroke-width');
 
-                        if (originalStroke && originalStrokeWidth) {
+                        if (originalStroke && originalStrokeWidth) { // Restore pre-hover stroke
                             cell.style("stroke", originalStroke).style("stroke-width", originalStrokeWidth);
-                            cell.attr('data-hover-temp-stroke', null);
+                            cell.attr('data-hover-temp-stroke', null); // Clear temp attributes
                             cell.attr('data-hover-temp-stroke-width', null);
-                        } else {
-                            const clusterIdStr = String(d.cluster_id);
+                        } else { // Fallback if temp attributes weren't set (should not happen with current logic)
+                            const clusterIdStr = String(d_mouseout.cluster_id);
                             const highlightColor = clusterHighlightColors.get(clusterIdStr);
                             if (highlightColor) {
                                 cell.style("stroke", highlightColor).style("stroke-width", highlightStrokeWidth);
@@ -3580,8 +3643,9 @@
                         }
                     });
 
-                cellSelection.filter(d => d.isNew)
-                    .each(function(dCell) {
+                // Add indicator lines for new clusters
+                cellSelection.filter(d_filter_new => d_filter_new.isNew)
+                    .each(function(dCell_new) {
                         const cellRect = d3.select(this);
                         const x = parseFloat(cellRect.attr("x"));
                         const y = parseFloat(cellRect.attr("y"));
@@ -3592,94 +3656,104 @@
                             heatmapLineGroup.append("line")
                                 .attr("class", "new-cluster-indicator")
                                 .attr("x1", x)
-                                .attr("y1", y + height + 1)
+                                .attr("y1", y + height + 1) // Position below the cell
                                 .attr("x2", x + width)
                                 .attr("y2", y + height + 1)
                                 .attr("stroke", "red")
                                 .attr("stroke-width", 1.5)
-                                .attr("data-cluster-ref", dCell.cluster_id);
+                                .attr("data-cluster-ref", dCell_new.cluster_id); // For potential future use
                         }
                     });
 
+
+                // Draw feature labels for the heatmap
                 heatmapLabelGroup.selectAll(".heatmap-feature-label")
                 .data(features)
                 .join("text")
                 .attr("class", "heatmap-feature-label")
-                .attr("x", margin.left - 5)
-                .attr("y", d => {
-                    const yVal = featureScale(d);
+                .attr("x", margin.left - 5) // Position to the left of the heatmap
+                .attr("y", d_label => {
+                    const yVal = featureScale(d_label);
                     return (typeof yVal === 'number' && isFinite(yVal)) ? yVal + featureScale.bandwidth() / 2 : -1000;
                 })
                 .attr("text-anchor", "end")
                 .attr("dominant-baseline", "middle")
                 .attr("font-size", "9px")
-                .text(d => d);
+                .text(d_label => d_label);
 
+                // Highlight the selected sort metric label
                 const metricSelectElement = document.getElementById('dendrogramSortMetricSelect');
                 const selectedMetricValue = metricSelectElement ? metricSelectElement.value : 'Default';
-                const selectedMetricLabelText = metricSelectElement ? metricSelectElement.options[metricSelectElement.selectedIndex].text : null;
+                const selectedMetricLabelText = metricSelectElement ? metricSelectElement.options[metricSelectElement.selectedIndex].text : null; // Get the display text
                 const featureLabels = heatmapLabelGroup.selectAll(".heatmap-feature-label");
-                featureLabels.style("fill", "#333").style("font-weight", "normal");
+                featureLabels.style("fill", "#333").style("font-weight", "normal"); // Reset all
                 if (selectedMetricValue !== 'Default' && selectedMetricLabelText) {
-                    featureLabels.filter(function(d) { return d === selectedMetricLabelText; })
-                    .style("fill", "#4299e1")
+                    featureLabels.filter(function(d_filter_label) { return d_filter_label === selectedMetricLabelText; })
+                    .style("fill", "#4299e1") // Highlight color
                     .style("font-weight", "bold");
                 }
-            }
-        }
 
+                } // End check for valid bandwidths
+            } // End check for features and cluster IDs
+
+        // --- Zoom setup ---
         let dx = 0, dy = 0, initialScale = 1;
         try {
-            const bounds = svgContent.node()?.getBBox();
+            const bounds = svgContent.node()?.getBBox(); // Get bounds of the drawn content
             if (bounds && bounds.width > 0 && bounds.height > 0) {
                 const scaleX = viewBoxWidth / bounds.width;
                 const scaleY = viewBoxHeight / bounds.height;
-                initialScale = Math.min(scaleX, scaleY) * 0.95;
-                initialScale = Math.max(0.05, Math.min(initialScale, 5));
+                initialScale = Math.min(scaleX, scaleY) * 0.95; // Fit with a little padding
+                initialScale = Math.max(0.05, Math.min(initialScale, 5)); // Clamp scale
+
+                // Center the scaled content
                 dx = (viewBoxWidth / 2) - ((bounds.x + bounds.width / 2) * initialScale);
                 dy = (viewBoxHeight / 2) - ((bounds.y + bounds.height / 2) * initialScale);
-                if (!isFinite(dx)) dx = margin.left;
-                if (!isFinite(dy)) dy = margin.top;
-                if (!isFinite(initialScale) || initialScale <= 0) initialScale = 1;
-            } else {
+
+                if(!isFinite(dx)) dx = margin.left; // Fallback for dx
+                if(!isFinite(dy)) dy = margin.top;   // Fallback for dy
+                if(!isFinite(initialScale) || initialScale <=0) initialScale = 1; // Fallback for scale
+
+            } else { // Fallback if bounds are not valid
                 dx = margin.left; dy = margin.top; initialScale = 1;
             }
         } catch(e) {
             console.error("Error calculating initial zoom transform:", e);
-            dx = margin.left; dy = margin.top; initialScale = 1;
+            dx = margin.left; dy = margin.top; initialScale = 1; // Fallback
         }
 
         initialTreeTransform = d3.zoomIdentity.translate(dx, dy).scale(initialScale);
 
         const zoomBehavior = d3.zoom()
-            .scaleExtent([0.05, 10])
-            .on("zoom.main", (event) => {
-                svgContent.attr("transform", event.transform);
+            .scaleExtent([0.05, 10]) // Min/max zoom scale
+            .on("zoom.main", (event) => { // Use a namespaced event type
+                svgContent.attr("transform", event.transform); // Apply zoom to the main content group
+                // Update threshold bar position during zoom
                 const thresholdSliderElem = document.getElementById('thresholdSlider');
                 if (thresholdSliderElem && window.lastTreeRoot && svgContent.node()) {
-                    requestAnimationFrame(() => {
-                        thresholdSliderElem.dispatchEvent(new Event('input'));
+                    requestAnimationFrame(() => { // Use rAF for smoother updates tied to repaint
+                        thresholdSliderElem.dispatchEvent(new Event('input')); // Trigger slider's input to redraw bar
                     });
                 } else {
                     d3.select("#threshold-bar").style("display", "none");
                 }
             });
 
-        window.inlineZoom = zoomBehavior;
-        svg.call(zoomBehavior)
-        .call(zoomBehavior.transform, initialTreeTransform)
-        .on("dblclick.zoom", null);
+        window.inlineZoom = zoomBehavior; // Store for reset functionality
+        svg.call(zoomBehavior) // Apply zoom behavior to the SVG element
+        .call(zoomBehavior.transform, initialTreeTransform) // Set initial zoom
+        .on("dblclick.zoom", null); // Disable double-click zoom (if default is undesirable)
 
-        if (treeControls) { treeControls.style.display = "flex"; }
+        if (treeControls) { treeControls.style.display = "flex"; } // Show controls now that tree is drawn
 
+        // Store previous state for comparison on recluster (if needed, might be handled by originalTreeData now)
         try { previousClusterCount = leafCount; previousClusterHash = JSON.stringify(data); } catch(e) { /* silently fail */ }
 
+        // Re-apply any existing highlights to the new tree structure
         highlightTreeClusters(new Set(clusterHighlightColors.keys()));
         const initialSlider = document.getElementById('thresholdSlider');
         if (initialSlider && window.lastTreeRoot && svgContent.node()) {
-            requestAnimationFrame(() => {
-                initialSlider.dispatchEvent(new Event('input'));
-            });
+            requestAnimationFrame(() => { initialSlider.dispatchEvent(new Event('input')); });
         } else {
             d3.select("#threshold-bar").style("display", "none");
         }
@@ -4283,10 +4357,20 @@
 
     async function reclusterAndRedraw() {
         const resolutionInput = document.getElementById('resolutionInput');
-        const resolution = parseFloat(resolutionInput.value);
         const messageDiv = document.getElementById('reclusterMessage');
         const acknowledgeBtn = document.getElementById('acknowledgeNewClustersBtn');
         const treeInfoSpan = document.getElementById('treeInfoSpan');
+
+        let resolution;
+        const inputValue = resolutionInput.value.trim();
+
+        if (inputValue === "") {
+            resolution = 2.5; // Default resolution
+            console.log("Resolution input is empty, using default: 2.5");
+        } else {
+            resolution = parseFloat(inputValue);
+            console.log(`Using user-provided resolution: ${resolution}`);
+        }
 
         if (isNaN(resolution) || resolution <= 0) {
             messageDiv.textContent = "Please enter a valid resolution > 0.";
@@ -4299,14 +4383,14 @@
         messageDiv.textContent = "Applying resolution and reclustering...";
         messageDiv.style.color = '#333';
         if (acknowledgeBtn) acknowledgeBtn.style.display = 'none';
-        if (treeInfoSpan) treeInfoSpan.textContent = '';
+        if (treeInfoSpan) treeInfoSpan.textContent = ''; // Clear previous info
         console.log(`Requesting recluster with resolution: ${resolution}`);
         showLoading();
 
         previousClusterIdsBeforeRecluster.clear();
-        if (window.originalTreeData) {
+        if (window.originalTreeData) { // Check if there's any original data to get IDs from
             try {
-                const oldRoot = d3.hierarchy(window.originalTreeData);
+                const oldRoot = d3.hierarchy(window.originalTreeData); // Use originalTreeData
                 oldRoot.leaves().forEach(leaf => {
                     if (leaf.data && leaf.data.cluster_id !== undefined) {
                         previousClusterIdsBeforeRecluster.add(String(leaf.data.cluster_id));
@@ -4314,8 +4398,10 @@
                 });
             } catch (e) {
                 console.warn("Could not get previous cluster IDs from originalTreeData:", e);
+                // Proceeding without previous IDs if originalTreeData was problematic
             }
         }
+
 
         try {
             const response = await fetch(`${API_BASE_URL}/hierarchical_clusters?resolution=${resolution}`);
@@ -4326,23 +4412,27 @@
             const treeData = await response.json();
             console.log("Reclustered tree data received:", treeData);
 
+            // Update originalTreeData with the new structure from re-clustering
             window.originalTreeData = structuredClone(treeData);
             const newOriginalRoot = d3.hierarchy(window.originalTreeData);
-            window.originalLeafCount = newOriginalRoot.leaves().length;
+            window.originalLeafCount = newOriginalRoot.leaves().length; // Update original leaf count
 
-            await updateHeatmap();
+            // Fetch new heatmap data as clustering might have changed cluster IDs and their compositions
+            await updateHeatmap(); // This is crucial
 
+            // Reset grouping state as this is a fresh tree structure
             window.currentGroupingApplied = false;
-            window.lastAppliedThreshold = 100;
+            window.lastAppliedThreshold = 100; // Reset display threshold logic
             const thresholdSlider = document.getElementById('thresholdSlider');
             const thresholdValueSpan = document.getElementById('thresholdValue');
-            if(thresholdSlider) thresholdSlider.value = 100;
+            if(thresholdSlider) thresholdSlider.value = 100; // Reset slider visuals
             if(thresholdValueSpan) thresholdValueSpan.textContent = '100%';
             
-            updateControlsState();
+            updateControlsState(); // Update button states based on new tree
 
+            // Determine new cluster IDs for highlighting
             const currentClusterIdsFromNewTree = new Set();
-            const rootOfNewTree = d3.hierarchy(treeData);
+            const rootOfNewTree = d3.hierarchy(treeData); // Use the newly fetched treeData
             rootOfNewTree.leaves().forEach(leaf => {
                 if (leaf.data && leaf.data.cluster_id !== undefined) {
                     currentClusterIdsFromNewTree.add(String(leaf.data.cluster_id));
@@ -4352,39 +4442,44 @@
             const newIdsForThisOperation = new Set(
                 [...currentClusterIdsFromNewTree].filter(id => !previousClusterIdsBeforeRecluster.has(id))
             );
-            currentNewClusterIds = newIdsForThisOperation;
+            currentNewClusterIds = newIdsForThisOperation; // Update global set of new IDs for this operation
 
+            // Count leaves in the currently displayed tree (which is treeData now)
             let currentLeafDisplayCount = 0;
-            (function countLeaves(node) {
+            (function countLeaves(node) { // IIFE to count leaves in the current tree structure
                 if (!node || typeof node !== 'object') return;
-                if (!node.children || node.children.length === 0) {
+                if ((!node.children || node.children.length === 0) && node.id !== "empty_root" && node.id !== "empty_root_no_data" && node.id !== "error_root" && node.id !== "error_scipy_tree" ) { // Check it's a leaf and not an error/empty node
                     if(node.cluster_id !== undefined && node.cluster_id !== null) currentLeafDisplayCount++;
-                } else {
+                } else if (node.children) {
                     node.children.forEach(countLeaves);
                 }
             })(treeData);
             
             if (currentNewClusterIds.size > 0) {
                 messageDiv.textContent = `Reclustering complete. ${currentLeafDisplayCount} leaf clusters found (${currentNewClusterIds.size} new).`;
-                messageDiv.style.color = '#e53e3e';
+                messageDiv.style.color = '#e53e3e'; // Highlight that there are new clusters
                 if (acknowledgeBtn) acknowledgeBtn.style.display = 'inline-block';
             } else if (previousClusterIdsBeforeRecluster.size > 0 && currentClusterIdsFromNewTree.size !== previousClusterIdsBeforeRecluster.size) {
+                // This case means the number of clusters changed, but none are "new" by ID comparison
+                // (e.g. some old ones disappeared, some new ones appeared but their IDs were recycled or already seen)
                 messageDiv.textContent = `Reclustering complete. ${currentLeafDisplayCount} leaf clusters found. Structure changed.`;
                 messageDiv.style.color = '#333';
                 if (acknowledgeBtn) acknowledgeBtn.style.display = 'none';
-            } else {
+            }
+            else {
                 messageDiv.textContent = `Reclustering complete. ${currentLeafDisplayCount} leaf clusters found. No new clusters identified.`;
                 messageDiv.style.color = '#333';
                 if (acknowledgeBtn) acknowledgeBtn.style.display = 'none';
             }
 
-            showInlineDendrogram(treeData, currentDendrogramHeight, currentNewClusterIds);
-            resetInlineZoom();
-            updateLegend();
-            clearSidebarVisualization();
+            showInlineDendrogram(treeData, currentDendrogramHeight, currentNewClusterIds); // Pass the new IDs
+            resetInlineZoom(); // Optional: fit view to new tree
+            updateLegend(); // Update legend as cluster compositions might have changed protocol distributions
+            clearSidebarVisualization(); // Clear sidebar as old selections are invalid for new tree
 
+            // Ensure threshold bar is updated based on the new tree
             const thresholdSliderElem = document.getElementById('thresholdSlider');
-            if (thresholdSliderElem && window.lastTreeRoot) {
+            if (thresholdSliderElem && window.lastTreeRoot) { // Check window.lastTreeRoot which is set by showInlineDendrogram
                 requestAnimationFrame(() => { thresholdSliderElem.dispatchEvent(new Event('input')); });
             }
 
@@ -4393,12 +4488,13 @@
             messageDiv.textContent = `Error: ${err.message || "Failed to recluster."}`;
             messageDiv.style.color = '#e53e3e';
             if (acknowledgeBtn) acknowledgeBtn.style.display = 'none';
-            if (treeInfoSpan) treeInfoSpan.textContent = '';
-            window.originalTreeData = null;
+            if (treeInfoSpan) treeInfoSpan.textContent = ''; // Clear info on error
+            // Potentially reset or clear tree display on error
+            window.originalTreeData = null; // Invalidate old data
             window.lastTreeData = null;
             window.originalLeafCount = 0;
             currentNewClusterIds.clear();
-            showInlineDendrogram(null, currentDendrogramHeight, currentNewClusterIds);
+            showInlineDendrogram(null, currentDendrogramHeight, currentNewClusterIds); // Show an empty/error state for dendrogram
         } finally {
             hideLoading();
         }

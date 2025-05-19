@@ -23,8 +23,8 @@ attack_pairs_for_anomaly_cache = set()
 
 # Set up logging so that we only see errors (keeps things quiet during normal use)
 logging.basicConfig(
-    level=logging.ERROR,
-    format="%(asctime)s - %(levelname)s - %(message)s"
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(name)s - %(module)s - %(funcName)s - %(lineno)d - %(message)s"
 )
 
 # Precompute internal subnets with their ranges to quickly classify IP addresses
@@ -363,7 +363,12 @@ CORS(app)  # Enable CORS so that requests from our web app can be processed
 def filter_and_aggregate():
     global global_df
     if global_df is None:
+        logging.warning("/filter_and_aggregate called but global_df is None.")
         return jsonify([])
+
+    # ---- START MODIFIED SECTION FOR INITIAL LOGGING ----
+    logging.info(f"Entering /filter_and_aggregate. global_df shape: {global_df.shape}")
+    # ---- END MODIFIED SECTION FOR INITIAL LOGGING ----
 
     anomaly_map = (
         global_df
@@ -381,6 +386,10 @@ def filter_and_aggregate():
             cluster_attack_types_map[cluster_id] = list(unique_cluster_attacks) if len(unique_cluster_attacks) > 0 else []
 
     data = request.get_json()
+    # ---- START ADDED DEBUG LOGS ----
+    logging.info(f"Request data for /filter_and_aggregate: {data}")
+    # ---- END ADDED DEBUG LOGS ----
+
     payloadKeyword = data.get("payloadKeyword", "").lower()
     sourceFilter = data.get("sourceFilter", "").lower()
     destinationFilter = data.get("destinationFilter", "").lower()
@@ -404,6 +413,8 @@ def filter_and_aggregate():
     max_dest_amt = int(data["maxDestinationAmt"]) if data.get("maxDestinationAmt","").strip() != "" else float('inf')
 
     df = global_df.copy()
+    logging.info(f"Initial df copy shape for filtering: {df.shape}")
+
     if payloadKeyword:
         df = df[df["Payload"].str.lower().str.contains(payloadKeyword, na=False)]
     if sourceFilter:
@@ -413,11 +424,22 @@ def filter_and_aggregate():
     if protocolFilter and "Protocol" in df.columns:
         df = df[df["Protocol"].str.lower().str.contains(protocolFilter, na=False)]
 
-    df["ClusterEntropy"] = pd.to_numeric(df["ClusterEntropy"], errors='coerce')
-    df = df[(df["ClusterEntropy"] >= entropyMin) & (df["ClusterEntropy"] <= entropyMax)]
+    if "ClusterEntropy" in df.columns: # Ensure column exists before filtering
+        df["ClusterEntropy"] = pd.to_numeric(df["ClusterEntropy"], errors='coerce')
+        df = df[(df["ClusterEntropy"] >= entropyMin) & (df["ClusterEntropy"] <= entropyMax)]
+    else:
+        logging.warning("ClusterEntropy column not found in df for filtering.")
+
 
     if isRetransmissionOnly and "IsRetransmission" in df.columns:
-        df = df[df["IsRetransmission"] == True]
+        df = df[df["IsRetransmission"] == True] # Boolean comparison
+
+    logging.info(f"df shape after filtering: {df.shape}, for metric: {metric}")
+    if df.empty:
+        logging.warning(f"DataFrame is empty after applying filters for metric '{metric}'. Returning empty list.")
+        return jsonify([])
+
+    agg = pd.Series(dtype=float) # Ensure agg is initialized
 
     if metric == "count":
         agg = df.groupby("ClusterID").size()
@@ -443,7 +465,7 @@ def filter_and_aggregate():
         )
     elif metric == "Payload Size Variance" and "PayloadLength" in df.columns:
         df["PayloadLength"] = pd.to_numeric(df["PayloadLength"], errors="coerce").fillna(0)
-        agg = df.groupby("ClusterID")["PayloadLength"].var(ddof=0)
+        agg = df.groupby("ClusterID")["PayloadLength"].var(ddof=0) # ddof=0 for population variance
     elif metric == "Packets per Second" and "Time" in df.columns:
         df['Time'] = pd.to_datetime(df['Time'], errors='coerce')
         grouped = df.groupby("ClusterID")
@@ -460,9 +482,9 @@ def filter_and_aggregate():
         overall_min_time = df['Time'].dropna().min()
         agg_time = df.groupby("ClusterID")["Time"].min()
         if pd.api.types.is_datetime64_any_dtype(overall_min_time) and not agg_time.empty:
-             agg = (agg_time - overall_min_time).dt.total_seconds()
+            agg = (agg_time - overall_min_time).dt.total_seconds()
         else:
-             agg = pd.Series(0, index=agg_time.index, dtype=float)
+            agg = pd.Series(0, index=agg_time.index, dtype=float)
         agg = agg.fillna(0)
     elif metric == "Duration" and "Time" in df.columns:
         df['Time'] = pd.to_datetime(df['Time'], errors='coerce')
@@ -473,13 +495,32 @@ def filter_and_aggregate():
         df["InterArrivalTime"] = pd.to_numeric(df["InterArrivalTime"], errors='coerce')
         agg = df.groupby("ClusterID")["InterArrivalTime"].mean()
         agg = agg.fillna(0)
-    elif metric in df.columns:
+    elif metric in df.columns: # Generic sum for other numeric columns
         df[metric] = pd.to_numeric(df[metric], errors='coerce').fillna(0)
         agg = df.groupby("ClusterID")[metric].sum()
     else:
+        logging.warning(f"Metric '{metric}' not found or not supported. Returning zeros.")
         unique_cluster_ids = df["ClusterID"].unique() if not df.empty else []
-        agg = pd.Series(0, index=unique_cluster_ids, dtype=float)
+        agg = pd.Series(0, index=unique_cluster_ids, dtype=float) # Ensure it's a Series
 
+    agg = agg.fillna(0) # Ensure NaNs in final agg are 0 for JSON compatibility
+
+    # ---- START ADDED DEBUG LOGS ----
+    logging.info(f"Metric: {metric}, Number of items in agg: {len(agg) if hasattr(agg, '__len__') else 'N/A (not a Series/list)'}")
+    if isinstance(agg, pd.Series) and not agg.empty:
+        logging.info(f"Aggregated data (agg) head for metric '{metric}': \n{agg.head().to_string()}")
+        logging.info(f"Aggregated data (agg) describe for metric '{metric}': \n{agg.describe().to_string()}")
+        # Check for non-finite values
+        if agg.isnull().any():
+            logging.warning(f"Agg for metric '{metric}' contains NaNs: \n{agg[agg.isnull()]}")
+        if not np.isfinite(agg).all():
+            logging.warning(f"Agg for metric '{metric}' contains non-finite values (inf): \n{agg[~np.isfinite(agg)]}")
+
+    elif not isinstance(agg, pd.Series):
+         logging.info(f"Aggregated data (agg) for metric '{metric}' is not a Pandas Series. Type: {type(agg)}, Value (first 200 chars): {str(agg)[:200]}")
+    else:
+        logging.info(f"Aggregated data (agg) for metric '{metric}' is an empty Series.")
+    # ---- END ADDED DEBUG LOGS ----
 
     unique_sources = df.groupby("ClusterID")["Source"].nunique()
     unique_destinations = df.groupby("ClusterID")["Destination"].nunique()
@@ -493,21 +534,36 @@ def filter_and_aggregate():
         if dst_count < min_dest_amt or dst_count > max_dest_amt:
             continue
 
+        # ---- START ADDED DEBUG LOG ----
+        # Log a few entries to see what values are being prepared
+        if len(filtered_pivot) < 3 : # Log first 3 entries
+            logging.info(f"Adding to filtered_pivot: cluster={cluster_id_val}, value={value}, anomaly={anomaly_map.get(cluster_id_val, 'normal')}")
+        # ---- END ADDED DEBUG LOG ----
+
         filtered_pivot.append({
-            "cluster": cluster_id_val,
-            "value": value,
-            "clusterAnomaly": anomaly_map.get(cluster_id_val, "normal"),
-            "ClusterAttackTypes": cluster_attack_types_map.get(cluster_id_val, [])
+            "cluster": str(cluster_id_val), # Ensure cluster_id is string for consistency
+            "value": float(value) if pd.notnull(value) and np.isfinite(value) else 0.0, # Ensure value is float and finite
+            "clusterAnomaly": anomaly_map.get(str(cluster_id_val), "normal"), # Ensure key is string
+            "ClusterAttackTypes": cluster_attack_types_map.get(str(cluster_id_val), []) # Ensure key is string
         })
+    logging.info(f"Number of items in filtered_pivot for metric '{metric}': {len(filtered_pivot)}")
+    if filtered_pivot:
+        logging.info(f"First item in filtered_pivot for metric '{metric}': {filtered_pivot[0]}")
+        if len(filtered_pivot) > 1:
+             logging.info(f"Last item in filtered_pivot for metric '{metric}': {filtered_pivot[-1]}")
+    else:
+        logging.info(f"filtered_pivot is empty for metric '{metric}'.")
     return jsonify(filtered_pivot)
 
 @app.route('/hierarchical_clusters', methods=['GET'])
 def hierarchical_clusters():
-    global global_df
-    if global_df is None:
-        return jsonify({"id": "root", "dist": 0, "children": []})
+    global global_df # Assuming global_df is populated by your /process_csv endpoint
+    if global_df is None or global_df.empty:
+        logging.warning("/hierarchical_clusters called but global_df is None or empty.")
+        # Return a structure indicating no data, which frontend should handle
+        return jsonify({"id": "empty_root_no_data", "dist": 0, "no_tree": True, "error": "No data loaded"}), 200
 
-    resolution = 2.5
+    resolution = 2.5 # Default resolution
     try:
         resolution_param = request.args.get("resolution")
         if resolution_param is not None:
@@ -517,107 +573,155 @@ def hierarchical_clusters():
             logging.info(f"Using custom resolution for hierarchical_clusters: {resolution}")
     except (TypeError, ValueError) as e:
         logging.warning(f"Invalid resolution parameter in hierarchical_clusters, using default 2.5: {e}")
-        resolution = 2.5
+        resolution = 2.5 # Fallback to default
 
     try:
         # Ensure Source/Destination are clean strings before re-clustering or anomaly detection
+        # This is crucial if data types might have changed or if NaNs are present
         if 'Source' in global_df.columns:
             global_df['Source'] = global_df['Source'].fillna('Unknown_IP').astype(str).str.strip()
         if 'Destination' in global_df.columns:
             global_df['Destination'] = global_df['Destination'].fillna('Unknown_IP').astype(str).str.strip()
 
+        # Re-compute clusters with the current (possibly new) resolution
         node_cluster = compute_clusters(global_df, resolution=resolution)
-        # Ensure 'Source' is string for mapping
-        global_df["ClusterID"] = global_df["Source"].astype(str).apply(lambda x: str(node_cluster.get(x, 'N/A')))
+        global_df["ClusterID"] = global_df["Source"].astype(str).map(node_cluster).fillna('N/A') # Use map for efficiency, ensure it's string
 
-        cluster_entropy = {}
-        if not global_df.empty:
-            for cluster, group in global_df.groupby("ClusterID"):
-                if cluster == 'N/A': continue
-                ent_protocol, ent_srcport, ent_dstport = 0,0,0
+        # Re-calculate ClusterEntropy
+        cluster_entropy_map = {} # Use a different variable name to avoid confusion if 'cluster_entropy' is used elsewhere
+        if "ClusterID" in global_df.columns and not global_df.empty:
+            for cluster_id_val, group in global_df.groupby("ClusterID"):
+                if cluster_id_val == 'N/A':
+                    continue
+                entropies = []
                 if "Protocol" in group.columns and not group["Protocol"].dropna().empty:
-                    ent_protocol = compute_entropy(group["Protocol"].dropna())
+                    entropies.append(compute_entropy(group["Protocol"].dropna()))
                 if "SourcePort" in group.columns and not group["SourcePort"].dropna().empty:
-                    ent_srcport = compute_entropy(group["SourcePort"].dropna())
+                    entropies.append(compute_entropy(group["SourcePort"].dropna()))
                 if "DestinationPort" in group.columns and not group["DestinationPort"].dropna().empty:
-                    ent_dstport = compute_entropy(group["DestinationPort"].dropna())
-                valid_entropies = [e for e in [ent_protocol, ent_srcport, ent_dstport] if e > 0]
-                cluster_entropy[cluster] = np.mean(valid_entropies) if valid_entropies else 0
-        global_df["ClusterEntropy"] = global_df["ClusterID"].map(cluster_entropy).fillna(0)
+                    entropies.append(compute_entropy(group["DestinationPort"].dropna()))
+                
+                valid_entropies = [e for e in entropies if e > 0 and pd.notna(e) and np.isfinite(e)]
+                cluster_entropy_map[cluster_id_val] = np.mean(valid_entropies) if valid_entropies else 0.0
+        global_df["ClusterEntropy"] = global_df["ClusterID"].map(cluster_entropy_map).fillna(0.0)
 
-        # Use the globally loaded attack_pairs_for_anomaly_cache
+        # Re-apply Anomaly and ClusterAnomaly based on current ClusterIDs and global attack data
+        # Assuming attack_detail_map_cache and attack_pairs_for_anomaly_cache are loaded globally
+        global_df["AttackType"] = global_df.apply(
+            lambda r: attack_detail_map_cache.get((r["Source"], r["Destination"]), "N/A"), axis=1
+        )
         global_df["Anomaly"] = global_df.apply(
-             lambda r: "anomaly" if (r["Source"] != r["Destination"]) and \
-                                     ((r["Source"], r["Destination"]) in attack_pairs_for_anomaly_cache) else "normal", axis=1)
-        
-        logging.info(f"Anomaly counts in hierarchical_clusters after re-apply: \n{global_df['Anomaly'].value_counts(dropna=False)}")
-
-        if not global_df.empty and "ClusterID" in global_df.columns and "Anomaly" in global_df.columns:
-             global_df["ClusterAnomaly"] = global_df.groupby("ClusterID")["Anomaly"].transform(
-                 lambda s: "anomaly" if (s == "anomaly").any() else "normal"
-             )
+            lambda r: "anomaly" if (r["Source"] != r["Destination"]) and \
+                                  ((r["Source"], r["Destination"]) in attack_pairs_for_anomaly_cache) else "normal",
+            axis=1
+        )
+        if "ClusterID" in global_df.columns and "Anomaly" in global_df.columns and not global_df.empty:
+            global_df["ClusterAnomaly"] = global_df.groupby("ClusterID")["Anomaly"].transform(
+                lambda s: "anomaly" if (s == "anomaly").any() else "normal"
+            )
         else:
-             global_df["ClusterAnomaly"] = "normal"
-        
-        logging.info(f"Recomputed clusters for hierarchical view. Resolution {resolution}. {global_df['ClusterID'].nunique(dropna=False)} clusters. \nClusterAnomaly counts: \n{global_df.get('ClusterAnomaly', pd.Series(dtype=str)).value_counts(dropna=False)}")
+            global_df["ClusterAnomaly"] = "normal"
+
+        logging.info(f"Recomputed clusters for hierarchical view. Resolution {resolution}. "
+                     f"{global_df['ClusterID'].nunique(dropna=False)} unique clusters. "
+                     f"Anomaly counts: \n{global_df.get('Anomaly', pd.Series(dtype=str)).value_counts(dropna=False)}. "
+                     f"ClusterAnomaly counts: \n{global_df.get('ClusterAnomaly', pd.Series(dtype=str)).value_counts(dropna=False)}")
 
     except Exception as e:
-        logging.error(f"Error during re-clustering or entropy/anomaly calculation in hierarchical_clusters: {e}", exc_info=True)
-        return jsonify({"error": f"Failed to recluster: {str(e)}"}), 500
-    
-    # Ensure stats are generated from the updated global_df
+        logging.error(f"Error during re-clustering or feature calculation in /hierarchical_clusters: {e}", exc_info=True)
+        return jsonify({"id": "error_root", "dist": 0, "error": f"Failed to recluster or recalculate features: {str(e)}", "no_tree": True}), 500
+
+    # Prepare data for SciPy linkage
+    # Ensure 'ClusterID' is present and not all 'N/A'
+    if 'ClusterID' not in global_df.columns or global_df['ClusterID'].nunique(dropna=False) == 0 or \
+       (global_df['ClusterID'].nunique(dropna=False) == 1 and global_df['ClusterID'].unique()[0] == 'N/A'):
+        logging.warning("No valid ClusterIDs available for hierarchical clustering stats.")
+        return jsonify({"id": "empty_root_no_clusters", "dist": 0, "no_tree": True, "error": "No valid clusters found"}), 200
+
     stats = (
-        global_df
+        global_df[global_df['ClusterID'] != 'N/A'] # Exclude 'N/A' clusters from stats for linkage
         .groupby('ClusterID')
-        .agg(total_packets=('ClusterID', 'size'),
-             avg_entropy=('ClusterEntropy', 'mean')) # avg_entropy should be fine
+        .agg(
+            total_packets=('ClusterID', 'size'),
+            avg_entropy=('ClusterEntropy', 'mean') # .mean() will ignore NaNs by default
+        )
         .reset_index()
     )
+    stats['avg_entropy'] = stats['avg_entropy'].fillna(0.0) # Ensure no NaNs for linkage
+
+    if stats.empty:
+        logging.warning("Stats DataFrame is empty after filtering N/A ClusterIDs. Cannot perform hierarchical clustering.")
+        return jsonify({"id": "empty_root_no_valid_stats", "dist": 0, "no_tree": True, "error": "No valid clusters for statistics"}), 200
+
+    # Sort stats by ClusterID to ensure consistent node indexing for SciPy
+    # Convert ClusterID to numeric for sorting if possible, otherwise sort as string
     try:
-        stats['ClusterID_num'] = pd.to_numeric(stats['ClusterID'], errors='coerce') # coerce errors for N/A etc.
+        stats['ClusterID_num'] = pd.to_numeric(stats['ClusterID'])
         stats = stats.sort_values('ClusterID_num').reset_index(drop=True)
-    except ValueError: # Should be less likely with errors='coerce'
+    except ValueError:
         stats = stats.sort_values('ClusterID').reset_index(drop=True)
 
+    linkage_data = stats[['total_packets', 'avg_entropy']].to_numpy() # Already filled NaNs
 
-    linkage_data = stats[['total_packets', 'avg_entropy']].fillna(0).to_numpy()
-
+    # SciPy linkage requires at least 2 samples
     if linkage_data.shape[0] < 2:
-         logging.warning("Not enough clusters (<2) to perform hierarchical clustering in /hierarchical_clusters.")
-         # Return a minimal structure if only one cluster exists (or no valid clusters)
-         cluster_id_val = stats.loc[0, 'ClusterID'] if not stats.empty and 'ClusterID' in stats.columns else "N/A"
-         return jsonify({"id": f"Cluster {cluster_id_val}", "cluster_id": str(cluster_id_val), "dist": 0}) # Ensure cluster_id is string
+        logging.warning(f"Not enough distinct clusters ({linkage_data.shape[0]}) to perform hierarchical clustering in /hierarchical_clusters.")
+        cluster_id_val = "N/A"
+        if not stats.empty: # If stats has one row
+            cluster_id_val = str(stats.loc[0, 'ClusterID'])
+
+        minimal_tree_response = {
+            "id": f"Cluster {cluster_id_val}",
+            "cluster_id": cluster_id_val,
+            "dist": 0,
+            "is_minimal": True, # Flag for the frontend
+            "children": [] # Explicitly empty children for single node
+        }
+        logging.info(f"Returning minimal tree structure: {minimal_tree_response}")
+        return jsonify(minimal_tree_response)
 
     try:
-        Z = linkage(linkage_data, method='average')
-        root, _ = to_tree(Z, rd=True) 
+        Z = linkage(linkage_data, method='average') # 'average' is a common linkage method
+        # rd=True gives root_node, node_list where root_node is the root of the tree.
+        root_node_obj, _ = to_tree(Z, rd=True)
     except Exception as e:
-        logging.error(f"Error during SciPy hierarchical clustering: {e}", exc_info=True)
-        return jsonify({"error": f"Hierarchical clustering failed: {str(e)}"}), 500
+        logging.error(f"Error during SciPy hierarchical clustering (linkage or to_tree): {e}", exc_info=True)
+        return jsonify({"id": "error_scipy_tree", "dist": 0, "error": f"Hierarchical clustering failed: {str(e)}", "no_tree": True}), 500
 
+    # Recursive function to convert SciPy tree object to the nested dictionary format
     def node_to_dict(node):
         if node.is_leaf():
             try:
-                # node.id is an index into the original linkage_data (which came from sorted stats)
-                cluster_id_val = stats.loc[node.id, 'ClusterID']
+                # node.id is an index into the original linkage_data (which came from the sorted stats DataFrame)
+                cluster_id_val = str(stats.loc[node.id, 'ClusterID']) # Ensure string
                 return {
-                    "id": f"Cluster {cluster_id_val}", 
-                    "cluster_id": str(cluster_id_val), # Ensure cluster_id is string
-                    "dist": float(node.dist)
+                    "id": f"Cluster {cluster_id_val}", # Used by D3 for display/linking, often unique
+                    "cluster_id": cluster_id_val,     # The actual ClusterID value
+                    "dist": float(node.dist)          # Distance for this leaf (often 0 or its own properties)
+                    # "children" is implicitly empty for leaves
                 }
-            except IndexError:
-                 logging.error(f"Error: Leaf node id {node.id} out of bounds for stats DataFrame (size: {len(stats)}).")
-                 return {"id": f"Unknown Leaf {node.id}", "cluster_id": "Error", "dist": float(node.dist)}
+            except IndexError as ie:
+                logging.error(f"IndexError in node_to_dict for leaf: node.id={node.id}, stats len={len(stats)}. Error: {ie}")
+                return {"id": f"ErrorLeaf_{node.id}", "cluster_id": "ERROR_ID", "dist": float(node.dist)}
+            except KeyError as ke:
+                logging.error(f"KeyError in node_to_dict for leaf: stats columns are {stats.columns}. Error: {ke}")
+                return {"id": f"ErrorLeaf_{node.id}", "cluster_id": "ERROR_ID_KEY", "dist": float(node.dist)}
         else:
-            left = node_to_dict(node.get_left())
-            right = node_to_dict(node.get_right())
+            # For internal nodes
+            left_child = node_to_dict(node.get_left())
+            right_child = node_to_dict(node.get_right())
+            children_list = []
+            if left_child: children_list.append(left_child)
+            if right_child: children_list.append(right_child)
+
             return {
-                "id": f"Internal_{node.id}", 
-                "dist": float(node.dist),
-                "children": [left, right]
+                "id": f"Internal_{node.id}", # Unique ID for the internal node
+                "dist": float(node.dist),    # Distance (height) of this merge
+                "children": children_list
             }
 
-    tree_dict = node_to_dict(root)
+    tree_dict = node_to_dict(root_node_obj)
+    logging.info(f"Hierarchical tree_dict successfully generated. Preview: {str(tree_dict)[:1000]}")
     return jsonify(tree_dict)
 
 # Endpoint to return network data for a given cluster
@@ -799,26 +903,48 @@ def get_cluster_table():
 @app.route('/process_csv', methods=['POST'])
 def process_csv_endpoint():
     """ Endpoint to process uploaded CSV data. """
-    global global_df, global_start_time, global_end_time, global_duration_seconds # Ensure globals are modified
+    global global_df, global_start_time, global_end_time, global_duration_seconds
 
     try:
         data = request.get_json()
         if not data or "csv_text" not in data:
-             logging.warning("Process CSV request missing 'csv_text'.")
-             return jsonify({"error": "No CSV data provided."}), 400
+            logging.warning("Process CSV request missing 'csv_text'.")
+            return jsonify({"error": "No CSV data provided."}), 400
 
         csv_text = data.get("csv_text", "")
         if not csv_text.strip():
-             logging.warning("Process CSV request received empty 'csv_text'.")
-             return jsonify({"error": "CSV data is empty."}), 400
+            logging.warning("Process CSV request received empty 'csv_text'.")
+            return jsonify({"error": "CSV data is empty."}), 400
 
-        # Process to DataFrame using the dedicated function
-        df = process_csv_to_df(csv_text) # process_csv_to_df does the main work
-        global_df = df # Store the processed DataFrame globally
+        df = process_csv_to_df(csv_text)
+        global_df = df
         logging.info(f"CSV processed into DataFrame with shape: {global_df.shape}")
 
-        # --- Calculate Time Information ---
-        global_start_time = None # Reset before calculation
+        # ---- START ADDED DEBUG LOGS ----
+        if global_df is not None and not global_df.empty:
+            logging.info(f"global_df populated. Shape: {global_df.shape}")
+            logging.info(f"global_df columns: {global_df.columns.tolist()}")
+            logging.info(f"dtypes of global_df: \n{global_df.dtypes}") # Corrected log message
+            if "ClusterID" in global_df.columns:
+                logging.info(f"Unique ClusterIDs in global_df: {global_df['ClusterID'].nunique(dropna=False)}") # Added dropna=False
+                logging.info(f"Top 5 ClusterID value counts in global_df: \n{global_df['ClusterID'].value_counts(dropna=False).head()}") # Added dropna=False
+            else:
+                logging.warning("Column 'ClusterID' not found in global_df.")
+            if "Anomaly" in global_df.columns:
+                logging.info(f"Anomaly counts in global_df: \n{global_df['Anomaly'].value_counts(dropna=False)}")
+            else:
+                logging.warning("Column 'Anomaly' not found in global_df.")
+            if "ClusterAnomaly" in global_df.columns:
+                logging.info(f"ClusterAnomaly counts in global_df: \n{global_df['ClusterAnomaly'].value_counts(dropna=False)}")
+            else:
+                logging.warning("Column 'ClusterAnomaly' not found in global_df.")
+            # Log a sample of the data
+            logging.info(f"global_df head (first 3 rows): \n{global_df.head(3).to_string()}")
+        else:
+            logging.warning("global_df is None or empty after CSV processing.")
+        # ---- END ADDED DEBUG LOGS ----
+
+        global_start_time = None
         global_end_time = None
         global_duration_seconds = None
 
@@ -835,18 +961,16 @@ def process_csv_endpoint():
                 logging.warning("Time column contains only NaT values.")
         else:
             logging.warning("Time column missing, not datetime type, or could not be parsed correctly during processing.")
-        # --- End Time Calculation ---
 
-        # Return a success confirmation JSON
         return jsonify({"message": f"CSV processed successfully. {len(global_df)} rows loaded."}), 200
 
-    except ValueError as ve: # Catch specific errors like missing columns
-        logging.error(f"Value Error during CSV processing: {ve}")
-        global_df, global_start_time, global_end_time, global_duration_seconds = None, None, None, None # Reset globals
-        return jsonify({"error": str(ve)}), 400 # Return specific error
+    except ValueError as ve:
+        logging.error(f"Value Error during CSV processing: {ve}", exc_info=True) # Added exc_info
+        global_df, global_start_time, global_end_time, global_duration_seconds = None, None, None, None
+        return jsonify({"error": str(ve)}), 400
     except Exception as e:
-        logging.exception(f"Unexpected error processing CSV") # Log full traceback
-        global_df, global_start_time, global_end_time, global_duration_seconds = None, None, None, None # Reset globals
+        logging.exception("Unexpected error processing CSV")
+        global_df, global_start_time, global_end_time, global_duration_seconds = None, None, None, None
         return jsonify({"error": "An unexpected server error occurred during CSV processing."}), 500
     
 # New endpoint for downloading the processed CSV file
@@ -1067,7 +1191,7 @@ if __name__ == '__main__':
     if len(sys.argv) > 1 and sys.argv[1].lower() == 'cli':
         # CLI mode: python app.py cli <input_file> -o <output_file>
         cli_arguments = sys.argv[2:] 
-        main_cli(cli_arguments) # Assumes main_cli is modified to accept args
+        main_cli(cli_arguments)
     else:
         # Server mode: python app.py
         port = int(os.environ.get("PORT", 5000))
