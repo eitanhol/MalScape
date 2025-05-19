@@ -991,32 +991,50 @@ def convert_nan_to_none(obj):
         return obj
 
 # Main CLI function to process a CSV file from the command line and save the output
-def main_cli():
-    parser = argparse.ArgumentParser(description="Process CSV files for network traffic analysis.")
-    parser.add_argument("input_file", help="Path to the input CSV file")
-    parser.add_argument("-o", "--output_file", help="Output CSV file name", default="processed.csv")
-    args = parser.parse_args()
+def main_cli(cli_args=None):
+    parser = argparse.ArgumentParser(
+        description="Process CSV files for network traffic analysis (CLI mode)."
+    )
+
+    args = parser.parse_args(cli_args)
+
     try:
         with open(args.input_file, 'r') as f:
             csv_text = f.read()
-    except Exception as e:
-        logging.error(f"Error reading input file: {e}")
+        logging.info(f"CLI: Successfully read input file: {args.input_file}")
+    except FileNotFoundError:
+        logging.error(f"CLI Error: Input file '{args.input_file}' not found.")
         sys.exit(1)
+    except Exception as e:
+        logging.error(f"CLI Error: Could not read input file '{args.input_file}': {e}")
+        sys.exit(1)
+
     try:
-        processed_csv = process_csv(csv_text)
+        # The process_csv function uses the global attack_detail_map_cache
+        # Ensure it's loaded as expected, or pass the path if you made load_attack_data more flexible
+        logging.info("CLI: Starting CSV processing...")
+        processed_csv_text = process_csv(csv_text) # process_csv returns the CSV string
+        logging.info("CLI: CSV processing complete.")
     except Exception as e:
-        logging.error(f"Error processing CSV: {e}")
+        logging.error(f"CLI Error: Error during CSV processing: {e}")
         sys.exit(1)
+
     try:
         with open(args.output_file, 'w') as f:
-            f.write(processed_csv)
-        logging.error(f"Processed CSV saved to {args.output_file}")
+            f.write(processed_csv_text)
+        # Changed to logging.info for success, as it's not an error.
+        logging.info(f"CLI: Processed CSV saved to {args.output_file}")
     except Exception as e:
-        logging.error(f"Error saving output file: {e}")
+        logging.error(f"CLI Error: Could not save output file '{args.output_file}': {e}")
         sys.exit(1)
 
 if __name__ == '__main__':
-    if len(sys.argv) > 1 and sys.argv[1] != "runserver":
-        main_cli()
+    if len(sys.argv) > 1 and sys.argv[1].lower() == 'cli':
+        # CLI mode: python app.py cli <input_file> -o <output_file>
+        cli_arguments = sys.argv[2:] 
+        main_cli(cli_arguments) # Assumes main_cli is modified to accept args
     else:
-        app.run(debug=True)
+        # Server mode: python app.py
+        port = int(os.environ.get("PORT", 5000))
+        logging.info(f"Starting Flask server on host 0.0.0.0 port {port}")
+        app.run(debug=True, host='0.0.0.0', port=port)
