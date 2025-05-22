@@ -359,7 +359,9 @@ def process_csv(csv_text):
 # -------------------------------
 # Flask endpoints and additional routes
 app = Flask(__name__)
-CORS(app)  # Enable CORS so that requests from our web app can be processed
+CORS(app)
+logging.info("--- FLASK APP INITIALIZED, CORS(app) CALLED ---")
+print("--- FLASK APP INITIALIZED, CORS(app) CALLED (print) ---")
 
 # Endpoint to filter and aggregate data by different metrics based on user filters
 @app.route('/filter_and_aggregate', methods=['POST'])
@@ -1000,11 +1002,20 @@ def serve_static(path):
 
 @app.route('/protocol_percentages', methods=['GET'])
 def protocol_percentages():
+    logging.info("--- /protocol_percentages ROUTE ACCESSED ---")
+    print("--- /protocol_percentages ROUTE ACCESSED (print) ---")
     global global_df
     if global_df is None:
+        logging.warning("/protocol_percentages: global_df is None")
         return jsonify({})
+
     df = global_df.copy()
-    df['Protocol'] = df['Protocol'].fillna('').str.strip()
+
+    if 'Protocol' not in df.columns:
+        logging.warning("/protocol_percentages: 'Protocol' column not found in DataFrame.")
+        return jsonify({})
+
+    df['Protocol'] = df['Protocol'].astype(str).fillna('').str.strip()
     
     if 'processCount' in df.columns:
         df['processCount'] = pd.to_numeric(df['processCount'], errors='coerce').fillna(1)
@@ -1013,8 +1024,18 @@ def protocol_percentages():
         protocol_counts = df.groupby('Protocol').size()
         
     total = protocol_counts.sum()
-    percentages = {proto: round(count / total * 100, 5)
-                   for proto, count in protocol_counts.items() if proto}
+    
+    if total == 0:
+        logging.warning("/protocol_percentages: total protocol count is 0 after grouping.")
+        return jsonify({})
+        
+    percentages = {
+        proto: round((count / total) * 100, 5)
+        for proto, count in protocol_counts.items() 
+        if proto # Ensure protocol name is not empty
+    }
+    
+    logging.info(f"/protocol_percentages: returning percentages: {percentages}")
     return jsonify(percentages)
 
 @app.route('/time_info', methods=['GET'])

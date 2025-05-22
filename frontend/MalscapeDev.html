@@ -586,7 +586,14 @@
   </div>
 
   <div id="legend-container" title="Shows protocol colors and statistics.">
-    <h3>Protocol Legend</h3>
+    <div id="saved-items-section" style="margin-bottom: 20px;">
+        <h3 style="font-size: 14px; margin-bottom: 8px;">Saved Items</h3>
+        <ul id="saved-items-list" style="list-style-type: none; padding-left: 0; font-size: 12px; max-height: 150px; overflow-y: auto;">
+            </ul>
+        <p id="no-saved-items" style="font-size: 12px; color: #6c757d; text-align: center; display: none;">No items saved yet.</p>
+    </div>
+    <hr style="margin-bottom: 15px;"> 
+    <h3 id="protocol-legend-title">Protocol Legend</h3>
     <table id="legend">
       <thead><tr><th>Protocol</th><th>Color</th><th>Process %</th></tr></thead>
       <tbody></tbody>
@@ -616,6 +623,7 @@
           <button id="sidebarFullscreenBtn" title="Toggle Sidebar Fullscreen">&#x2922;</button>
 
           <h3>Cluster Visualization</h3>
+          <button id="saveSelectionBtn" title="Save current selection to Saved Items list" style="margin-bottom: 10px; width: 100%; background-color: #28a745; color: white;">Save Selection</button>
           <button id="resetSidebarBtn" title="Clear sidebar graph, table, and heatmap selections.">Reset Node Selection</button>
 
           <div class="control-group sidebar-control" title="Change sidebar graph layout.">
@@ -847,7 +855,7 @@
     let isSidebarOpen = false;
     const sidebarWidth = 500;
     const legendWidth = 220;
-
+    
     const sidebar = document.getElementById('sidebar');
     const sidebarToggleBtn = document.getElementById('sidebar-toggle');
     const mainContainer = document.getElementById('main-container');
@@ -861,6 +869,8 @@
     const sidebarInfoDiv = document.getElementById('sidebar-info');
     const sidebarFullscreenBtn = document.getElementById('sidebarFullscreenBtn');
     let isSidebarFullscreen = false;
+    let savedItems = [];
+    const MAX_SAVED_ITEMS = 10;
 
 
     const sidebarLayoutOptions = {
@@ -1351,118 +1361,122 @@
     }
 
     function visualizeClusterInSidebar(clusterID, nodeColor, isAnomalous) {
-        // Check if the cluster's nodes are ALREADY in the sidebar graph
-        // And also if it's in addedSidebarClusters (for cases where elements might have been removed but ID persisted)
-        if (sidebarCy && sidebarCy.nodes(`[clusterID = "${clusterID}"]`).length > 0 && addedSidebarClusters.has(clusterID)) {
-             console.log(`Cluster ${clusterID} is already present in sidebar graph. Re-focusing.`);
-             if (sidebarCy) { // Double check sidebarCy just in case
-                 sidebarCy.nodes(`[clusterID = "${clusterID}"]`).animate({ style: { 'opacity': 0.5 } }, { duration: 200 }).animate({ style: { 'opacity': 1 } }, { duration: 200 });
-             }
-             if (currentSidebarTableClusterId !== clusterID || sidebarTableMode !== 'cluster') {
-                 loadSidebarClusterTable(clusterID, 1);
-             }
-             deselectCurrentNode(); // Deselect any currently selected node or edge
-             // Clear individually selected edges if any
-             if (selectedSidebarEdges.size > 0 && sidebarCy) {
-                  sidebarCy.edges().filter(edge => selectedSidebarEdges.has(`${edge.data('source')}|${edge.data('target')}|${edge.data('Protocol')}`))
-                  .forEach(edge => {
-                      const originalColor = edge.scratch('_protocolColor') || DEFAULT_UNKNOWN_COLOR;
-                      const originalWidth = edge.scratch('_originalWidth') || calculateEdgeWidth(edge.data('processCount'));
-                      edge.style({ 'line-color': originalColor, 'target-arrow-color': originalColor, 'width': originalWidth, 'z-index': 1 });
-                      edge.unselect();
-                  });
-                  selectedSidebarEdges.clear();
-             }
-             applySidebarSizeControls();
-             return;
-        }
+        return new Promise((resolve, reject) => { // Wrap in a Promise
+            const stringClusterID = String(clusterID); // Ensure consistent string IDs
 
-        toggleSidebar(true);
-        showSidebarLoading(true, false); // Show graph loading, not table loading
-        sidebarInfoDiv.innerHTML = `Loading network for Cluster ${clusterID}...`;
-        sidebarInfoDiv.style.display = 'block';
-
-        fetch(`${API_BASE_URL}/cluster_network?cluster_id=${clusterID}`)
-            .then(response => { if (!response.ok) throw new Error(`Network error (${response.status}) for Cluster ${clusterID}`); return response.json(); })
-            .then(data => {
-                showSidebarLoading(false, false); // Hide loading indicators
-
-                if (!data || (!data.nodes || data.nodes.length === 0)) {
-                    console.log(`No network data for Cluster ${clusterID}.`);
-                    if (!sidebarCy) { // Initialize sidebarCy if it doesn't exist
-                        sidebarCy = cytoscape({ container: document.getElementById('sidebar-cy'), style: CYTOSCAPE_STYLE });
-                        bindSidebarGraphEvents(); // Bind events only once on initialization
+            // If this specific cluster's nodes are already in the graph,
+            // we might just want to ensure they are visible and highlighted, not re-fetch/re-add.
+            if (sidebarCy && sidebarCy.nodes(`[clusterID = "${stringClusterID}"]`).length > 0 && addedSidebarClusters.has(stringClusterID)) {
+                console.log(`Cluster ${stringClusterID} elements already in sidebar. Re-focusing/styling.`);
+                sidebarCy.nodes(`[clusterID = "${stringClusterID}"]`).forEach(node => {
+                    node.style('background-color', nodeColor); // Apply/re-apply color
+                    if (!node.scratch('_originalColor')) { // Ensure original color is stored if it wasn't
+                        node.scratch('_originalColor', nodeColor);
                     }
-                    // Even if no graph data, mark as "added" to prevent re-fetch spam, load table
-                    addedSidebarClusters.add(clusterID);
-                    loadSidebarClusterTable(clusterID, 1);
-                    updateLegend(sidebarCy?.edges()); // Update legend (will likely be empty or global)
-                    deselectCurrentNode();
-                    sidebarInfoDiv.innerHTML = `Cluster ${clusterID}: No network data to display.`;
-                    sidebarInfoDiv.style.display = 'block';
-                    return;
-                }
-
-                const nodesToAdd = data.nodes.map(node => ({
-                    group: 'nodes',
-                    data: { ...node.data, clusterID: clusterID, Classification: node.data.Classification || 'Unknown' },
-                    style: {
-                        'background-color': nodeColor,
-                        ...(isAnomalous && { 'border-color': 'red', 'border-width': 2, 'border-style': 'solid' })
-                    },
-                    scratch: { _originalColor: nodeColor }
-                }));
-
-                const edgesToAdd = data.edges.map(edge => {
-                    const protocol = edge.data.Protocol || 'Unknown';
-                    if (!protocolColorMap[protocol]) {
-                        let randomColor;
-                        do {
-                            randomColor = '#' + Math.floor(Math.random() * 0xFFFFFF).toString(16).padStart(6, '0');
-                        } while (randomColor.toLowerCase() === SELECTED_EDGE_COLOR.toLowerCase());
-                        protocolColorMap[protocol] = randomColor;
+                    if (isAnomalous) {
+                        node.style({ 'border-color': 'red', 'border-width': 2, 'border-style': 'solid' });
                     }
-                    const edgeColor = protocolColorMap[protocol] || DEFAULT_UNKNOWN_COLOR;
-                    return {
-                        group: 'edges',
-                        data: { ...edge.data, clusterID: clusterID }, // Ensure edges also carry clusterID if needed
-                        style: { 'line-color': edgeColor, 'target-arrow-color': edgeColor },
-                        scratch: { _protocolColor: edgeColor }
-                    };
                 });
-
-                if (!sidebarCy) {
-                    sidebarCy = cytoscape({
-                        container: document.getElementById('sidebar-cy'),
-                        elements: { nodes: nodesToAdd, edges: edgesToAdd },
-                        style: CYTOSCAPE_STYLE
-                    });
-                    bindSidebarGraphEvents(); // Bind events after initialization
-                } else {
-                    sidebarCy.add(nodesToAdd.concat(edgesToAdd)); // Add to existing instance
+                // Optional: fit to this specific cluster if it's the only one being focused.
+                // If part of a larger view, fitting might be done globally later.
+                // sidebarCy.animate({ fit: { eles: sidebarCy.nodes(`[clusterID = "${stringClusterID}"]`), padding: 50 }, duration: 300});
+                if (currentSidebarTableClusterId !== stringClusterID || sidebarTableMode !== 'cluster') {
+                    loadSidebarClusterTable(stringClusterID, 1);
                 }
-                
-                addedSidebarClusters.add(clusterID); // Add to tracking set AFTER successful fetch and element prep
+                resolve({ clusterId: stringClusterID, status: 're-focused' });
+                return;
+            }
 
-                applySidebarSizeControls();
-                applySidebarLayout(); // Apply layout
-                sidebarCy.fit(null, 30); // Fit to view
-                sidebarInfoDiv.style.display = 'none'; // Hide info message
+            toggleSidebar(true); // Ensure sidebar is open
+            showSidebarLoading(true, false);
+            sidebarInfoDiv.innerHTML = `Loading network for Cluster ${stringClusterID}...`;
+            sidebarInfoDiv.style.display = 'block';
 
-                updateLegend(sidebarCy.edges());
-                loadSidebarClusterTable(clusterID, 1);
-                deselectCurrentNode(); // Deselect any previous node/edge selection
-            })
-            .catch(error => {
-                console.error(`Error visualizing cluster ${clusterID} in sidebar:`, error);
-                showSidebarLoading(false, false);
-                sidebarInfoDiv.innerHTML = `Error loading graph data for Cluster ${clusterID}.`;
-                sidebarInfoDiv.style.display = 'block';
-                // Still attempt to load table even if graph fails, and mark as "added" to avoid spam
-                addedSidebarClusters.add(clusterID);
-                loadSidebarClusterTable(clusterID, 1);
-                deselectCurrentNode();
-            });
+            fetch(`${API_BASE_URL}/cluster_network?cluster_id=${stringClusterID}`)
+                .then(response => { 
+                    if (!response.ok) throw new Error(`Network error (${response.status}) for Cluster ${stringClusterID}`); 
+                    return response.json(); 
+                })
+                .then(data => {
+                    showSidebarLoading(false, false);
+
+                    if (!data || (!data.nodes || data.nodes.length === 0)) {
+                        console.log(`No network data to display for Cluster ${stringClusterID}.`);
+                        sidebarInfoDiv.innerHTML = `Cluster ${stringClusterID}: No network data.`;
+                        sidebarInfoDiv.style.display = 'block';
+                        // Still add to addedSidebarClusters to prevent re-fetch spam, and load its (empty) table.
+                        addedSidebarClusters.add(stringClusterID);
+                        loadSidebarClusterTable(stringClusterID, 1); 
+                        resolve({ clusterId: stringClusterID, status: 'no-data' });
+                        return;
+                    }
+
+                    const nodesToAdd = data.nodes.map(node => ({
+                        group: 'nodes',
+                        data: { ...node.data, clusterID: stringClusterID, Classification: node.data.Classification || 'Unknown' },
+                        style: {
+                            'background-color': nodeColor,
+                            ...(isAnomalous && { 'border-color': 'red', 'border-width': 2, 'border-style': 'solid' })
+                        },
+                        scratch: { _originalColor: nodeColor }
+                    }));
+
+                    const edgesToAdd = data.edges.map(edge => {
+                        const protocol = edge.data.Protocol || 'Unknown';
+                        if (!protocolColorMap[protocol]) {
+                            let randomColor;
+                            do {
+                                randomColor = '#' + Math.floor(Math.random() * 0xFFFFFF).toString(16).padStart(6, '0');
+                            } while (randomColor.toLowerCase() === SELECTED_EDGE_COLOR.toLowerCase());
+                            protocolColorMap[protocol] = randomColor;
+                        }
+                        const edgeColor = protocolColorMap[protocol] || DEFAULT_UNKNOWN_COLOR;
+                        return {
+                            group: 'edges',
+                            data: { ...edge.data, clusterID: stringClusterID },
+                            style: { 'line-color': edgeColor, 'target-arrow-color': edgeColor },
+                            scratch: { _protocolColor: edgeColor }
+                        };
+                    });
+
+                    if (!sidebarCy) {
+                        sidebarCy = cytoscape({
+                            container: document.getElementById('sidebar-cy'),
+                            elements: { nodes: nodesToAdd, edges: edgesToAdd },
+                            style: CYTOSCAPE_STYLE
+                        });
+                        bindSidebarGraphEvents();
+                    } else {
+                        // Add new elements. Cytoscape handles duplicates by ID if nodes are shared.
+                        sidebarCy.add(nodesToAdd.concat(edgesToAdd));
+                    }
+                    
+                    addedSidebarClusters.add(stringClusterID);
+                    sidebarInfoDiv.style.display = 'none';
+                    
+                    // Apply layout and fit ONLY if this is the *only* cluster being added,
+                    // or handle fitting globally after all clusters in a view are added.
+                    // For now, let's let the caller handle global fitting.
+                    applySidebarSizeControls(); // Apply sizes to newly added elements
+                    let currentLayout = document.getElementById('sidebarLayoutSelect').value;
+                    if (sidebarCy.nodes(`[clusterID = "${stringClusterID}"]`).length > 0) { // Ensure elements exist before layout
+                        sidebarCy.layout(sidebarLayoutOptions[currentLayout]).run();
+                    }
+
+
+                    // Do not call updateLegend or loadSidebarClusterTable here if part of a multi-cluster view load.
+                    // The caller (renderSavedItemsList) will handle that once all clusters are loaded.
+                    resolve({ clusterId: stringClusterID, status: 'loaded' });
+                })
+                .catch(error => {
+                    console.error(`Error visualizing cluster ${stringClusterID} in sidebar:`, error);
+                    showSidebarLoading(false, false);
+                    sidebarInfoDiv.innerHTML = `Error loading graph for Cluster ${stringClusterID}.`;
+                    sidebarInfoDiv.style.display = 'block';
+                    addedSidebarClusters.add(stringClusterID); // Add to prevent repeated failed fetches
+                    reject(error);
+                });
+        });
     }
 
     function updateSidebarTableForSelectedNodesAndEdges() {
@@ -1599,6 +1613,29 @@
         sidebarCy.on('click', 'node', (event) => {
             const clickedNode = event.target;
             const clickedNodeId = clickedNode.id();
+            const clusterID = clickedNode.data('clusterID');
+
+            if (event.originalEvent.shiftKey && clusterID) {
+                console.log(`Shift+click on node ${clickedNodeId}. Selecting cluster ${clusterID}.`);
+                const cellInDendro = d3.select(`#inlineDendrogramSvg .heatmap-cell[data-cluster_id="${clusterID}"]`);
+                if (!cellInDendro.empty()) {
+                    clusterHighlightColors.delete(String(clusterID));
+                    cellInDendro.dispatch('click'); 
+                    highlightTreeClusters(new Set(clusterHighlightColors.keys()));
+                } else {
+                    console.warn(`Could not find heatmap cell for cluster ${clusterID} to simulate selection.`);
+                    if (!clusterHighlightColors.has(String(clusterID))) {
+                        const highlightColor = generateUniqueHighlightColor();
+                        clusterHighlightColors.set(String(clusterID), highlightColor);
+                        visualizeClusterInSidebar(clusterID, highlightColor, clickedNode.data('clusterAnomaly') === 'anomaly');
+                        highlightTreeClusters(new Set(clusterHighlightColors.keys()));
+                    } else {
+                        visualizeClusterInSidebar(clusterID, clusterHighlightColors.get(String(clusterID)), clickedNode.data('clusterAnomaly') === 'anomaly');
+                    }
+                }
+                loadSidebarClusterTable(clusterID, 1);
+                return; 
+            }
 
             if (selectedSidebarEdges.size > 0) {
                 selectedSidebarEdges.forEach(edgeKey => {
@@ -1691,6 +1728,29 @@
             const target = edge.data('target');
             const protocol = edge.data('Protocol');
             const edgeKey = `${source}|${target}|${protocol}`;
+            const clusterID = edge.data('clusterID'); 
+
+            if (event.originalEvent.shiftKey && clusterID) {
+                console.log(`Shift+click on edge ${edgeKey}. Selecting cluster ${clusterID}.`);
+                const cellInDendro = d3.select(`#inlineDendrogramSvg .heatmap-cell[data-cluster_id="${clusterID}"]`);
+                if (!cellInDendro.empty()) {
+                    clusterHighlightColors.delete(String(clusterID));
+                    cellInDendro.dispatch('click');
+                    highlightTreeClusters(new Set(clusterHighlightColors.keys()));
+                } else {
+                    console.warn(`Could not find heatmap cell for cluster ${clusterID} to simulate selection.`);
+                    if (!clusterHighlightColors.has(String(clusterID))) {
+                        const highlightColor = generateUniqueHighlightColor();
+                        clusterHighlightColors.set(String(clusterID), highlightColor);
+                        visualizeClusterInSidebar(clusterID, highlightColor, false);
+                        highlightTreeClusters(new Set(clusterHighlightColors.keys()));
+                    } else {
+                        visualizeClusterInSidebar(clusterID, clusterHighlightColors.get(String(clusterID)), false);
+                    }
+                }
+                loadSidebarClusterTable(clusterID, 1);
+                return; 
+            }
 
             if (selectedSidebarNodes.size > 0) {
                 selectedSidebarNodes.forEach(nodeId => {
@@ -1729,7 +1789,7 @@
                 edge.style({
                     'line-color': SELECTED_EDGE_COLOR,
                     'target-arrow-color': SELECTED_EDGE_COLOR,
-                    'width': originalWidth,
+                    'width': originalWidth, 
                     'z-index': SELECTED_EDGE_ZINDEX
                 });
                 edge.select();
@@ -2018,8 +2078,8 @@
     function hideLoading() { document.getElementById('loading-overlay').style.display = 'none'; }
 
     function updateLegend(cyEdges = null) {
+        const legendTitleElement = document.getElementById('protocol-legend-title'); // Get the specific title element
         const legendTableBody = d3.select('#legend tbody');
-        // legendTableBody.html(''); // <<<< REMOVE this line from here
 
         let protocols = new Set();
         let calculationPromise;
@@ -2027,7 +2087,7 @@
 
         if (cyEdges && cyEdges.length > 0) {
             // Sidebar Mode: Calculate percentages locally
-            document.querySelector('#legend-container h3').textContent = "Sidebar Protocols";
+            if (legendTitleElement) legendTitleElement.textContent = "Sidebar Protocols";
             const counts = {};
             cyEdges.forEach(edge => {
                 const protocol = (edge.data('Protocol') || 'Unknown').trim();
@@ -2043,74 +2103,80 @@
             calculationPromise = Promise.resolve(percentages); // Resolve immediately
         } else {
             // Global Mode: Fetch percentages from backend
-            document.querySelector('#legend-container h3').textContent = "Protocol Edge Coloring";
+            if (legendTitleElement) legendTitleElement.textContent = "Protocol Legend"; // Default title
             calculationPromise = fetch(`${API_BASE_URL}/protocol_percentages`)
-                .then(res => res.ok ? res.json() : Promise.reject('Failed global percentages'))
+                .then(res => {
+                    if (!res.ok) { // Check if response is not OK
+                        // Try to parse JSON error, otherwise use status text
+                        return res.json().catch(() => ({ error: `Failed global percentages. Status: ${res.status}` })).then(err => {
+                            // If it's an object with an error key, use that, otherwise create one.
+                            throw new Error(err.error || `Failed global percentages. Status: ${res.statusText || res.status}`);
+                        });
+                    }
+                    return res.json();
+                })
                 .catch(error => {
-                    console.error("Error fetching global protocol percentages:", error);
-                    return {}; // Return empty object on error
+                    console.error("Error fetching global protocol percentages:", error.message || error);
+                    // Ensure legend title is set even on error
+                    if (legendTitleElement) legendTitleElement.textContent = "Protocol Legend (Error)";
+                    return {}; // Return empty object on error to prevent further issues
                 });
         }
 
         // Common logic after getting percentages
         calculationPromise.then(percentages => {
-            // **** Moved Clear Operation Here ****
             legendTableBody.html(''); // Clear the table *just before* adding new rows
-            // **** End Moved Clear Operation ****
 
-            // Populate the 'protocols' set if in global mode
-            if (!cyEdges) {
+            if (!cyEdges || cyEdges.length === 0) { // Only if in global mode and percentages might define protocols
                 Object.keys(percentages).forEach(proto => { if(proto) protocols.add(proto); });
             }
 
-            // Assign colors if they don't exist
             protocols.forEach(proto => {
                 if (proto && !protocolColorMap[proto]) {
                     let randomColor;
                     do {
                         randomColor = '#' + Math.floor(Math.random() * 0xFFFFFF).toString(16).padStart(6, '0');
-                    } while (randomColor.toLowerCase() === SELECTED_EDGE_COLOR.toLowerCase()); // Ensure not the selection color
+                    } while (randomColor.toLowerCase() === SELECTED_EDGE_COLOR.toLowerCase());
                     protocolColorMap[proto] = randomColor;
                 }
             });
             if (!protocolColorMap['Unknown']) {
-                protocolColorMap['Unknown'] = DEFAULT_UNKNOWN_COLOR; // Ensure 'Unknown' has a color
+                protocolColorMap['Unknown'] = DEFAULT_UNKNOWN_COLOR;
             }
 
-            // Sort protocols by percentage (descending)
             const sortedProtocols = Array.from(protocols).filter(p => p).sort((a, b) => (percentages[b] || 0) - (percentages[a] || 0));
 
-            // Append rows to the legend table
             sortedProtocols.forEach(protocol => {
                 const pct = percentages[protocol] || 0;
-                // Format percentage text
                 const pctText = (pct > 0.01 ? pct.toFixed(2) : (pct > 0 ? '<0.01' : '0.00')) + '%';
                 const color = protocolColorMap[protocol] || DEFAULT_UNKNOWN_COLOR;
-                // Append the table row
                 legendTableBody.append('tr').html(
                     `<td>${protocol}</td><td><span class="color-box" style="background-color:${color}"></span></td><td>${pctText}</td>`
                 );
             });
 
-            // Update sidebar edge colors if sidebar graph exists
             if (sidebarCy) {
                 sidebarCy.edges().forEach(edge => {
                     const protocol = edge.data('Protocol') || 'Unknown';
                     const newColor = protocolColorMap[protocol] || DEFAULT_UNKNOWN_COLOR;
-                    // Only update style if edge is not currently selected (avoids overriding selection color)
                     const edgeKey = `${edge.data('source')}|${edge.data('target')}|${edge.data('Protocol')}`;
-                    const nodeIsSelected = selectedNodeId && (edge.source().id() === selectedNodeId || edge.target().id() === selectedNodeId);
+                    // Check if any connected node is the currently selected single node
+                    const sourceNodeSelected = selectedNodeId && edge.source().id() === selectedNodeId;
+                    const targetNodeSelected = selectedNodeId && edge.target().id() === selectedNodeId;
                     const edgeIsSelected = selectedSidebarEdges.has(edgeKey);
 
-                    if (!nodeIsSelected && !edgeIsSelected) {
+                    if (!sourceNodeSelected && !targetNodeSelected && !edgeIsSelected) {
                         edge.style({'line-color': newColor, 'target-arrow-color': newColor});
                     }
-                    // Always update the scratchpad color for future reference
                     edge.scratch('_protocolColor', newColor);
                 });
             }
-        }); // End calculationPromise.then()
-    } // End updateLegend function
+        }).catch(error => { // Catch errors from the calculationPromise itself
+            console.error("Error processing percentages for legend:", error);
+            if (legendTitleElement) legendTitleElement.textContent = "Protocol Legend (Data Error)";
+            legendTableBody.html('<tr><td colspan="3" style="text-align:center;color:red;">Could not load protocol data.</td></tr>');
+        });
+    }
 
     function updateHeatmap() {
         return new Promise((resolve, reject) => {
@@ -2542,7 +2608,7 @@
      }
 
     document.addEventListener('DOMContentLoaded', async () => {
-        tooltip = d3.select("#tooltip"); // Initialize global tooltip
+        tooltip = d3.select("#tooltip"); 
 
         const fileInput = document.getElementById('fileInput');
         const downloadButton = document.getElementById('downloadButton');
@@ -2572,6 +2638,9 @@
         const resetGroupingBtn = document.getElementById('resetGroupingBtn');
         const acknowledgeBtn = document.getElementById('acknowledgeNewClustersBtn');
         const messageDivForAcknowledge = document.getElementById('reclusterMessage');
+        const saveSelectionBtn = document.getElementById('saveSelectionBtn'); //
+        
+        renderSavedItemsList(); //
 
         try {
             showLoading();
@@ -2718,6 +2787,10 @@
 
         if (sidebarFullscreenBtn) {
             sidebarFullscreenBtn.addEventListener('click', toggleSidebarFullscreen);
+        }
+        
+        if (saveSelectionBtn) { //
+            saveSelectionBtn.addEventListener('click', handleSaveSelection); //
         }
 
         document.addEventListener('fullscreenchange', () => {
@@ -2910,9 +2983,6 @@
                     console.warn("Cannot redraw to remove lines: window.lastTreeData is not available.");
                 }
             });
-        } else {
-            if (!acknowledgeBtn) console.error("Acknowledge button (#acknowledgeNewClustersBtn) not found.");
-            if (!messageDivForAcknowledge) console.error("Recluster message div (#reclusterMessage) not found for acknowledge button.");
         }
     });
 
@@ -4497,6 +4567,249 @@
             showInlineDendrogram(null, currentDendrogramHeight, currentNewClusterIds); // Show an empty/error state for dendrogram
         } finally {
             hideLoading();
+        }
+    }
+
+    // Function to render the saved items list in the UI
+    function renderSavedItemsList() {
+        const listElement = document.getElementById('saved-items-list');
+        const noItemsMessage = document.getElementById('no-saved-items');
+        if (!listElement || !noItemsMessage) return;
+
+        listElement.innerHTML = ''; // Clear current list
+
+        if (savedItems.length === 0) {
+            noItemsMessage.style.display = 'block';
+            return;
+        }
+        noItemsMessage.style.display = 'none';
+
+        savedItems.forEach(item => {
+            const listItem = document.createElement('li');
+            listItem.style.padding = "5px 0";
+            listItem.style.borderBottom = "1px solid #eee";
+            listItem.setAttribute('data-id', item.id);
+            listItem.setAttribute('data-type', item.type);
+
+            const itemNameSpan = document.createElement('span');
+            itemNameSpan.textContent = item.name; // e.g., "Cluster 123"
+            itemNameSpan.style.fontWeight = "bold";
+            itemNameSpan.style.cursor = 'pointer';
+            itemNameSpan.title = `Click to add/focus on ${item.name}`;
+            
+            listItem.appendChild(itemNameSpan);
+
+            // Display node details/descriptions if available
+            if (item.type === 'cluster-with-details' && item.data && item.data.displayDescriptions) {
+                const detailsContainer = document.createElement('div');
+                detailsContainer.style.marginLeft = "10px";
+                detailsContainer.style.fontSize = "11px";
+                detailsContainer.style.color = "#555";
+                item.data.displayDescriptions.forEach(desc => {
+                    const descP = document.createElement('p');
+                    descP.style.margin = "2px 0";
+                    descP.textContent = "↳ " + desc;
+                    detailsContainer.appendChild(descP);
+                });
+                listItem.appendChild(detailsContainer);
+            }
+            
+            itemNameSpan.addEventListener('click', async () => {
+                console.log(`Adding/Focusing on saved ${item.type}: ${item.name} (ID: ${item.id})`);
+                toggleSidebar(true); 
+                
+                sidebarInfoDiv.innerHTML = 'Loading saved item...';
+                sidebarInfoDiv.style.display = 'block';
+
+                // Clear previous programmatic selections, but keep existing graph elements for additive behavior
+                if (sidebarCy) {
+                    sidebarCy.elements().filter(':selected').unselect().forEach(el => {
+                        if (el.isNode()) {
+                            const originalNodeColor = el.scratch('_originalColor') || clusterHighlightColors.get(String(el.data('clusterID'))) || '#888';
+                            el.style('background-color', originalNodeColor);
+                        }
+                    });
+                }
+                selectedSidebarNodes.clear(); 
+                // selectedSidebarEdges.clear(); // Not saving edges anymore
+
+                try {
+                    if (item.type === 'cluster-with-details' && item.data && item.data.clusterId) {
+                        const clusterIdToLoad = String(item.data.clusterId);
+                        let targetHighlightColor = clusterHighlightColors.get(clusterIdToLoad);
+                        if (!targetHighlightColor) {
+                            targetHighlightColor = generateUniqueHighlightColor();
+                            clusterHighlightColors.set(clusterIdToLoad, targetHighlightColor);
+                        }
+                        
+                        await visualizeClusterInSidebar(clusterIdToLoad, targetHighlightColor, false); // This should add to sidebarCy if not present
+                        highlightTreeClusters(new Set(clusterHighlightColors.keys()));
+                        loadSidebarClusterTable(clusterIdToLoad, 1); // Focus table on the main cluster
+
+                        let nodesToFitOrFocus = sidebarCy.collection();
+                        
+                        // Highlight originally selected nodes and prepare for tooltip
+                        if (item.data.selectedNodesDetails && item.data.selectedNodesDetails.length > 0) {
+                            item.data.selectedNodesDetails.forEach(nodeDetail => {
+                                const nodeInGraph = sidebarCy.getElementById(nodeDetail.ip);
+                                if (nodeInGraph && !nodeInGraph.empty()) {
+                                    // Special highlight for these specific nodes
+                                    nodeInGraph.style({
+                                        'border-width': 3,
+                                        'border-color': 'gold' 
+                                    });
+                                    nodesToFitOrFocus = nodesToFitOrFocus.union(nodeInGraph);
+                                }
+                            });
+
+                            if (!nodesToFitOrFocus.empty()) {
+                                sidebarCy.layout(sidebarLayoutOptions[document.getElementById('sidebarLayoutSelect').value]).run();
+                                sidebarCy.animate({ fit: { eles: nodesToFitOrFocus, padding: 100 }, duration: 400 });
+
+                                // Trigger mouseover for the first originally selected node to show its tooltip
+                                const firstNodeToTooltip = sidebarCy.getElementById(item.data.selectedNodesDetails[0].ip);
+                                if (firstNodeToTooltip && !firstNodeToTooltip.empty()) {
+                                    setTimeout(() => { // Timeout to ensure graph is rendered and ready
+                                        firstNodeToTooltip.trigger('mouseover');
+                                        // To hide it after a delay:
+                                        // setTimeout(() => firstNodeToTooltip.trigger('mouseout'), 3000); 
+                                    }, 200); // Short delay
+                                }
+                            }
+                        } else if (!sidebarCy.elements(`[clusterID = "${clusterIdToLoad}"]`).empty()){
+                            // If no specific nodes were detailed, fit the whole cluster
+                            sidebarCy.layout(sidebarLayoutOptions[document.getElementById('sidebarLayoutSelect').value]).run();
+                            sidebarCy.animate({ fit: { eles: sidebarCy.elements(`[clusterID = "${clusterIdToLoad}"]`), padding: 50 }, duration: 300 });
+                        }
+                    } else {
+                        alert(`Cannot process saved item of type '${item.type}' or data is missing.`);
+                    }
+                } catch (error) {
+                    console.error("Error during saved item click processing:", error);
+                    alert("An error occurred while trying to load the saved item.");
+                }
+
+                if(sidebarInfoDiv.innerHTML === 'Loading saved item...') sidebarInfoDiv.style.display = 'none';
+            });
+
+            const removeBtn = document.createElement('button');
+            removeBtn.textContent = '✖';
+            removeBtn.title = "Remove item";
+            // ... (styling for removeBtn)
+            removeBtn.style.float = 'right';
+            removeBtn.style.fontSize = '10px';
+            removeBtn.style.padding = '1px 4px';
+            removeBtn.style.marginLeft = '5px';
+            removeBtn.style.backgroundColor = '#f56565';
+            removeBtn.style.color = 'white';
+            removeBtn.style.border = 'none';
+            removeBtn.style.borderRadius = '3px';
+            removeBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                removeSavedItem(item.id);
+            });
+
+            listItem.appendChild(removeBtn); // Add remove button after name for better layout
+            listElement.appendChild(listItem);
+        });
+    }
+
+    // Function to add an item to the saved list
+    function addSavedItem(item) { 
+        if (savedItems.some(saved => saved.id === item.id && saved.type === item.type)) {
+            console.log("Item already saved:", item);
+            return;
+        }
+        if (savedItems.length >= MAX_SAVED_ITEMS) {
+            alert(`You can save a maximum of ${MAX_SAVED_ITEMS} items. Please remove an item to save a new one.`);
+            return;
+        }
+        savedItems.push(item);
+        renderSavedItemsList();
+        console.log("Saved item:", item);
+    }
+
+    // Function to remove an item from the saved list
+    function removeSavedItem(itemId) {
+        savedItems = savedItems.filter(item => item.id !== itemId);
+        renderSavedItemsList();
+        console.log("Removed item with ID:", itemId);
+    }
+
+    function handleSaveSelection() {
+        if (!isSidebarOpen || !sidebarCy) {
+            alert("Please open the sidebar and ensure a visualization is active.");
+            return;
+        }
+
+        if (selectedSidebarNodes.size === 0) {
+            alert("Please select at least one node to save its cluster information.");
+            return;
+        }
+
+        const nodesByCluster = new Map();
+
+        // Group selected nodes by their clusterID and collect details
+        selectedSidebarNodes.forEach(nodeId => {
+            const node = sidebarCy.getElementById(nodeId);
+            if (node && node.length > 0) {
+                const nodeData = node.data();
+                const clusterID = String(nodeData.clusterID);
+                const ipAddress = node.id(); // Assuming node ID is the IP address
+                const attackTypes = nodeData.InvolvedAttackTypes || []; // Get from node data
+
+                if (!nodesByCluster.has(clusterID)) {
+                    nodesByCluster.set(clusterID, []);
+                }
+                nodesByCluster.get(clusterID).push({
+                    ip: ipAddress,
+                    attackTypes: attackTypes
+                });
+            }
+        });
+
+        if (nodesByCluster.size === 0) {
+            alert("Could not retrieve details for selected nodes.");
+            return;
+        }
+
+        let itemsActuallySaved = 0;
+        nodesByCluster.forEach((nodeDetailsList, clusterID) => {
+            const descriptions = nodeDetailsList.map(detail => {
+                let desc = `IP: ${detail.ip}`;
+                if (detail.attackTypes && detail.attackTypes.length > 0 && detail.attackTypes.join('') !== "N/A") {
+                    desc += ` (Attacks: ${detail.attackTypes.join(', ')})`;
+                }
+                return desc;
+            });
+
+            // The item ID is the clusterID. Name is "Cluster X".
+            // Descriptions for selected nodes within this cluster are stored in data.
+            addSavedItem({
+                id: clusterID, // Use clusterID as the unique ID for this saved item
+                type: 'cluster-with-details', // New type
+                name: `Cluster ${clusterID}`,
+                data: {
+                    clusterId: clusterID,
+                    // Store the original selected IPs and their full descriptions for display and potential tooltip triggering
+                    selectedNodesDetails: nodeDetailsList.map(detail => ({ ip: detail.ip, attackTypes: detail.attackTypes })),
+                    displayDescriptions: descriptions // For easy rendering in the list
+                }
+            });
+            itemsActuallySaved++;
+        });
+
+        if (itemsActuallySaved > 0) {
+            console.log(`${itemsActuallySaved} cluster(s)/group(s) saved with node details.`);
+            // Clear current node selections after saving
+            if (sidebarCy) {
+                sidebarCy.nodes().filter(n => selectedSidebarNodes.has(n.id())).unselect().forEach(n => {
+                    const originalNodeColor = n.scratch('_originalColor') || clusterHighlightColors.get(String(n.data('clusterID'))) || '#888';
+                    n.style('background-color', originalNodeColor);
+                });
+            }
+            selectedSidebarNodes.clear();
+            updateSidebarTableForSelectedNodesAndEdges(); // Revert table to broader context if needed
         }
     }
 

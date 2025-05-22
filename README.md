@@ -1,5 +1,8 @@
 # Changelog
 
+## 5/21/2025
+- Functionality to save selected nodes to list.
+
 ## [2025-05-18]
 ### Added
 - Working deployment for small CSVs.
