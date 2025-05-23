@@ -284,37 +284,40 @@
 
         #legend-container.fullscreen-active {
             display: block !important; position: fixed !important; left: 0 !important; top: 0 !important;
-            height: 100vh !important; width: 220px !important; z-index: 1999 !important;
+            height: 100vh !important; width: 220px !important;
+            z-index: 1999 !important;
             box-shadow: 2px 0 5px rgba(0,0,0,0.1); border-right: 1px solid #dee2e6;
             background-color: #fff; overflow-y: auto;
         }
 
-        #sidebar.fullscreen { /* Styles for sidebar when it IS the fullscreen element */
-            padding: 10px !important; /* Reduce padding in fullscreen */
-            position: fixed !important; top: 0 !important; left: 0 !important; /* Ensure it covers viewport */
-            width: 100vw !important; height: 100vh !important;
+        #sidebar.fullscreen {
+            padding: 10px !important;
+            position: fixed !important; top: 0 !important; 
+            left: 220px !important;
+            width: calc(100vw - 220px) !important;
+            height: 100vh !important;
             border-right: none !important;
             z-index: 2000 !important;
-            overflow: hidden !important; /* Prevent main scrollbar in fullscreen */
+            overflow: hidden !important;
         }
         #sidebar.fullscreen #sidebar-content {
             flex-direction: column;
             gap: 10px;
         }
         #sidebar.fullscreen #sidebar-cy {
-            flex: 1 1 60%; /* Graph takes more space */
-            min-height: 150px !important; height: 100% !important; /* Full height of content area */
+            flex: 1 1 60%; 
+            min-height: 150px !important; height: 100% !important; 
             margin-top: 0 !important; border-radius: 6px; border: 1px solid #dee2e6;
         }
         #sidebar.fullscreen #sidebar-table-container {
-            flex: 1 1 40%; /* Table takes less space */
-            min-height: 100px; height: 100% !important; /* Full height of content area */
+            flex: 1 1 40%; 
+            min-height: 100px; height: 100% !important; 
             margin-top: 0 !important; display: flex !important; flex-direction: column;
             border-radius: 6px; border: 1px solid #dee2e6;
         }
         #sidebar.fullscreen #sidebar-table-container table {
-            flex-grow: 1; /* Allows table to fill available space in its container */
-            display: block; /* Needed for overflow-y to work on table wrapper */
+            flex-grow: 1; 
+            display: block; 
             overflow-y: auto;
         }
         #sidebar.fullscreen #sidebar-table-search-container { display: block !important; visibility: visible !important; padding-bottom: 10px; }
@@ -324,6 +327,12 @@
         #sidebar.fullscreen #sidebar-info,
         #sidebar.fullscreen .sidebar-control /* Hides layout select in fullscreen */
          { display: none !important; visibility: hidden !important; }
+
+        #sidebar.fullscreen #saveSelectionBtn {
+            padding: 5px 10px;
+            font-size: 12px;
+            width: auto;
+        }
 
         body.sidebar-fullscreen #main-container,
         body.sidebar-fullscreen #sidebar-toggle { display: none !important; visibility: hidden !important; }
@@ -1364,38 +1373,39 @@
         return new Promise((resolve, reject) => { // Wrap in a Promise
             const stringClusterID = String(clusterID); // Ensure consistent string IDs
 
-            // If this specific cluster's nodes are already in the graph,
-            // we might just want to ensure they are visible and highlighted, not re-fetch/re-add.
             if (sidebarCy && sidebarCy.nodes(`[clusterID = "${stringClusterID}"]`).length > 0 && addedSidebarClusters.has(stringClusterID)) {
                 console.log(`Cluster ${stringClusterID} elements already in sidebar. Re-focusing/styling.`);
                 sidebarCy.nodes(`[clusterID = "${stringClusterID}"]`).forEach(node => {
-                    node.style('background-color', nodeColor); // Apply/re-apply color
-                    if (!node.scratch('_originalColor')) { // Ensure original color is stored if it wasn't
+                    node.style('background-color', nodeColor);
+                    if (!node.scratch('_originalColor')) {
                         node.scratch('_originalColor', nodeColor);
                     }
                     if (isAnomalous) {
                         node.style({ 'border-color': 'red', 'border-width': 2, 'border-style': 'solid' });
                     }
                 });
-                // Optional: fit to this specific cluster if it's the only one being focused.
-                // If part of a larger view, fitting might be done globally later.
-                // sidebarCy.animate({ fit: { eles: sidebarCy.nodes(`[clusterID = "${stringClusterID}"]`), padding: 50 }, duration: 300});
-                if (currentSidebarTableClusterId !== stringClusterID || sidebarTableMode !== 'cluster') {
+                // If no nodes or edges are specifically selected, load the table for this cluster.
+                // If selections exist, updateSidebarTableForSelectedNodesAndEdges will handle the table.
+                if (selectedSidebarNodes.size === 0 && selectedSidebarEdges.size === 0) {
                     loadSidebarClusterTable(stringClusterID, 1);
+                } else {
+                    // If there are selections, let the existing selection logic handle the table.
+                    // This prevents overriding a specific node/edge table view when just re-focusing a cluster.
+                    console.log("Selections exist, table update will be handled by selection logic if necessary.");
                 }
                 resolve({ clusterId: stringClusterID, status: 're-focused' });
                 return;
             }
 
-            toggleSidebar(true); // Ensure sidebar is open
+            toggleSidebar(true);
             showSidebarLoading(true, false);
             sidebarInfoDiv.innerHTML = `Loading network for Cluster ${stringClusterID}...`;
             sidebarInfoDiv.style.display = 'block';
 
             fetch(`${API_BASE_URL}/cluster_network?cluster_id=${stringClusterID}`)
-                .then(response => { 
-                    if (!response.ok) throw new Error(`Network error (${response.status}) for Cluster ${stringClusterID}`); 
-                    return response.json(); 
+                .then(response => {
+                    if (!response.ok) throw new Error(`Network error (${response.status}) for Cluster ${stringClusterID}`);
+                    return response.json();
                 })
                 .then(data => {
                     showSidebarLoading(false, false);
@@ -1404,9 +1414,11 @@
                         console.log(`No network data to display for Cluster ${stringClusterID}.`);
                         sidebarInfoDiv.innerHTML = `Cluster ${stringClusterID}: No network data.`;
                         sidebarInfoDiv.style.display = 'block';
-                        // Still add to addedSidebarClusters to prevent re-fetch spam, and load its (empty) table.
                         addedSidebarClusters.add(stringClusterID);
-                        loadSidebarClusterTable(stringClusterID, 1); 
+                        // Load its table (which will likely be empty or show "no data")
+                        if (selectedSidebarNodes.size === 0 && selectedSidebarEdges.size === 0) {
+                            loadSidebarClusterTable(stringClusterID, 1);
+                        }
                         resolve({ clusterId: stringClusterID, status: 'no-data' });
                         return;
                     }
@@ -1447,25 +1459,24 @@
                         });
                         bindSidebarGraphEvents();
                     } else {
-                        // Add new elements. Cytoscape handles duplicates by ID if nodes are shared.
                         sidebarCy.add(nodesToAdd.concat(edgesToAdd));
                     }
-                    
+
                     addedSidebarClusters.add(stringClusterID);
                     sidebarInfoDiv.style.display = 'none';
-                    
-                    // Apply layout and fit ONLY if this is the *only* cluster being added,
-                    // or handle fitting globally after all clusters in a view are added.
-                    // For now, let's let the caller handle global fitting.
-                    applySidebarSizeControls(); // Apply sizes to newly added elements
+
+                    applySidebarSizeControls();
                     let currentLayout = document.getElementById('sidebarLayoutSelect').value;
-                    if (sidebarCy.nodes(`[clusterID = "${stringClusterID}"]`).length > 0) { // Ensure elements exist before layout
+                    if (sidebarCy.nodes(`[clusterID = "${stringClusterID}"]`).length > 0) {
                         sidebarCy.layout(sidebarLayoutOptions[currentLayout]).run();
+                    }
+                    
+                    // Load table for the newly visualized cluster if no specific nodes/edges are selected.
+                    if (selectedSidebarNodes.size === 0 && selectedSidebarEdges.size === 0) {
+                        loadSidebarClusterTable(stringClusterID, 1);
                     }
 
 
-                    // Do not call updateLegend or loadSidebarClusterTable here if part of a multi-cluster view load.
-                    // The caller (renderSavedItemsList) will handle that once all clusters are loaded.
                     resolve({ clusterId: stringClusterID, status: 'loaded' });
                 })
                 .catch(error => {
@@ -1473,7 +1484,10 @@
                     showSidebarLoading(false, false);
                     sidebarInfoDiv.innerHTML = `Error loading graph for Cluster ${stringClusterID}.`;
                     sidebarInfoDiv.style.display = 'block';
-                    addedSidebarClusters.add(stringClusterID); // Add to prevent repeated failed fetches
+                    addedSidebarClusters.add(stringClusterID);
+                    if (selectedSidebarNodes.size === 0 && selectedSidebarEdges.size === 0) {
+                       loadSidebarClusterTable(stringClusterID, 1); // Attempt to load table even on error
+                    }
                     reject(error);
                 });
         });
@@ -1581,9 +1595,27 @@
             }
 
             tooltip.style("display", "block")
-                .html(tooltipHTML)
-                .style("left", (event.originalEvent.pageX + 10) + "px")
-                .style("top", (event.originalEvent.pageY + 10) + "px");
+                .html(tooltipHTML);
+
+            // UPDATED SECTION FOR TOOLTIP POSITIONING
+            if (event.originalEvent && typeof event.originalEvent.pageX === 'number' && typeof event.originalEvent.pageY === 'number') {
+                tooltip.style("left", (event.originalEvent.pageX + 10) + "px")
+                       .style("top", (event.originalEvent.pageY + 10) + "px");
+                console.log("[DEBUG] Tooltip on node (mouse event): Positioned at", event.originalEvent.pageX, event.originalEvent.pageY);
+            } else if (event.renderedPosition) {
+                // Fallback for triggered events: position relative to the node's rendered position
+                // This requires the viewport dimensions to be accessible or use fixed offset
+                const sidebarCyContainer = document.getElementById('sidebar-cy');
+                const containerRect = sidebarCyContainer.getBoundingClientRect();
+                tooltip.style("left", (containerRect.left + event.renderedPosition.x + 10) + "px")
+                       .style("top", (containerRect.top + event.renderedPosition.y + 10) + "px");
+                console.log("[DEBUG] Tooltip on node (triggered event): Positioned via renderedPosition at", event.renderedPosition.x, event.renderedPosition.y);
+            } else {
+                console.warn("[DEBUG] Tooltip on node: Could not determine position (no originalEvent or renderedPosition).");
+                // Optionally, hide tooltip or position it statically if positioning fails
+                // tooltip.style("display", "none");
+            }
+            // END UPDATED SECTION
         });
 
         sidebarCy.on('mouseover', 'edge', (event) => {
@@ -1601,9 +1633,24 @@
             }
 
             tooltip.style("display", "block")
-                .html(edgeTooltipHTML)
-                .style("left", (event.originalEvent.pageX + 10) + "px")
-                .style("top", (event.originalEvent.pageY + 10) + "px");
+                .html(edgeTooltipHTML);
+
+            // UPDATED SECTION FOR TOOLTIP POSITIONING
+            if (event.originalEvent && typeof event.originalEvent.pageX === 'number' && typeof event.originalEvent.pageY === 'number') {
+                tooltip.style("left", (event.originalEvent.pageX + 10) + "px")
+                       .style("top", (event.originalEvent.pageY + 10) + "px");
+                console.log("[DEBUG] Tooltip on edge (mouse event): Positioned at", event.originalEvent.pageX, event.originalEvent.pageY);
+            } else if (event.renderedPosition) {
+                 // Fallback for triggered events (less common for edges but good practice)
+                const sidebarCyContainer = document.getElementById('sidebar-cy');
+                const containerRect = sidebarCyContainer.getBoundingClientRect();
+                tooltip.style("left", (containerRect.left + event.renderedPosition.x + 10) + "px")
+                       .style("top", (containerRect.top + event.renderedPosition.y - 15) + "px"); // Adjusted y for edge midpoints
+                console.log("[DEBUG] Tooltip on edge (triggered event): Positioned via renderedPosition at", event.renderedPosition.x, event.renderedPosition.y);
+            } else {
+                console.warn("[DEBUG] Tooltip on edge: Could not determine position.");
+            }
+            // END UPDATED SECTION
         });
 
         sidebarCy.on('mouseout', 'node, edge', () => {
@@ -2560,19 +2607,17 @@
             // Enter fullscreen
             sidebar.requestFullscreen().then(() => {
                 sidebar.classList.add('fullscreen');
-                legendContainer.classList.add('fullscreen-active'); // Show legend
+                legendContainer.classList.add('fullscreen-active'); // This line adds the class
                 document.body.classList.add('sidebar-fullscreen');
                 isSidebarFullscreen = true;
-                sidebarFullscreenBtn.innerHTML = '&#x274C;'; // Exit icon
+                sidebarFullscreenBtn.innerHTML = '&#x274C;'; 
                 sidebarFullscreenBtn.title = "Exit Sidebar Fullscreen";
                 console.log("Entered sidebar fullscreen.");
                 if (sidebarCy) {
                     setTimeout(() => {
                          sidebarCy.resize();
-                         // Recenter graph on entering fullscreen
-                         sidebarCy.fit(null, 50); // Fit with 50px padding
-                         // applySidebarLayout(); // Optional: re-run layout
-                    }, 100); // Increased delay slightly
+                         sidebarCy.fit(null, 50); 
+                    }, 100); 
                 }
             }).catch(err => {
                 alert(`Error attempting to enable fullscreen mode: ${err.message} (${err.name})`);
@@ -2594,17 +2639,13 @@
 
      function cleanupFullscreenStyles() {
         sidebar.classList.remove('fullscreen');
-        legendContainer.classList.remove('fullscreen-active'); // Hide legend unless sidebar is open
+        legendContainer.classList.remove('fullscreen-active'); // This line removes the class
         document.body.classList.remove('sidebar-fullscreen');
         isSidebarFullscreen = false;
         sidebarFullscreenBtn.innerHTML = '&#x2922;';
         sidebarFullscreenBtn.title = "Toggle Sidebar Fullscreen";
         console.log("Cleaned up fullscreen styles.");
-
-        // Restore normal sidebar state (open or closed) - this triggers resize/layout
         toggleSidebar(isSidebarOpen);
-
-        // Recenter is handled by the fullscreenchange listener after this
      }
 
     document.addEventListener('DOMContentLoaded', async () => {
@@ -2795,11 +2836,12 @@
 
         document.addEventListener('fullscreenchange', () => {
             if (!document.fullscreenElement && isSidebarFullscreen) {
-                cleanupFullscreenStyles();
+                cleanupFullscreenStyles(); 
                 if (sidebarCy) { setTimeout(() => { sidebarCy.resize(); sidebarCy.fit(null, 50); }, 400); }
-            } else if (document.fullscreenElement === sidebar && !isSidebarFullscreen) {
+            } else if (document.fullscreenElement === sidebar && !isSidebarFullscreen) { // Re-entering
                 isSidebarFullscreen = true;
-                legendContainer.classList.add('fullscreen-active');
+                sidebar.classList.add('fullscreen'); 
+                legendContainer.classList.add('fullscreen-active'); // This line also adds the class
                 document.body.classList.add('sidebar-fullscreen');
                 sidebarFullscreenBtn.innerHTML = '&#x274C;';
                 sidebarFullscreenBtn.title = "Exit Sidebar Fullscreen";
@@ -4599,7 +4641,6 @@
             
             listItem.appendChild(itemNameSpan);
 
-            // Display node details/descriptions if available
             if (item.type === 'cluster-with-details' && item.data && item.data.displayDescriptions) {
                 const detailsContainer = document.createElement('div');
                 detailsContainer.style.marginLeft = "10px";
@@ -4615,87 +4656,164 @@
             }
             
             itemNameSpan.addEventListener('click', async () => {
-                console.log(`Adding/Focusing on saved ${item.type}: ${item.name} (ID: ${item.id})`);
+                console.log(`[DEBUG] Saved Item Clicked: Name: ${item.name}, ID: ${item.id}, Type: ${item.type}`);
+                console.log("[DEBUG] Saved Item Full Object:", JSON.parse(JSON.stringify(item)));
+                
                 toggleSidebar(true); 
                 
                 sidebarInfoDiv.innerHTML = 'Loading saved item...';
                 sidebarInfoDiv.style.display = 'block';
+                console.log("[DEBUG] Sidebar toggled (or ensured open), info message set to 'Loading saved item...'.");
 
-                // Clear previous programmatic selections, but keep existing graph elements for additive behavior
                 if (sidebarCy) {
+                    console.log("[DEBUG] sidebarCy exists. Current elements:", sidebarCy.elements().length);
                     sidebarCy.elements().filter(':selected').unselect().forEach(el => {
                         if (el.isNode()) {
                             const originalNodeColor = el.scratch('_originalColor') || clusterHighlightColors.get(String(el.data('clusterID'))) || '#888';
                             el.style('background-color', originalNodeColor);
+                        } else if (el.isEdge()) {
+                            const originalEdgeColor = el.scratch('_protocolColor') || DEFAULT_UNKNOWN_COLOR;
+                            const originalEdgeWidth = el.scratch('_originalWidth') || calculateEdgeWidth(el.data('processCount'));
+                            el.style({ 'line-color': originalEdgeColor, 'target-arrow-color': originalEdgeColor, 'width': originalEdgeWidth, 'z-index': 1 });
                         }
                     });
+                    console.log("[DEBUG] Cleared existing selections in sidebarCy.");
+                } else {
+                    console.log("[DEBUG] sidebarCy does NOT exist at this point (before timeout).");
                 }
                 selectedSidebarNodes.clear(); 
-                // selectedSidebarEdges.clear(); // Not saving edges anymore
+                selectedSidebarEdges.clear();
+                console.log("[DEBUG] Cleared selectedSidebarNodes and selectedSidebarEdges sets.");
 
-                try {
-                    if (item.type === 'cluster-with-details' && item.data && item.data.clusterId) {
-                        const clusterIdToLoad = String(item.data.clusterId);
-                        let targetHighlightColor = clusterHighlightColors.get(clusterIdToLoad);
-                        if (!targetHighlightColor) {
-                            targetHighlightColor = generateUniqueHighlightColor();
-                            clusterHighlightColors.set(clusterIdToLoad, targetHighlightColor);
-                        }
-                        
-                        await visualizeClusterInSidebar(clusterIdToLoad, targetHighlightColor, false); // This should add to sidebarCy if not present
-                        highlightTreeClusters(new Set(clusterHighlightColors.keys()));
-                        loadSidebarClusterTable(clusterIdToLoad, 1); // Focus table on the main cluster
+                const sidebarTransitionDuration = 350; 
+                console.log(`[DEBUG] Setting timeout for ${sidebarTransitionDuration}ms to allow sidebar transition.`);
 
-                        let nodesToFitOrFocus = sidebarCy.collection();
-                        
-                        // Highlight originally selected nodes and prepare for tooltip
-                        if (item.data.selectedNodesDetails && item.data.selectedNodesDetails.length > 0) {
-                            item.data.selectedNodesDetails.forEach(nodeDetail => {
-                                const nodeInGraph = sidebarCy.getElementById(nodeDetail.ip);
-                                if (nodeInGraph && !nodeInGraph.empty()) {
-                                    // Special highlight for these specific nodes
-                                    nodeInGraph.style({
-                                        'border-width': 3,
-                                        'border-color': 'gold' 
-                                    });
-                                    nodesToFitOrFocus = nodesToFitOrFocus.union(nodeInGraph);
-                                }
-                            });
+                setTimeout(async () => {
+                    console.log("[DEBUG] Timeout reached. Proceeding with visualization.");
+                    try {
+                        if (item.type === 'cluster-with-details' && item.data && item.data.clusterId) {
+                            const clusterIdToLoad = String(item.data.clusterId);
+                            console.log(`[DEBUG] Processing 'cluster-with-details'. Cluster ID to load: ${clusterIdToLoad}`);
+                            
+                            let targetHighlightColor = clusterHighlightColors.get(clusterIdToLoad);
+                            if (!targetHighlightColor) {
+                                targetHighlightColor = generateUniqueHighlightColor();
+                                clusterHighlightColors.set(clusterIdToLoad, targetHighlightColor);
+                                console.log(`[DEBUG] Generated new highlight color for ${clusterIdToLoad}: ${targetHighlightColor}`);
+                            } else {
+                                console.log(`[DEBUG] Using existing highlight color for ${clusterIdToLoad}: ${targetHighlightColor}`);
+                            }
+                            
+                            await visualizeClusterInSidebar(clusterIdToLoad, targetHighlightColor, false);
+                            console.log(`[DEBUG] visualizeClusterInSidebar called for ${clusterIdToLoad}.`);
+                            
+                            if (!sidebarCy) {
+                                console.error("[DEBUG] CRITICAL: sidebarCy is NULL after visualizeClusterInSidebar call inside timeout!");
+                                sidebarInfoDiv.innerHTML = 'Error initializing graph display.';
+                                return; 
+                            }
+                            console.log("[DEBUG] sidebarCy after visualizeClusterInSidebar. Elements:", sidebarCy.elements().length, "Nodes for this cluster:", sidebarCy.nodes(`[clusterID = "${clusterIdToLoad}"]`).length);
+                            
+                            console.log("[DEBUG] Calling sidebarCy.resize().");
+                            sidebarCy.resize();
 
-                            if (!nodesToFitOrFocus.empty()) {
-                                sidebarCy.layout(sidebarLayoutOptions[document.getElementById('sidebarLayoutSelect').value]).run();
-                                sidebarCy.animate({ fit: { eles: nodesToFitOrFocus, padding: 100 }, duration: 400 });
+                            highlightTreeClusters(new Set(clusterHighlightColors.keys()));
+                            console.log("[DEBUG] highlightTreeClusters called.");
+                            
+                            if (!item.data.selectedNodesDetails || item.data.selectedNodesDetails.length === 0) {
+                                loadSidebarClusterTable(clusterIdToLoad, 1);
+                                console.log(`[DEBUG] Loaded sidebar table for cluster ${clusterIdToLoad} (no specific nodes in saved item).`);
+                            }
 
-                                // Trigger mouseover for the first originally selected node to show its tooltip
-                                const firstNodeToTooltip = sidebarCy.getElementById(item.data.selectedNodesDetails[0].ip);
-                                if (firstNodeToTooltip && !firstNodeToTooltip.empty()) {
-                                    setTimeout(() => { // Timeout to ensure graph is rendered and ready
-                                        firstNodeToTooltip.trigger('mouseover');
-                                        // To hide it after a delay:
-                                        // setTimeout(() => firstNodeToTooltip.trigger('mouseout'), 3000); 
-                                    }, 200); // Short delay
+                            let nodesToFitOrFocus = sidebarCy.collection();
+                            console.log("[DEBUG] Initialized nodesToFitOrFocus as empty collection.");
+                            
+                            if (item.data.selectedNodesDetails && item.data.selectedNodesDetails.length > 0) {
+                                console.log("[DEBUG] Saved item has selectedNodesDetails. Processing them:", item.data.selectedNodesDetails);
+                                item.data.selectedNodesDetails.forEach(nodeDetail => {
+                                    const nodeInGraph = sidebarCy.getElementById(nodeDetail.ip);
+                                    if (nodeInGraph && !nodeInGraph.empty()) {
+                                        console.log(`[DEBUG] Found node ${nodeDetail.ip} in graph. Applying styles.`);
+                                        nodeInGraph.style({
+                                            'border-width': 3,
+                                            'border-color': 'gold',
+                                            'background-color': SELECTED_NODE_COLOR
+                                        });
+                                        nodesToFitOrFocus = nodesToFitOrFocus.union(nodeInGraph);
+                                        selectedSidebarNodes.add(nodeDetail.ip);
+                                    } else {
+                                        console.log(`[DEBUG] Node ${nodeDetail.ip} NOT found in graph or graph is empty.`);
+                                    }
+                                });
+
+                                if (!nodesToFitOrFocus.empty()) {
+                                    console.log(`[DEBUG] nodesToFitOrFocus has ${nodesToFitOrFocus.length} nodes. Updating sidebar table for selected nodes.`);
+                                    updateSidebarTableForSelectedNodesAndEdges();
+                                } else {
+                                    console.log("[DEBUG] nodesToFitOrFocus is empty. Not updating table based on specific nodes.");
                                 }
                             }
-                        } else if (!sidebarCy.elements(`[clusterID = "${clusterIdToLoad}"]`).empty()){
-                            // If no specific nodes were detailed, fit the whole cluster
-                            sidebarCy.layout(sidebarLayoutOptions[document.getElementById('sidebarLayoutSelect').value]).run();
-                            sidebarCy.animate({ fit: { eles: sidebarCy.elements(`[clusterID = "${clusterIdToLoad}"]`), padding: 50 }, duration: 300 });
-                        }
-                    } else {
-                        alert(`Cannot process saved item of type '${item.type}' or data is missing.`);
-                    }
-                } catch (error) {
-                    console.error("Error during saved item click processing:", error);
-                    alert("An error occurred while trying to load the saved item.");
-                }
+                            
+                            if (sidebarCy.elements().length > 0) {
+                                console.log("[DEBUG] sidebarCy has elements. Applying layout and then fitting.");
+                                
+                                applySidebarLayout(); 
+                                console.log("[DEBUG] applySidebarLayout called (which includes a layout run).");
 
-                if(sidebarInfoDiv.innerHTML === 'Loading saved item...') sidebarInfoDiv.style.display = 'none';
-            });
+                                sidebarCy.one('layoutstop', function() { 
+                                    console.log("[DEBUG] 'layoutstop' event detected after applySidebarLayout.");
+                                    if (!nodesToFitOrFocus.empty()) {
+                                        console.log("[DEBUG] Fitting specifically to nodesToFitOrFocus:", nodesToFitOrFocus.map(n => n.id()));
+                                        sidebarCy.animate({
+                                            // *** INCREASED PADDING HERE ***
+                                            fit: { eles: nodesToFitOrFocus, padding: 150 } 
+                                        }, { duration: 400 });
+
+                                        if (item.data.selectedNodesDetails && item.data.selectedNodesDetails.length > 0) { 
+                                            const firstNodeToTooltip = sidebarCy.getElementById(item.data.selectedNodesDetails[0].ip);
+                                            if (firstNodeToTooltip && !firstNodeToTooltip.empty()) {
+                                                console.log(`[DEBUG] Triggering mouseover for ${firstNodeToTooltip.id()} after specific fit.`);
+                                                setTimeout(() => { firstNodeToTooltip.trigger('mouseover'); }, 50);
+                                            }
+                                        }
+                                    } else {
+                                        const elesToFitCluster = sidebarCy.elements(`[clusterID = "${clusterIdToLoad}"]`);
+                                        if (!elesToFitCluster.empty()) {
+                                            console.log(`[DEBUG] No specific nodes, fitting to all elements of cluster ${clusterIdToLoad}. Count: ${elesToFitCluster.length}`);
+                                            sidebarCy.animate({
+                                                // *** INCREASED PADDING HERE ***
+                                                fit: { eles: elesToFitCluster, padding: 100 } 
+                                            }, { duration: 300 });
+                                        } else {
+                                            console.log("[DEBUG] No specific nodes or cluster elements found to fit. The general fit from layout should apply.");
+                                        }
+                                    }
+                                });
+
+                            } else {
+                                console.log("[DEBUG] sidebarCy has no elements. Skipping layout and fit.");
+                            }
+
+                        } else {
+                            console.warn(`[DEBUG] Cannot process saved item. Type: '${item.type}', Data:`, item.data);
+                        }
+                    } catch (error) {
+                        console.error("[DEBUG] Error during saved item click processing (inside timeout):", error);
+                        alert("An error occurred while trying to load the saved item."); 
+                        sidebarInfoDiv.innerHTML = 'Error loading item.';
+                    } finally {
+                         if(sidebarInfoDiv.innerHTML === 'Loading saved item...') {
+                            sidebarInfoDiv.style.display = 'none';
+                            console.log("[DEBUG] Hid 'Loading saved item...' message (in finally block).");
+                        }
+                    }
+                }, sidebarTransitionDuration); 
+
+            }); 
 
             const removeBtn = document.createElement('button');
             removeBtn.textContent = '✖';
             removeBtn.title = "Remove item";
-            // ... (styling for removeBtn)
             removeBtn.style.float = 'right';
             removeBtn.style.fontSize = '10px';
             removeBtn.style.padding = '1px 4px';
@@ -4709,7 +4827,7 @@
                 removeSavedItem(item.id);
             });
 
-            listItem.appendChild(removeBtn); // Add remove button after name for better layout
+            listItem.appendChild(removeBtn);
             listElement.appendChild(listItem);
         });
     }
@@ -4773,34 +4891,76 @@
             return;
         }
 
-        let itemsActuallySaved = 0;
-        nodesByCluster.forEach((nodeDetailsList, clusterID) => {
-            const descriptions = nodeDetailsList.map(detail => {
-                let desc = `IP: ${detail.ip}`;
-                if (detail.attackTypes && detail.attackTypes.length > 0 && detail.attackTypes.join('') !== "N/A") {
-                    desc += ` (Attacks: ${detail.attackTypes.join(', ')})`;
-                }
-                return desc;
-            });
+        let itemsProcessedCount = 0; // To track if anything was saved or updated
 
-            // The item ID is the clusterID. Name is "Cluster X".
-            // Descriptions for selected nodes within this cluster are stored in data.
-            addSavedItem({
-                id: clusterID, // Use clusterID as the unique ID for this saved item
-                type: 'cluster-with-details', // New type
-                name: `Cluster ${clusterID}`,
-                data: {
-                    clusterId: clusterID,
-                    // Store the original selected IPs and their full descriptions for display and potential tooltip triggering
-                    selectedNodesDetails: nodeDetailsList.map(detail => ({ ip: detail.ip, attackTypes: detail.attackTypes })),
-                    displayDescriptions: descriptions // For easy rendering in the list
+        nodesByCluster.forEach((newlySelectedNodeDetailsList, clusterID) => {
+            const existingSavedItemIndex = savedItems.findIndex(item => item.id === clusterID && item.type === 'cluster-with-details');
+
+            if (existingSavedItemIndex !== -1) {
+                // --- ITEM EXISTS, UPDATE IT ---
+                const existingItem = savedItems[existingSavedItemIndex];
+                let updated = false;
+
+                newlySelectedNodeDetailsList.forEach(newNodeDetail => {
+                    // Check if this specific node (by IP) is already in the saved details for this cluster
+                    const alreadySelected = existingItem.data.selectedNodesDetails.some(existingNode => existingNode.ip === newNodeDetail.ip);
+                    if (!alreadySelected) {
+                        existingItem.data.selectedNodesDetails.push(newNodeDetail);
+                        updated = true;
+                    }
+                });
+
+                if (updated) {
+                    // Rebuild displayDescriptions based on the potentially updated selectedNodesDetails
+                    existingItem.data.displayDescriptions = existingItem.data.selectedNodesDetails.map(detail => {
+                        let desc = `IP: ${detail.ip}`;
+                        if (detail.attackTypes && detail.attackTypes.length > 0 && detail.attackTypes.join('') !== "N/A") {
+                            desc += ` (Attacks: ${detail.attackTypes.join(', ')})`;
+                        }
+                        return desc;
+                    });
+                    console.log(`Updated existing saved item for Cluster ${clusterID}:`, existingItem);
+                    itemsProcessedCount++;
+                } else {
+                    console.log(`No new nodes to add to existing saved item for Cluster ${clusterID}. All selected nodes were already present.`);
                 }
-            });
-            itemsActuallySaved++;
+
+            } else {
+                // --- ITEM DOES NOT EXIST, ADD NEW ---
+                if (savedItems.length >= MAX_SAVED_ITEMS) {
+                    alert(`Cannot save Cluster ${clusterID}. Maximum of ${MAX_SAVED_ITEMS} items reached. Please remove an item to save a new one.`);
+                    return; // Skip processing this cluster if max is reached
+                }
+
+                const displayDescriptions = newlySelectedNodeDetailsList.map(detail => {
+                    let desc = `IP: ${detail.ip}`;
+                    if (detail.attackTypes && detail.attackTypes.length > 0 && detail.attackTypes.join('') !== "N/A") {
+                        desc += ` (Attacks: ${detail.attackTypes.join(', ')})`;
+                    }
+                    return desc;
+                });
+
+                const newItem = {
+                    id: clusterID, // Use clusterID as the unique ID for this saved item
+                    type: 'cluster-with-details', // New type
+                    name: `Cluster ${clusterID}`,
+                    data: {
+                        clusterId: clusterID,
+                        // Store the original selected IPs and their full descriptions for display
+                        selectedNodesDetails: newlySelectedNodeDetailsList, // This is a fresh list for a new item
+                        displayDescriptions: displayDescriptions // For easy rendering in the list
+                    }
+                };
+                savedItems.push(newItem); // Directly add the new item to the list
+                console.log(`Added new saved item for Cluster ${clusterID}:`, newItem);
+                itemsProcessedCount++;
+            }
         });
 
-        if (itemsActuallySaved > 0) {
-            console.log(`${itemsActuallySaved} cluster(s)/group(s) saved with node details.`);
+        if (itemsProcessedCount > 0) {
+            renderSavedItemsList(); // Re-render the list if any item was added or updated
+            console.log(`${itemsProcessedCount} cluster(s)/group(s) processed (saved or updated) with node details.`);
+
             // Clear current node selections after saving
             if (sidebarCy) {
                 sidebarCy.nodes().filter(n => selectedSidebarNodes.has(n.id())).unselect().forEach(n => {
@@ -4810,6 +4970,10 @@
             }
             selectedSidebarNodes.clear();
             updateSidebarTableForSelectedNodesAndEdges(); // Revert table to broader context if needed
+        } else {
+            // This case can occur if the save limit was hit before processing any cluster,
+            // or if all selected nodes were already present in existing saved items and no new items could be added.
+            alert("No new information was saved. Selected nodes might already be part of saved items, or the save limit was reached for new entries.");
         }
     }
 

@@ -1,5 +1,9 @@
 # Changelog
 
+### 5/22/2025
+- Fix sidebar table issue
+- Saved items list fixes
+
 ## 5/21/2025
 - Functionality to save selected nodes to list.
 
