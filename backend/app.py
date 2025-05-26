@@ -729,111 +729,275 @@ def hierarchical_clusters():
     logging.info(f"Hierarchical tree_dict successfully generated. Preview: {str(tree_dict)[:1000]}")
     return jsonify(tree_dict)
 
+@app.route('/louvain_ip_graph_data', methods=['GET'])
+def louvain_ip_graph_data():
+    global global_df
+    if global_df is None or global_df.empty:
+        logging.warning("/louvain_ip_graph_data called but global_df is None.")
+        return jsonify({"nodes": [], "edges": [], "error": "No data loaded"}), 400
+
+    # Ensure ClusterID is present and correctly typed (it should be from process_csv_to_df)
+    if 'ClusterID' not in global_df.columns:
+        logging.error("ClusterID column is missing from global_df. Cannot generate IP graph.")
+        return jsonify({"nodes": [], "edges": [], "error": "ClusterID not found in processed data."}), 500
+
+    # To get a canonical ClusterID for each IP, we need the map used during process_csv
+    # For simplicity, we'll re-derive a node_cluster_map here or assume the one implicitly
+    # used by global_df['ClusterID'] (which is source-ip based) is sufficient for node coloring,
+    # but for parent grouping, we need a map for *all* unique IPs.
+
+    # Create a fresh node_cluster_map based on the current global_df structure
+    # This ensures that if resolution changes, this graph reflects it.
+    # Note: The global_df['ClusterID'] is packet-based (from source IP). We need an IP-to-ClusterID map.
+    current_resolution = 2.5 # Default, or you could try to get it from a global state if it changes
+    # Potentially, you could pass the current resolution from frontend if this endpoint is dynamic
+
+    # Ensure Source and Destination are clean for compute_clusters
+    df_for_clustering = global_df[['Source', 'Destination']].copy()
+    df_for_clustering['Source'] = df_for_clustering['Source'].astype(str).str.strip()
+    df_for_clustering['Destination'] = df_for_clustering['Destination'].astype(str).str.strip()
+    ip_to_cluster_map = compute_clusters(df_for_clustering, resolution=current_resolution)
+
+    df_for_graph = global_df.copy()
+    df_for_graph['Source'] = df_for_graph['Source'].astype(str).str.strip()
+    df_for_graph['Destination'] = df_for_graph['Destination'].astype(str).str.strip()
+
+    nodes_dict = {} # Using dict to ensure unique nodes with their data
+
+    # Aggregate packet count for each IP
+    source_packet_counts = df_for_graph.groupby('Source').size()
+    dest_packet_counts = df_for_graph.groupby('Destination').size()
+
+    all_ips_involved = pd.concat([df_for_graph['Source'], df_for_graph['Destination']]).unique()
+
+    for ip in all_ips_involved:
+        if not ip or pd.isna(ip):
+            continue
+
+        cluster_id = ip_to_cluster_map.get(ip, 'N/A') # Get canonical ClusterID for this IP
+
+        # Determine classification (take from first appearance or re-classify)
+        classification = "Unknown"
+        src_class = df_for_graph.loc[df_for_graph['Source'] == ip, 'SourceClassification'].iloc[0] if not df_for_graph.loc[df_for_graph['Source'] == ip, 'SourceClassification'].empty else None
+        dst_class = df_for_graph.loc[df_for_graph['Destination'] == ip, 'DestinationClassification'].iloc[0] if not df_for_graph.loc[df_for_graph['Destination'] == ip, 'DestinationClassification'].empty else None
+
+        if src_class and src_class != "Unknown":
+            classification = src_class
+        elif dst_class and dst_class != "Unknown":
+            classification = dst_class
+        else: # If still unknown, re-classify
+            classification = classify_ip_vector(ip)
+
+
+        packet_involvement_count = source_packet_counts.get(ip, 0) + dest_packet_counts.get(ip, 0)
+
+        nodes_dict[ip] = {
+            "data": {
+                "id": ip,
+                "label": ip, # Cytoscape uses 'label' for display by default
+                "clusterId": str(cluster_id),
+                "classification": classification,
+                "packet_count": int(packet_involvement_count) # Total times IP appears as source or dest
+            }
+        }
+
+    nodes_list = list(nodes_dict.values())
+
+    # Aggregate Edges
+    df_for_graph['Length'] = pd.to_numeric(df_for_graph['Length'], errors='coerce').fillna(0)
+
+    # Group by Source, Destination, and include Protocol if you want protocol-specific edges
+    # For now, let's aggregate all traffic between two IPs
+    edges_df = df_for_graph.groupby(["Source", "Destination"]).agg(
+        packet_count=('Time', 'count'), 
+        total_length=('Length', 'sum')
+    ).reset_index()
+
+    edges_list = []
+    for _, row in edges_df.iterrows():
+        src = str(row["Source"])
+        dst = str(row["Destination"])
+
+        if not src or pd.isna(src) or not dst or pd.isna(dst): # Skip if IPs are invalid
+            continue
+        if src == dst: # Skip self-loops for this graph type
+            continue
+
+        edges_list.append({
+            "data": {
+                "id": f"edge_{src}_{dst}", # Create a unique edge ID
+                "source": src,
+                "target": dst,
+                "packet_count": int(row["packet_count"]),
+                "total_length": float(row["total_length"])
+            }
+        })
+
+    logging.info(f"/louvain_ip_graph_data: Nodes: {len(nodes_list)}, Edges: {len(edges_list)}")
+    return jsonify({"nodes": nodes_list, "edges": edges_list})
+
 # Endpoint to return network data for a given cluster
 @app.route('/cluster_network', methods=['GET'])
 def cluster_network():
     global global_df
     if global_df is None:
-        return jsonify({"nodes": [], "edges": []})
-    
+        logging.error("/cluster_network called but global_df is None.")
+        return jsonify({"nodes": [], "edges": [], "error": "No data loaded"}), 500 # Send error back
+
     cluster_id_param = request.args.get("cluster_id")
-    df_cluster = global_df[global_df["ClusterID"] == str(cluster_id_param)]
-    
-    nodes_data = {} # Use a temporary dict to build node details
-    edges_data = {}
-    
-    # Pre-calculate attack types for edges in the cluster
-    edge_attack_types_map = {}
-    if "AttackType" in df_cluster.columns:
-        for (src, dst, proto), group in df_cluster.groupby(["Source", "Destination", "Protocol"]):
-            attack_type_for_edge = "N/A"
-            unique_attacks_on_edge = group["AttackType"][group["AttackType"] != "N/A"].unique()
-            if len(unique_attacks_on_edge) > 0:
-                attack_type_for_edge = unique_attacks_on_edge[0] 
-            edge_key_for_lookup = f"{src}|{dst}|{proto}"
-            edge_attack_types_map[edge_key_for_lookup] = attack_type_for_edge
+    logging.info(f"Processing /cluster_network for cluster_id: {cluster_id_param}")
 
-    # Pre-calculate involved attack types for nodes in the cluster
-    node_involved_attack_types = {}
-    if "AttackType" in df_cluster.columns and not df_cluster.empty:
-        all_nodes_in_cluster = pd.concat([df_cluster["Source"], df_cluster["Destination"]]).unique()
-        for node_ip_str in all_nodes_in_cluster:
-            if pd.isna(node_ip_str): # Skip if node_ip is NaN
+    if not cluster_id_param:
+        logging.error("/cluster_network called without cluster_id.")
+        return jsonify({"nodes": [], "edges": [], "error": "cluster_id parameter is missing"}), 400
+
+    try:
+        # Ensure global_df has necessary columns; provide defaults if not already robustly handled
+        # This is more of a safeguard; ideally, process_csv_to_df ensures these.
+        for col in ["Source", "Destination", "Protocol", "ClusterID", "NodeWeight", "SourceClassification", "DestinationClassification", "AttackType", "Length"]:
+            if col not in global_df.columns:
+                logging.warning(f"Column '{col}' missing in global_df. This might cause issues downstream.")
+                # Depending on the column, you might initialize it here, e.g., global_df[col] = default_value
+                # For now, we'll let it proceed and see if specific cluster data slice fails.
+
+        df_cluster = global_df[global_df["ClusterID"] == str(cluster_id_param)].copy() # Use .copy() to avoid SettingWithCopyWarning
+        logging.info(f"df_cluster for {cluster_id_param} shape: {df_cluster.shape}")
+        if df_cluster.empty:
+            logging.warning(f"df_cluster is empty for cluster_id: {cluster_id_param}. Returning empty network.")
+            return jsonify({"nodes": [], "edges": []})
+
+        if 'NodeWeight' not in df_cluster.columns:
+            logging.warning(f"NodeWeight column missing in df_cluster for cluster {cluster_id_param}. Defaulting to 0.5 for nodes.")
+            df_cluster.loc[:, 'NodeWeight'] = 0.5
+        else:
+            df_cluster.loc[:, 'NodeWeight'] = pd.to_numeric(df_cluster['NodeWeight'], errors='coerce').fillna(0.5)
+
+        # Ensure key columns are strings for reliable operations
+        df_cluster.loc[:, "Source"] = df_cluster["Source"].astype(str).str.strip()
+        df_cluster.loc[:, "Destination"] = df_cluster["Destination"].astype(str).str.strip()
+        df_cluster.loc[:, "Protocol"] = df_cluster["Protocol"].astype(str).str.strip()
+
+
+        all_ips_in_cluster_series = pd.concat([df_cluster["Source"], df_cluster["Destination"]]).drop_duplicates()
+        all_ips_in_cluster = [str(ip).strip() for ip in all_ips_in_cluster_series if str(ip).strip() and str(ip).strip().lower() != 'nan']
+
+        node_avg_weights = {}
+        node_packet_counts = {}
+
+        source_counts = df_cluster["Source"].value_counts()
+        destination_counts = df_cluster["Destination"].value_counts()
+
+        for ip_val in all_ips_in_cluster:
+            source_weights = df_cluster.loc[df_cluster["Source"] == ip_val, "NodeWeight"]
+            dest_weights = df_cluster.loc[df_cluster["Destination"] == ip_val, "NodeWeight"]
+            all_weights_for_ip = pd.concat([source_weights, dest_weights]).dropna()
+
+            node_avg_weights[ip_val] = all_weights_for_ip.mean() if not all_weights_for_ip.empty else 0.5
+
+            s_count = source_counts.get(ip_val, 0)
+            d_count = destination_counts.get(ip_val, 0)
+            # How many rows this IP is involved in
+            node_packet_counts[ip_val] = len(df_cluster[(df_cluster["Source"] == ip_val) | (df_cluster["Destination"] == ip_val)])
+            if node_packet_counts[ip_val] == 0: # Should not happen if ip_val came from all_ips_in_cluster
+                logging.warning(f"IP {ip_val} from all_ips_in_cluster resulted in 0 packet count from df_cluster query.")
+
+
+        nodes_data = {} 
+        edges_data = {}
+
+        edge_attack_types_map = {}
+        if "AttackType" in df_cluster.columns:
+             # Ensure 'AttackType' is string before groupby
+            df_cluster.loc[:, "AttackType"] = df_cluster["AttackType"].astype(str)
+            for (src, dst, proto), group in df_cluster.groupby(["Source", "Destination", "Protocol"]):
+                attack_type_for_edge = "N/A" # Default
+                # Filter out "N/A" strings before finding unique attack types
+                unique_attacks_on_edge = group["AttackType"][group["AttackType"].str.upper() != "N/A"].unique()
+                if len(unique_attacks_on_edge) > 0:
+                    attack_type_for_edge = unique_attacks_on_edge[0] 
+                edge_key_for_lookup = f"{src}|{dst}|{proto}"
+                edge_attack_types_map[edge_key_for_lookup] = attack_type_for_edge
+
+
+        node_involved_attack_types = {}
+        if "AttackType" in df_cluster.columns and not df_cluster.empty:
+            for node_ip_str in all_ips_in_cluster: 
+                involved_rows = df_cluster[
+                    (df_cluster["Source"] == node_ip_str) | (df_cluster["Destination"] == node_ip_str)
+                ]
+                # Ensure 'AttackType' is string and filter out "N/A" before unique
+                unique_node_attacks = involved_rows["AttackType"].astype(str)[involved_rows["AttackType"].str.upper() != "N/A"].unique()
+                node_involved_attack_types[node_ip_str] = list(unique_node_attacks) if len(unique_node_attacks) > 0 else []
+
+
+        for idx, row in df_cluster.iterrows():
+            source_ip = row["Source"] # Already str.strip()'d
+            destination_ip = row["Destination"] # Already str.strip()'d
+            protocol = row["Protocol"] # Already str.strip()'d
+
+            # Basic check for empty strings (should be redundant if handled above but safe)
+            if not source_ip or not destination_ip or not protocol:
+                logging.warning(f"Skipping row {idx} due to empty source/dest/protocol: S='{source_ip}', D='{destination_ip}', P='{protocol}'")
                 continue
-            
-            # Find rows where this node is either source or destination
-            involved_rows = df_cluster[
-                (df_cluster["Source"] == node_ip_str) | (df_cluster["Destination"] == node_ip_str)
-            ]
-            # Get unique attack types from these rows, excluding "N/A"
-            unique_node_attacks = involved_rows["AttackType"][involved_rows["AttackType"] != "N/A"].unique()
-            
-            if len(unique_node_attacks) > 0:
-                node_involved_attack_types[node_ip_str] = list(unique_node_attacks)
-            else:
-                node_involved_attack_types[node_ip_str] = []
 
+            source_classification = str(row.get("SourceClassification", "")).strip()
+            if not source_classification or source_classification.lower() == 'nan': 
+                source_classification = classify_ip_vector(source_ip)
 
-    for idx, row in df_cluster.iterrows():
-        source_ip = str(row.get("Source", "")).strip()
-        destination_ip = str(row.get("Destination", "")).strip()
-        protocol = str(row.get("Protocol", "")).strip()
+            destination_classification = str(row.get("DestinationClassification", "")).strip()
+            if not destination_classification or destination_classification.lower() == 'nan': 
+                destination_classification = classify_ip_vector(destination_ip)
 
-        if not source_ip or not destination_ip or not protocol:
-            continue
-            
-        source_classification = row.get("SourceClassification") or classify_ip_vector(source_ip)
-        destination_classification = row.get("DestinationClassification") or classify_ip_vector(destination_ip)
-        
-        # Add/Update Source Node
-        if source_ip not in nodes_data:
-            nodes_data[source_ip] = {
-                "id": source_ip, 
-                "label": source_ip, 
-                "Classification": source_classification, 
-                "NodeWeight": row.get("NodeWeight", 0), # Typically, NodeWeight might be pre-calculated
-                "InvolvedAttackTypes": node_involved_attack_types.get(source_ip, [])
-            }
-        
-        # Add/Update Destination Node
-        if destination_ip not in nodes_data:
-            nodes_data[destination_ip] = {
-                "id": destination_ip, 
-                "label": destination_ip, 
-                "Classification": destination_classification, 
-                "NodeWeight": row.get("NodeWeight", 0), # Or look up based on IP if pre-calculated
-                "InvolvedAttackTypes": node_involved_attack_types.get(destination_ip, [])
-            }
-            
-        edge_key = f"{source_ip}|{destination_ip}|{protocol}"
-        
-        if edge_key not in edges_data:
-            current_edge_attack_type = edge_attack_types_map.get(edge_key, "N/A")
-            edges_data[edge_key] = {
-                "data": {
-                    "id": f"edge-{source_ip}-{destination_ip}-{protocol}",
-                    "source": source_ip,
-                    "target": destination_ip,
-                    "Protocol": protocol,
-                    "EdgeWeight": 0,
-                    "processCount": 0,
-                    "AttackType": current_edge_attack_type
+            if source_ip not in nodes_data:
+                nodes_data[source_ip] = {
+                    "id": source_ip, 
+                    "label": source_ip, 
+                    "Classification": source_classification, 
+                    "NodeWeight": node_avg_weights.get(source_ip, 0.5), 
+                    "packetCount": node_packet_counts.get(source_ip, 0),
+                    "InvolvedAttackTypes": node_involved_attack_types.get(source_ip, [])
                 }
-            }
-        
-        try:
-            length = float(row.get("Length", 0))
-        except (ValueError, TypeError):
-            length = 0
-            
-        edges_data[edge_key]["data"]["EdgeWeight"] += length
-        edges_data[edge_key]["data"]["processCount"] += 1
 
-    # Format nodes for Cytoscape
-    final_nodes_list = [{"data": node_info} for node_info in nodes_data.values()]
+            if destination_ip not in nodes_data:
+                nodes_data[destination_ip] = {
+                    "id": destination_ip, 
+                    "label": destination_ip, 
+                    "Classification": destination_classification, 
+                    "NodeWeight": node_avg_weights.get(destination_ip, 0.5),
+                    "packetCount": node_packet_counts.get(destination_ip, 0),
+                    "InvolvedAttackTypes": node_involved_attack_types.get(destination_ip, [])
+                }
 
-    network_data = {"nodes": final_nodes_list, "edges": list(edges_data.values())}
-    return jsonify(convert_nan_to_none(network_data))
+            edge_key = f"{source_ip}|{destination_ip}|{protocol}"
+            if edge_key not in edges_data:
+                edges_data[edge_key] = {
+                    "data": {
+                        "id": f"edge-{source_ip}-{destination_ip}-{protocol}", # Ensure unique enough
+                        "source": source_ip, "target": destination_ip, "Protocol": protocol,
+                        "EdgeWeight": 0, "processCount": 0,
+                        "AttackType": edge_attack_types_map.get(edge_key, "N/A")
+                    }
+                }
+
+            current_length = 0
+            try:
+                current_length = float(row.get("Length", 0))
+                if pd.isna(current_length): current_length = 0
+            except (ValueError, TypeError):
+                current_length = 0
+
+            edges_data[edge_key]["data"]["EdgeWeight"] += current_length
+            edges_data[edge_key]["data"]["processCount"] += 1
+
+        final_nodes_list = [{"data": node_info} for node_info in nodes_data.values()]
+        network_data = {"nodes": final_nodes_list, "edges": list(edges_data.values())}
+
+        logging.info(f"Successfully prepared network data for cluster {cluster_id_param}. Nodes: {len(final_nodes_list)}, Edges: {len(edges_data)}")
+        return jsonify(convert_nan_to_none(network_data))
+
+    except Exception as e:
+        logging.exception(f"Critical error in /cluster_network for cluster_id {cluster_id_param}:")
+        return jsonify({"nodes": [], "edges": [], "error": f"Server error processing cluster {cluster_id_param}: {str(e)}"}), 500
 
 # Endpoint to return rows of a cluster in JSON format (for pagination)
 @app.route('/get_cluster_rows', methods=['GET'])

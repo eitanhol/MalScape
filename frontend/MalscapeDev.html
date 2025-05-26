@@ -669,11 +669,12 @@
   <div id="main-container">
     <h2>MalScape</h2>
     <div id="topControls">
-      <div style="margin-bottom: 16px; background: #fff; padding: 12px; border-radius: 4px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-        <label for="fileInput"><strong>Upload CSV File:</strong></label>
-        <input type="file" id="fileInput" accept=".csv" title="Select CSV file to visualize.">
-        <button id="downloadButton" title="Download currently loaded data as CSV.">Download Processed CSV File</button>
-      </div>
+        <div style="margin-bottom: 16px; background: #fff; padding: 12px; border-radius: 4px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+            <label for="fileInput"><strong>Upload CSV File:</strong></label>
+            <input type="file" id="fileInput" accept=".csv" title="Select CSV file to visualize.">
+            <button id="downloadButton" title="Download currently loaded data as CSV.">Download Processed CSV File</button>
+            <button id="showPacketSimilarityBtn" title="Visualize Louvain IP Communities" style="margin-left: 8px;">Show Community IP Graph</button>
+        </div>
       <div class="control-group" title="Filter data displayed in heatmap.">
         <label for="rowOrderSelect">Order Cells By:</label>
         <select id="rowOrderSelect" title="Order heatmap rows by metric value."> <option value="descending">Descending</option> <option value="ascending">Ascending</option> </select>
@@ -770,6 +771,27 @@
             <button id="acknowledgeNewClustersBtn" style="display: none; padding: 4px 8px; font-size: 12px; background-color: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer;">Acknowledge</button>
         </div>
     </div>
+
+    <div id="packetSimilarityCard" style="display:none; background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-top: 20px;">
+        <h3>Louvain Community IP Graph</h3>
+        <div style="margin-bottom:10px;">
+            <label for="ipGraphLayoutSelect">Layout:</label>
+            <select id="ipGraphLayoutSelect" style="padding: 6px 8px;">
+                <option value="cose" selected>COSE (Default)</option>
+                <option value="circle">Circle</option>
+                <option value="grid">Grid</option>
+                <option value="concentric">Concentric</option>
+                <option value="breadthfirst">Breadthfirst</option>
+            </select>
+            <button id="refreshIpGraphBtn" style="margin-left: 10px;">Refresh Graph</button>
+            </div>
+        <div id="louvain-ip-graph-container" style="width: 100%; height: 600px; position: relative; border: 1px solid #ccc; margin-top:10px; background-color: #fdfdfd;">
+            </div>
+        <div id="packetSimilarityLoading" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(255,255,255,0.8); display: none; align-items: center; justify-content: center; flex-direction: column;">
+            <div class="spinner" style="border: 4px solid #f3f3f3; border-top: 4px solid #4299e1; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin-bottom: 10px;"></div>
+            Loading IP Community Graph... </div>
+    </div>
+
     <div id="table-search-container" style="display:none; margin-bottom: 12px; margin-top: 24px;" title="Search main table payload.">
       <label for="tableSearchInput"><strong>Search Payload:</strong></label>
       <input type="text" id="tableSearchInput" placeholder="Enter keyword..." style="padding: 6px 10px; width: 250px;">
@@ -817,6 +839,7 @@
     const SELECTED_EDGE_WIDTH = 3.5;
     const SELECTED_EDGE_ZINDEX = 999;
 
+    let louvainIpCy = null;
     window.currentGroupingApplied = false;
     window.lastAppliedThreshold = 100;
     window.originalTreeData = null;
@@ -1176,7 +1199,6 @@
     }
 
     function clearSidebarVisualization() {
-        // --- Existing code to clear Sidebar Graph, State Variables, Table, etc. ---
         if (sidebarCy) {
             sidebarCy.destroy();
             sidebarCy = null;
@@ -1196,21 +1218,14 @@
         document.getElementById('sidebar-table-loading').style.display = 'none';
         sidebarInfoDiv.innerHTML = 'Click a cell on the heatmap to add its cluster. Click nodes or edges in the graph to highlight and filter the table below.';
         sidebarInfoDiv.style.display = 'block';
-        // --- End of existing code ---
 
-        // Clear Heatmap Highlights (for the *main* heatmap, if you uncommented that)
         clusterHighlightColors.clear(); // Clear the central selection state map
-        // resetHeatmapHighlights();    // Call function for main heatmap if needed
-
-        // --- Clear Dendrogram Highlights (Leaves AND Attached Heatmap Outlines) ---
         try {
             const svgContent = d3.select("#inlineDendrogramSvg g"); // Select the content group
             if (!svgContent.empty()) {
 
-                // 1. Reset Leaf Node Fills (using existing function)
                 highlightTreeClusters(); // Calling with no arguments resets fills
 
-                // --- 2. ADDED: Reset Tree-Attached Heatmap Cell Outlines ---
                 const defaultStrokeColor = '#fff'; // Define or ensure access to default color
                 const defaultStrokeWidth = 0.2;   // Define or ensure access to default width
 
@@ -1218,14 +1233,12 @@
                     .transition().duration(150) // Use a short transition for smoothness
                     .style("stroke", defaultStrokeColor) // Set stroke color to default
                     .style("stroke-width", defaultStrokeWidth); // Set stroke width to default
-                // --- End ADDED section ---
 
                 console.log("Reset tree node highlights AND tree-attached heatmap cell outlines.");
             }
         } catch (error) {
             console.error("Error resetting tree elements:", error);
         }
-        // --- End Dendrogram Reset ---
 
         // Reset Sidebar Layout Dropdown
         document.getElementById('sidebarLayoutSelect').value = 'cose';
@@ -1906,45 +1919,33 @@
             return;
         }
 
-        // --- Read values from Input Fields ---
-        const minNS_input = Math.max(parseFloat(document.getElementById('sidebarNodeSizeMin').value) || 10, 1);
-        const maxNS_input = Math.max(parseFloat(document.getElementById('sidebarNodeSizeMax').value) || 30, minNS_input + 1); // Ensured default max is greater than default min
         const minEW_input = Math.max(parseFloat(document.getElementById('sidebarEdgeWidthMin').value) || 1, 0.1);
-        const maxEW_input = Math.max(parseFloat(document.getElementById('sidebarEdgeWidthMax').value) || 8, minEW_input + 0.1); // Ensured default max is greater than default min
-        // --- End Read values from Input Fields ---
-
-        console.log(`Applying sidebar sizes: Node(${minNS_input}-${maxNS_input}), Edge(${minEW_input}-${maxEW_input}) using normalization.`);
+        const maxEW_input = Math.max(parseFloat(document.getElementById('sidebarEdgeWidthMax').value) || 8, minEW_input + 0.1);
+        
+        const MIN_RADIUS = 3; // User-defined minimum radius
 
         sidebarCy.batch(() => {
-            // --- Node Size Normalization ---
             const nodes = sidebarCy.nodes();
             if (nodes.length > 0) {
-                const nodeWeights = nodes.map(n => n.data('NodeWeight') ?? n.degree());
-                const actualMinNodeWeight = Math.min(...nodeWeights);
-                const actualMaxNodeWeight = Math.max(...nodeWeights);
-                const nodeWeightRange = (actualMaxNodeWeight - actualMinNodeWeight);
-
                 nodes.forEach(n => {
-                    const weight = n.data('NodeWeight') ?? n.degree();
-                    let normalizedWeight = 0;
-                    if (nodeWeightRange > 0) {
-                        normalizedWeight = (weight - actualMinNodeWeight) / nodeWeightRange;
-                    } else if (nodes.length > 0) {
-                         normalizedWeight = 0;
+                    const packetCount = n.data('packetCount'); // Get packetCount from node data
+                    let radius = MIN_RADIUS; // Default to min radius
+
+                    if (typeof packetCount === 'number' && packetCount > 0) {
+                        radius = Math.sqrt(packetCount);
                     }
+                    
+                    radius = Math.max(MIN_RADIUS, radius); // Ensure minimum radius
+                    
+                    const diameter = 2 * radius; // Cytoscape uses diameter for width/height
 
-                    // Use input values for scaling
-                    let size = minNS_input + normalizedWeight * (maxNS_input - minNS_input);
-                    size = Math.max(minNS_input, Math.min(size, maxNS_input)); 
 
-                    if(n.id() !== selectedNodeId) {
-                        n.style({ 'width': size, 'height': size });
+                    if(n.id() !== selectedNodeId) { // Avoid directly styling the selected node if special styling is applied
+                        n.style({ 'width': diameter, 'height': diameter });
                     }
                 });
             }
-            // --- End Node Size Normalization ---
 
-            // --- Edge Width Normalization ---
             const edges = sidebarCy.edges();
             if (edges.length > 0) {
                 const edgeCounts = edges.map(e => e.data('processCount') || 1);
@@ -1961,13 +1962,10 @@
                     } else if (edges.length > 0) {
                         normalizedCount = 0;
                     }
-
-                    // Use input values for scaling
                     let width = minEW_input + normalizedCount * (maxEW_input - minEW_input);
                     width = Math.max(minEW_input, Math.min(width, maxEW_input)); 
 
                     e.scratch('_originalWidth', width);
-
                     const edgeKey = `${e.data('source')}|${e.data('target')}|${e.data('Protocol')}`;
                     const nodeIsSelected = selectedNodeId && (e.source().id() === selectedNodeId || e.target().id() === selectedNodeId);
                     const edgeIsSelected = selectedSidebarEdges.has(edgeKey);
@@ -1975,12 +1973,11 @@
                     if (!nodeIsSelected && !edgeIsSelected) {
                         e.style('width', width);
                     } else {
-                         e.style('width', SELECTED_EDGE_WIDTH);
+                         e.style('width', SELECTED_EDGE_WIDTH); // Keep selected edge width distinct
                     }
                 });
             }
-            // --- End Edge Width Normalization ---
-        }); // End batch update
+        }); 
     }
 
     function updateSidebarTableForSelectedEdges() {
@@ -2012,7 +2009,6 @@
             }
         }
 
-        // --- Handle Edge Selection (if no node is selected) ---
         if (selectedSidebarEdges.size > 0) {
             const edgeList = Array.from(selectedSidebarEdges).map(key => {
                 const parts = key.split('|');
@@ -2022,10 +2018,8 @@
             loadSidebarMultiEdgeTable(edgeList, 1);
             sidebarInfoDiv.style.display = 'none'; // Hide default info
         }
-        // --- Handle No Node/Edge Selection (Fallback) ---
         else {
             console.log("No node or edge selected. Checking for remaining added clusters...");
-            // --- MODIFIED FALLBACK LOGIC ---
             if (addedSidebarClusters.size > 0) {
                 // If clusters remain in the sidebar, show table for the first one
                 const firstRemainingClusterId = addedSidebarClusters.values().next().value;
@@ -2044,7 +2038,6 @@
                 currentSidebarTableClusterId = null; // Ensure no stale cluster ID remains
                 sidebarTableMode = 'cluster'; // Reset mode
             }
-            // --- END MODIFIED FALLBACK LOGIC ---
         }
     }
 
@@ -2228,11 +2221,9 @@
     function updateHeatmap() {
         return new Promise((resolve, reject) => {
             console.log("updateHeatmap started...");
-            // showLoading(); // Consider if loading indicator is needed here or handled globally
 
             if (typeof metrics === 'undefined' || !Array.isArray(metrics)) {
                 console.error("Global 'metrics' array is not defined correctly.");
-                // hideLoading(); // Ensure loading is hidden on early exit
                 return reject(new Error("Global 'metrics' array is not defined correctly."));
             }
             window.fullHeatmapData = {};
@@ -2251,15 +2242,11 @@
                 minDestinationAmt: document.getElementById('minDestinationAmtFilter').value,
                 maxDestinationAmt: document.getElementById('maxDestinationAmtFilter').value
             };
-            // ---- START ADDED DEBUG LOG ----
             console.log("updateHeatmap - Filter parameters:", JSON.parse(JSON.stringify(filterParamsBase)));
-            // ---- END ADDED DEBUG LOG ----
 
             Promise.all(metrics.map(m => {
                 const filterParams = { ...filterParamsBase, metric: m.value };
-                // ---- START ADDED DEBUG LOG ----
                 console.log(`Workspaceing heatmap data for metric: ${m.label} (value: ${m.value}) with params:`, JSON.parse(JSON.stringify(filterParams)));
-                // ---- END ADDED DEBUG LOG ----
                 return fetch(`${API_BASE_URL}/filter_and_aggregate`, {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
@@ -2267,9 +2254,7 @@
                     })
                     .then(response => {
                         if (!response.ok) {
-                            // ---- START ADDED DEBUG LOG ----
                             console.error(`Failed to fetch heatmap data for metric: ${m.label}. Status: ${response.status}`);
-                            // ---- END ADDED DEBUG LOG ----
                             return response.json().catch(() => response.text()).then(errBody => {
                                 throw new Error(`Workspace failed for ${m.label}: ${errBody.error || errBody || response.statusText}`);
                             });
@@ -2277,7 +2262,6 @@
                         return response.json();
                     })
                     .then(data => {
-                        // ---- START ADDED DEBUG LOG ----
                         console.log(`Data received for metric: ${m.label}`, data ? data.slice(0, Math.min(data.length, 5)) : 'No data'); // Log first 5 items or 'No data'
                         if (data && data.length > 0) {
                             const values = data.map(d => d.value);
@@ -2287,7 +2271,6 @@
                         } else {
                             console.log(`Metric: ${m.label}, No data entries received or empty array.`);
                         }
-                        // ---- END ADDED DEBUG LOG ----
                         return { metric: m.label, pivotData: data };
                     })
                     .catch(error => {
@@ -2312,9 +2295,7 @@
                             window.heatmapSortOrders[metricName] = [];
                             window.fullHeatmapData[metricName] = [];
                             if(metricName === 'Count') { window.heatmapCountSortOrder = []; }
-                            // ---- START ADDED DEBUG LOG ----
                             console.warn(`No pivotData (or empty array) for metric: ${metricName} after fetch.`);
-                            // ---- END ADDED DEBUG LOG ----
                         }
                     } else {
                         console.warn(`Invalid or missing pivotData structure for metric: ${metricName}`);
@@ -2324,21 +2305,17 @@
                     }
                 });
 
-                // ---- START ADDED DEBUG LOGS ----
                 console.log("updateHeatmap - All metric data fetched and processed for heatmap.");
                 console.log("window.fullHeatmapData (sample):", Object.fromEntries(Object.entries(window.fullHeatmapData).map(([k, v]) => [k, v.slice(0,3)])));
                 console.log("window.heatmapSortOrders (sample):", Object.fromEntries(Object.entries(window.heatmapSortOrders).map(([k, v]) => [k, v.slice(0,3)])));
                 if (window.heatmapCountSortOrder) {
                     console.log("window.heatmapCountSortOrder (first 10):", window.heatmapCountSortOrder.slice(0, 10));
                 }
-                // ---- END ADDED DEBUG LOGS ----
-                // hideLoading(); // Ensure loading is hidden
                 resolve(validResults);
             })
             .catch(error => {
                 console.error("Major error fetching one or more heatmap data components:", error);
                 window.fullHeatmapData = {}; window.heatmapSortOrders = {}; window.heatmapCountSortOrder = [];
-                // hideLoading(); // Ensure loading is hidden
                 reject(error);
             });
         });
@@ -2679,9 +2656,9 @@
         const resetGroupingBtn = document.getElementById('resetGroupingBtn');
         const acknowledgeBtn = document.getElementById('acknowledgeNewClustersBtn');
         const messageDivForAcknowledge = document.getElementById('reclusterMessage');
-        const saveSelectionBtn = document.getElementById('saveSelectionBtn'); //
+        const saveSelectionBtn = document.getElementById('saveSelectionBtn');
         
-        renderSavedItemsList(); //
+        renderSavedItemsList();
 
         try {
             showLoading();
@@ -2785,7 +2762,7 @@
 
         if(downloadButton) {
             downloadButton.addEventListener('click', function() {
-                if (window.originalTreeData) {
+                if (window.originalTreeData) { // Check if data has been loaded
                     window.location.href = `${API_BASE_URL}/download_csv`;
                 } else {
                     alert("No processed data available to download. Please upload a CSV file first.");
@@ -2801,11 +2778,11 @@
                     if (window.lastTreeData) {
                         showInlineDendrogram(window.lastTreeData, currentDendrogramHeight, currentNewClusterIds);
                     } else {
-                        await loadInlineDendrogram();
+                        await loadInlineDendrogram(); // If no tree data, try to load it
                     }
-                    highlightTreeClusters(new Set(clusterHighlightColors.keys()));
+                    highlightTreeClusters(new Set(clusterHighlightColors.keys())); // Re-apply highlights
                     const localThresholdSlider = document.getElementById('thresholdSlider');
-                    if (localThresholdSlider && window.lastTreeRoot) {
+                    if (localThresholdSlider && window.lastTreeRoot) { // Ensure tree root is available
                         requestAnimationFrame(() => { localThresholdSlider.dispatchEvent(new Event('input')); });
                     }
                 } catch (error) {
@@ -2822,7 +2799,8 @@
         if(resetSidebarBtn) {
             resetSidebarBtn.addEventListener('click', () => {
                 clearSidebarVisualization();
-                updateLegend();
+                updateLegend(); // Reset legend to global
+                // No need to call updateHeatmap here as sidebar reset doesn't change main heatmap filters
             });
         }
 
@@ -2830,8 +2808,8 @@
             sidebarFullscreenBtn.addEventListener('click', toggleSidebarFullscreen);
         }
         
-        if (saveSelectionBtn) { //
-            saveSelectionBtn.addEventListener('click', handleSaveSelection); //
+        if (saveSelectionBtn) {
+            saveSelectionBtn.addEventListener('click', handleSaveSelection);
         }
 
         document.addEventListener('fullscreenchange', () => {
@@ -2841,7 +2819,7 @@
             } else if (document.fullscreenElement === sidebar && !isSidebarFullscreen) { // Re-entering
                 isSidebarFullscreen = true;
                 sidebar.classList.add('fullscreen'); 
-                legendContainer.classList.add('fullscreen-active'); // This line also adds the class
+                legendContainer.classList.add('fullscreen-active');
                 document.body.classList.add('sidebar-fullscreen');
                 sidebarFullscreenBtn.innerHTML = '&#x274C;';
                 sidebarFullscreenBtn.title = "Exit Sidebar Fullscreen";
@@ -2857,7 +2835,7 @@
             sidebarSearchInput.addEventListener('input', filterSidebarTable);
         }
 
-        if(sidebarGoPageBtn) {
+        if(sidebarGoPageBtn) { // This listener was duplicated, ensuring only one correct version
             sidebarGoPageBtn.addEventListener('click', function () {
                 let pageInput = document.getElementById('sidebarCurrentPageInput');
                 let page = parseInt(pageInput.value, 10);
@@ -2869,19 +2847,24 @@
                         loadSidebarClusterTable(currentSidebarTableClusterId, page);
                     } else if (sidebarTableMode === 'edges') {
                         let edgeList = [];
-                        if (selectedNodeId && sidebarCy) {
+                        if (selectedNodeId && sidebarCy) { // Check selectedNodeId first
                             const node = sidebarCy.getElementById(selectedNodeId);
                             if (node && node.length > 0) {
                                 edgeList = node.connectedEdges().map(edge => ({ source: edge.data('source'), destination: edge.data('target'), protocol: edge.data('Protocol') }));
                             }
-                        } else if (selectedSidebarEdges.size > 0) {
+                         } else if (selectedSidebarEdges.size > 0) { // Then check selectedSidebarEdges
                             edgeList = Array.from(selectedSidebarEdges).map(key => {
-                                const parts = key.split('|'); return { source: parts[0], destination: parts[1], protocol: parts[2] };
+                                const parts = key.split('|');
+                                return { source: parts[0], destination: parts[1], protocol: parts[2] };
                             });
-                        }
-                        if (edgeList.length > 0) {
-                            loadSidebarMultiEdgeTable(edgeList, page);
-                        }
+                         }
+                         if (edgeList.length > 0) {
+                             loadSidebarMultiEdgeTable(edgeList, page);
+                         } else {
+                             console.warn("Sidebar pagination: In edge mode but no edges identified.");
+                         }
+                    } else {
+                        console.warn("Sidebar pagination: Current table context unclear.");
                     }
                 } else {
                     alert(`Please enter a valid page number between 1 and ${totalPagesStr}.`);
@@ -2903,9 +2886,9 @@
                 updateRowOrderSelectState();
                 if (window.lastTreeData) {
                     showInlineDendrogram(window.lastTreeData, currentDendrogramHeight, currentNewClusterIds);
-                    highlightTreeClusters(new Set(clusterHighlightColors.keys()));
+                    highlightTreeClusters(new Set(clusterHighlightColors.keys())); // Re-apply highlights
                     const localThresholdSlider = document.getElementById('thresholdSlider');
-                    requestAnimationFrame(() => {
+                    requestAnimationFrame(() => { // Ensure slider update happens after DOM is stable
                         if (localThresholdSlider) localThresholdSlider.dispatchEvent(new Event('input'));
                     });
                 }
@@ -2916,9 +2899,9 @@
             reorderTreeCheckbox.addEventListener('change', () => {
                 if (window.lastTreeData) {
                     showInlineDendrogram(window.lastTreeData, currentDendrogramHeight, currentNewClusterIds);
-                    highlightTreeClusters(new Set(clusterHighlightColors.keys()));
+                    highlightTreeClusters(new Set(clusterHighlightColors.keys())); // Re-apply highlights
                     const localThresholdSlider = document.getElementById('thresholdSlider');
-                    requestAnimationFrame(() => {
+                    requestAnimationFrame(() => { // Ensure slider update
                         if (localThresholdSlider) localThresholdSlider.dispatchEvent(new Event('input'));
                     });
                 }
@@ -2935,10 +2918,10 @@
                 const svgInstance = d3.select("#inlineDendrogramSvg");
                 const svgNodeInstance = svgInstance.node();
                 if (!svgNodeInstance) return;
-                const svgContentInstance = svgInstance.select("g");
-                const rootInstance = window.lastTreeRoot;
-                const layoutHeightInstance = window.currentD3LayoutHeight;
-                const treeLayoutWidthInstance = window.currentLayoutWidth;
+                const svgContentInstance = svgInstance.select("g"); // The main transformed group
+                const rootInstance = window.lastTreeRoot; // Root of the D3 hierarchy
+                const layoutHeightInstance = window.currentD3LayoutHeight; // The height used for d3.cluster().size
+                const treeLayoutWidthInstance = window.currentLayoutWidth; // The width for X positions
 
                 if (!layoutHeightInstance || layoutHeightInstance <= 0 || !rootInstance || svgContentInstance.empty() || treeLayoutWidthInstance === undefined) {
                     svgInstance.select("#threshold-bar").style("display", "none");
@@ -2946,20 +2929,22 @@
                 }
 
                 const physicalPercentageForBar = physicalValue / 100;
-                const thresholdLayoutYForBar = layoutHeightInstance * physicalPercentageForBar;
+                const thresholdLayoutYForBar = layoutHeightInstance * physicalPercentageForBar; // Y in layout coordinates
 
+                // Update node visual state based on threshold (graying out)
                 svgContentInstance.selectAll('.node').each(function(dNode) {
                     if (dNode && typeof dNode.structuralY === 'number' && isFinite(dNode.structuralY)) {
                         d3.select(this).classed('grayed-out', dNode.structuralY > thresholdLayoutYForBar + 1e-6);
                     } else {
-                        d3.select(this).classed('grayed-out', false);
+                        d3.select(this).classed('grayed-out', false); // Default if structuralY is invalid
                     }
                 });
 
+                // Update threshold bar position considering SVG zoom/pan
                 try {
-                    const transform = d3.zoomTransform(svgNodeInstance);
-                    const thresholdVisualY = ((thresholdLayoutYForBar + margin.top) * transform.k) + transform.y;
-                    const barX1 = margin.left * transform.k + transform.x;
+                    const transform = d3.zoomTransform(svgNodeInstance); // Get current zoom transform of the SVG
+                    const thresholdVisualY = ((thresholdLayoutYForBar + margin.top) * transform.k) + transform.y; // Apply transform
+                    const barX1 = (margin.left * transform.k) + transform.x;
                     const barX2 = (margin.left + treeLayoutWidthInstance) * transform.k + transform.x;
 
                     svgInstance.select("#threshold-bar")
@@ -2968,11 +2953,12 @@
                     .attr("x1", barX1).attr("x2", barX2);
                 } catch (e) {
                     console.error("Error updating threshold bar position:", e);
-                    svgInstance.select("#threshold-bar").style("display", "none");
+                    svgInstance.select("#threshold-bar").style("display", "none"); // Hide bar on error
                 }
             });
 
-            requestAnimationFrame(() => {
+            // Trigger initial update if tree is already loaded
+             requestAnimationFrame(() => { // Ensure it runs after initial render potentially
                 if (window.lastTreeRoot) { thresholdSlider.dispatchEvent(new Event('input')); }
             });
         }
@@ -3002,6 +2988,7 @@
         const mainTableSearchInput = document.getElementById('tableSearchInput');
         if (mainTableSearchInput) {
             mainTableSearchInput.addEventListener('input', function() {
+                // Placeholder for main table search, if implemented
                 console.log("Main table search not implemented in this example.");
             });
         }
@@ -3009,14 +2996,15 @@
         if (acknowledgeBtn && messageDivForAcknowledge) {
             acknowledgeBtn.addEventListener('click', () => {
                 console.log("New clusters acknowledged by user.");
-                currentNewClusterIds.clear(); 
+                currentNewClusterIds.clear(); // Clear the set of new IDs
 
-                acknowledgeBtn.style.display = 'none';
+                acknowledgeBtn.style.display = 'none'; // Hide button
                 messageDivForAcknowledge.textContent = 'Changes acknowledged.'; 
-                messageDivForAcknowledge.style.color = '#333'; 
+                messageDivForAcknowledge.style.color = '#333'; // Reset color
 
+                // Redraw the dendrogram without the new cluster highlighting
                 if (window.lastTreeData) {
-                    showInlineDendrogram(window.lastTreeData, currentDendrogramHeight, currentNewClusterIds);
+                    showInlineDendrogram(window.lastTreeData, currentDendrogramHeight, currentNewClusterIds); // Pass empty set
                     const thresholdSliderElem = document.getElementById('thresholdSlider');
                     if (thresholdSliderElem && window.lastTreeRoot) {
                         requestAnimationFrame(() => { thresholdSliderElem.dispatchEvent(new Event('input')); });
@@ -3026,7 +3014,65 @@
                 }
             });
         }
-    });
+
+        // --- START: MODIFIED/ADDED Listeners for Louvain IP Community Graph ---
+        const togglePacketBtn = document.getElementById('showPacketSimilarityBtn'); // This ID is for "Show Community IP Graph" button
+        if (togglePacketBtn) {
+            togglePacketBtn.addEventListener('click', function() {
+                const card = document.getElementById('packetSimilarityCard'); // This is the card for the IP Community Graph
+                if (!card) { console.error("packetSimilarityCard not found!"); return; }
+
+                if (card.style.display === 'none' || card.style.display === '') {
+                    if (!window.originalTreeData && !window.lastTreeData) { // Check if any CSV data is loaded
+                        alert("Please upload and process a CSV file first.");
+                        return;
+                    }
+                    card.style.display = 'block';
+                    this.textContent = 'Hide Community IP Graph'; // Update button text
+                    
+                    if (typeof fetchAndRenderLouvainIpGraph === 'function') {
+                        if (louvainIpCy === null) { // Only fetch and render if graph isn't initialized
+                            fetchAndRenderLouvainIpGraph();
+                        }
+                    } else {
+                        console.error("fetchAndRenderLouvainIpGraph function not defined.");
+                    }
+                } else {
+                    card.style.display = 'none';
+                    this.textContent = 'Show Community IP Graph'; // Update button text
+                }
+            });
+        }
+
+        const refreshIpGraphBtn = document.getElementById('refreshIpGraphBtn');
+        if (refreshIpGraphBtn) {
+            refreshIpGraphBtn.addEventListener('click', () => {
+                if (typeof fetchAndRenderLouvainIpGraph === 'function') {
+                    fetchAndRenderLouvainIpGraph();
+                } else {
+                    console.error("fetchAndRenderLouvainIpGraph function not defined.");
+                }
+            });
+        }
+
+        const ipGraphLayoutSelect = document.getElementById('ipGraphLayoutSelect');
+        if (ipGraphLayoutSelect) {
+            ipGraphLayoutSelect.addEventListener('change', () => {
+                if (louvainIpCy) { // Check if the Cytoscape instance exists
+                    const selectedLayout = ipGraphLayoutSelect.value;
+                    let layoutOptions = {
+                        name: selectedLayout,
+                        idealEdgeLength: 120, nodeRepulsion: node => node.isParent() ? 800000 : 40000,
+                        edgeElasticity: 100, gravity: 60, numIter: 1500,
+                        fit: true, padding: 50, animate: true, animationDuration: 600,
+                        quality: "default", randomize: true, tile: true, nodeSeparation: 75, packComponents: true
+                    };
+                    louvainIpCy.layout(layoutOptions).run();
+                }
+            });
+        }
+
+    }); // End of DOMContentLoaded
 
     function showInlineDendrogram(data, svgH = 400, newClusterIds = new Set()) {
         const containerDiv = document.getElementById("inline-dendrogram-container");
@@ -4974,6 +5020,177 @@
             // This case can occur if the save limit was hit before processing any cluster,
             // or if all selected nodes were already present in existing saved items and no new items could be added.
             alert("No new information was saved. Selected nodes might already be part of saved items, or the save limit was reached for new entries.");
+        }
+    }
+
+    async function fetchAndRenderLouvainIpGraph() {
+        const loadingIndicator = document.getElementById('packetSimilarityLoading'); // ID of your loading div
+        const graphContainerDiv = document.getElementById('louvain-ip-graph-container'); // ID of the div for Cytoscape
+
+        if (!loadingIndicator || !graphContainerDiv) {
+            console.error("Required HTML elements for IP graph are missing.");
+            return;
+        }
+
+        loadingIndicator.style.display = 'flex';
+        if (louvainIpCy) { // louvainIpCy is your global Cytoscape instance variable
+            louvainIpCy.destroy();
+            louvainIpCy = null;
+        }
+        graphContainerDiv.innerHTML = ''; // Clear previous content
+
+        try {
+            const response = await fetch(`${API_BASE_URL}/louvain_ip_graph_data`); // Call the new backend endpoint
+
+            if (!response.ok) {
+                const errData = await response.json().catch(() => ({error: "Failed to fetch Louvain IP graph data. Server returned an error."}));
+                throw new Error(errData.error || `HTTP error ${response.status}`);
+            }
+            const graphData = await response.json();
+
+            // You can use packetSimilarityDataCache or rename it, e.g., louvainIpGraphDataCache = graphData;
+
+            if (!graphData || !graphData.nodes || graphData.nodes.length === 0) {
+                graphContainerDiv.innerHTML = '<p style="text-align:center; padding-top:50px;">No IP graph data to display. Ensure data is processed and contains multiple IPs/clusters.</p>';
+                return;
+            }
+
+            const parentNodeElements = [];
+            const uniqueClusterIds = new Set(graphData.nodes.map(n => n.data.clusterId).filter(id => id && id !== 'N/A'));
+            uniqueClusterIds.forEach(clusterId => {
+                parentNodeElements.push({
+                    data: { id: `cluster_parent_${clusterId}`, label: `Cluster ${clusterId}` },
+                    classes: 'cluster-parent'
+                });
+            });
+
+            louvainIpCy = cytoscape({
+                container: graphContainerDiv,
+                elements: {
+                    nodes: graphData.nodes.concat(parentNodeElements),
+                    edges: graphData.edges
+                },
+                style: [
+                    { // General style for IP nodes (non-parents)
+                        selector: 'node',
+                        style: {
+                            'background-color': '#888', // Default, will be overridden by cluster/classification color
+                            'label': 'data(label)',    // Display node ID (IP address)
+                            'width': ele => Math.max(10, Math.min(50, (ele.data('packet_count') || 10) / 20 + 5)),
+                            'height': ele => Math.max(10, Math.min(50, (ele.data('packet_count') || 10) / 20 + 5)),
+                            'font-size': '9px',
+                            'color': '#000',
+                            'text-valign': 'bottom',
+                            'text-halign': 'center',
+                            'text-margin-y': 1,
+                            'border-width': ele => (ele.data('classification') === 'Internal' ? 1.5 : 0.5),
+                            'border-color': ele => (ele.data('classification') === 'Internal' ? '#3182ce' : '#718096'),
+                            'shape': ele => (ele.data('classification') === 'Internal' ? 'square' : 'ellipse')
+                        }
+                    },
+                    { // Style for parent (cluster) nodes - these will override the 'node' style above for parent nodes
+                        selector: '.cluster-parent', // Selects nodes with the class 'cluster-parent'
+                        style: {
+                            'background-color': '#f0f8ff', // Light alice blue
+                            'label': 'data(label)',         // e.g., "Cluster 123"
+                            'font-size': '12px',
+                            'font-weight': 'bold',
+                            'color': '#333',
+                            'text-valign': 'top',
+                            'text-halign': 'center',
+                            'border-width': 1.5,
+                            'border-color': '#adb5bd',
+                            'shape': 'roundrectangle',
+                            'padding': '20px', // Space around children
+                            'ghost': 'yes',    // Enable ghosting for better performance with compound nodes
+                            'ghost-offset-x': 0,
+                            'ghost-offset-y': 0,
+                            'ghost-opacity': 0.1
+                        }
+                    },
+                    { // Style for edges
+                        selector: 'edge',
+                        style: {
+                            'width': ele => Math.max(0.5, Math.min(8, (ele.data('packet_count') || 1) / 100 + 0.5)),
+                            'line-color': '#b3b3b3',
+                            'target-arrow-color': '#b3b3b3',
+                            'target-arrow-shape': 'triangle',
+                            'curve-style': 'bezier'
+                        }
+                    }
+                ],
+            });
+
+            louvainIpCy.nodes().filter(node => !node.hasClass('cluster-parent')).forEach(node => {
+                const clusterId = node.data('clusterId');
+                if (clusterId && clusterId !== 'N/A') {
+                    node.move({ parent: `cluster_parent_${clusterId}` });
+                    let color = protocolColorMap[clusterId]; // protocolColorMap is global
+                    if (!color) {
+                        let hash = 0;
+                        for (let i = 0; i < clusterId.length; i++) {
+                            hash = clusterId.charCodeAt(i) + ((hash << 5) - hash);
+                        }
+                        const c = (hash & 0x00FFFFFF).toString(16).toUpperCase();
+                        color = "#" + "00000".substring(0, 6 - c.length) + c;
+                        protocolColorMap[clusterId] = color;
+                    }
+                    node.style('background-color', color);
+                } else {
+                    node.style('background-color', DEFAULT_UNKNOWN_COLOR);
+                }
+            });
+
+            const selectedLayoutName = document.getElementById('ipGraphLayoutSelect')?.value || 'cose';
+            louvainIpCy.layout({
+                name: selectedLayoutName, idealEdgeLength: 120,
+                nodeRepulsion: node => node.isParent() ? 800000 : 40000,
+                edgeElasticity: 100, gravity: 60, numIter: 1500,
+                fit: true, padding: 50, animate: true, animationDuration: 600,
+                quality: "default", randomize: true, tile: true, nodeSeparation: 75, packComponents: true
+            }).run();
+
+            const tooltip = d3.select("#tooltip"); // Ensure global tooltip is used
+            louvainIpCy.elements().unbind('mouseover mouseout click');
+            louvainIpCy.elements().on('mouseover', (event) => {
+                const el = event.target;
+                if (el.hasClass('cluster-parent')) return;
+                const data = el.data();
+                let content = `<b>IP:</b> ${data.label || data.id}`;
+                content += `<br><b>Cluster:</b> ${data.clusterId || 'N/A'}`;
+                content += `<br><b>Class:</b> ${data.classification || 'N/A'}`;
+                content += `<br><b>Packets:</b> ${data.packet_count || 0}`;
+                tooltip.style("display", "block").html(content)
+                    .style("left", (event.originalEvent.pageX + 10) + "px")
+                    .style("top", (event.originalEvent.pageY - 15) + "px");
+            });
+            louvainIpCy.elements().on('mouseout', () => { tooltip.style("display", "none"); });
+            louvainIpCy.on('click', 'node[!$id^="cluster_parent_"]', function(event){ // Only non-parent nodes
+                const node = event.target;
+                console.log("Clicked IP Node in Main Graph:", node.id(), "Data:", node.data());
+                if(sidebarCy) { // Interaction with sidebar graph
+                    const sidebarNode = sidebarCy.getElementById(node.id());
+                    if(sidebarNode.length > 0) {
+                        toggleSidebar(true); sidebarNode.trigger('click');
+                        sidebarCy.animate({ fit: { eles: sidebarNode, padding: 100 } }, { duration: 400 });
+                    } else {
+                        const clusterToLoad = node.data('clusterId');
+                        if(clusterToLoad && clusterToLoad !== 'N/A') {
+                            const highlightColor = clusterHighlightColors.get(clusterToLoad) || generateUniqueHighlightColor();
+                            if(!clusterHighlightColors.has(clusterToLoad)) clusterHighlightColors.set(clusterToLoad, highlightColor);
+                            visualizeClusterInSidebar(clusterToLoad, highlightColor, node.data('clusterAnomaly') === 'anomaly')
+                                .then(() => { /* ... further actions if needed ... */ });
+                            highlightTreeClusters(new Set(clusterHighlightColors.keys()));
+                        }
+                    }
+                }
+            });
+
+        } catch (error) {
+            console.error("Error fetching/rendering Louvain IP graph:", error);
+            graphContainerDiv.innerHTML = `<p style="text-align:center; padding-top:50px;">Error loading IP Community Graph: ${error.message}</p>`;
+        } finally {
+            loadingIndicator.style.display = 'none';
         }
     }
 
