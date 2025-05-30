@@ -1,11 +1,40 @@
 # Changelog
 
-### 5/22/2025
-- Fix sidebar table issue
-- Saved items list fixes
+## [2025-05-29]
+### Changed
+- Sankey diagram updates
 
-## 5/21/2025
-- Functionality to save selected nodes to list.
+## [2025-05-28]
+### Added
+- Started Sankey diagram
+
+## [2025-05-27]
+### Fixed
+- Anomaly detection now considers the timeframe of the uploaded CSV
+
+### Added
+- Cancel button to loading screen
+
+### Changed
+- IP graph now uses PCA
+
+## [2025-05-25]
+### Added
+- Started IP node graph
+
+## [2025-05-24]
+### Changed
+- Node radius is now equal to square root of number of packets
+
+## [2025-05-22]
+### Fixed
+- Sidebar table issue
+- Saved items list behavior
+
+## [2025-05-21]
+### Added
+- Functionality to save selected nodes to list
+
 
 ## [2025-05-18]
 ### Added

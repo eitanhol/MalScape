@@ -6,6 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
     <title>MalScape</title>
     <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="https://unpkg.com/d3-sankey@0.12.3/dist/d3-sankey.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.26.0/cytoscape.min.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
@@ -592,6 +593,7 @@
   <div id="loading-overlay" title="Data is loading...">
     <div class="spinner"></div>
     <div class="loading-text">Loading, please wait...</div>
+    <button id="cancelLoadingBtn" style="margin-top: 20px; padding: 8px 16px; background-color: #f44336; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">Cancel</button>
   </div>
 
   <div id="legend-container" title="Shows protocol colors and statistics.">
@@ -674,6 +676,7 @@
             <input type="file" id="fileInput" accept=".csv" title="Select CSV file to visualize.">
             <button id="downloadButton" title="Download currently loaded data as CSV.">Download Processed CSV File</button>
             <button id="showPacketSimilarityBtn" title="Visualize Louvain IP Communities" style="margin-left: 8px;">Show Community IP Graph</button>
+            <button id="showSankeyBtn" title="Visualize data flows with Sankey diagram" style="margin-left: 8px;">Show Sankey Diagram</button>
         </div>
       <div class="control-group" title="Filter data displayed in heatmap.">
         <label for="rowOrderSelect">Order Cells By:</label>
@@ -775,14 +778,6 @@
     <div id="packetSimilarityCard" style="display:none; background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-top: 20px;">
         <h3>Louvain Community IP Graph</h3>
         <div style="margin-bottom:10px;">
-            <label for="ipGraphLayoutSelect">Layout:</label>
-            <select id="ipGraphLayoutSelect" style="padding: 6px 8px;">
-                <option value="cose" selected>COSE (Default)</option>
-                <option value="circle">Circle</option>
-                <option value="grid">Grid</option>
-                <option value="concentric">Concentric</option>
-                <option value="breadthfirst">Breadthfirst</option>
-            </select>
             <button id="refreshIpGraphBtn" style="margin-left: 10px;">Refresh Graph</button>
             </div>
         <div id="louvain-ip-graph-container" style="width: 100%; height: 600px; position: relative; border: 1px solid #ccc; margin-top:10px; background-color: #fdfdfd;">
@@ -790,6 +785,59 @@
         <div id="packetSimilarityLoading" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(255,255,255,0.8); display: none; align-items: center; justify-content: center; flex-direction: column;">
             <div class="spinner" style="border: 4px solid #f3f3f3; border-top: 4px solid #4299e1; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin-bottom: 10px;"></div>
             Loading IP Community Graph... </div>
+    </div>
+
+    <div id="sankeyCard" style="display:none; background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-top: 20px;">
+        <h3>Sankey Diagram</h3>
+        <div style="margin-bottom:10px; display: flex; flex-wrap: wrap; align-items: center; gap: 10px;">
+            <div>
+                <label for="sankeyDim1">Level 1:</label>
+                <select id="sankeyDim1" class="sankey-dim-select" title="Select first dimension for Sankey flow.">
+                    <option value="Protocol" selected>Protocol</option>
+                    <option value="SourceClassification">Source Type</option>
+                    <option value="DestinationClassification">Destination Type</option>
+                    <option value="SourcePort_Group">Src Port Group</option>
+                    <option value="DestinationPort_Group">Dst Port Group</option>
+                    <option value="Len_Group">Payload Length Group</option>
+                    <option value="ClusterID">Cluster ID</option>
+                    <option value="Anomaly">Anomaly Status</option>
+                </select>
+            </div>
+            <div>
+                <label for="sankeyDim2">Level 2:</label>
+                <select id="sankeyDim2" class="sankey-dim-select" title="Select second dimension for Sankey flow.">
+                    <option value="SourceClassification" selected>Source Type</option>
+                    <option value="Protocol">Protocol</option>
+                    <option value="DestinationClassification">Destination Type</option>
+                    <option value="SourcePort_Group">Src Port Group</option>
+                    <option value="DestinationPort_Group">Dst Port Group</option>
+                    <option value="Len_Group">Payload Length Group</option>
+                    <option value="ClusterID">Cluster ID</option>
+                    <option value="Anomaly">Anomaly Status</option>
+                </select>
+            </div>
+            <div>
+                <label for="sankeyDim3">Level 3 (Optional):</label>
+                <select id="sankeyDim3" class="sankey-dim-select" title="Select third dimension for Sankey flow (optional).">
+                    <option value="" selected>None</option>
+                    <option value="DestinationClassification">Destination Type</option>
+                    <option value="Protocol">Protocol</option>
+                    <option value="SourceClassification">Source Type</option>
+                    <option value="SourcePort_Group">Src Port Group</option>
+                    <option value="DestinationPort_Group">Dst Port Group</option>
+                    <option value="Len_Group">Payload Length Group</option>
+                    <option value="ClusterID">Cluster ID</option>
+                    <option value="Anomaly">Anomaly Status</option>
+                </select>
+            </div>
+            <button id="refreshSankeyBtn" title="Refresh Sankey diagram with selected dimensions.">Refresh Sankey</button>
+        </div>
+        <div id="sankey-diagram-container" style="width: 100%; height: 700px; position: relative; border: 1px solid #ccc; margin-top:10px; background-color: #fdfdfd; overflow: auto;">
+            </div>
+        <div id="sankeyLoading" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(255,255,255,0.8); display: none; align-items: center; justify-content: center; flex-direction: column; padding: 20px; border-radius: 5px; box-shadow: 0 0 10px rgba(0,0,0,0.2); z-index:10;">
+            <div class="spinner" style="border: 4px solid #f3f3f3; border-top: 4px solid #4299e1; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin-bottom: 10px;"></div>
+            Loading Sankey Diagram...
+        </div>
     </div>
 
     <div id="table-search-container" style="display:none; margin-bottom: 12px; margin-top: 24px;" title="Search main table payload.">
@@ -839,6 +887,8 @@
     const SELECTED_EDGE_WIDTH = 3.5;
     const SELECTED_EDGE_ZINDEX = 999;
 
+    let sankeyDiagramRendered = false;
+    let globalAbortController = new AbortController();
     let louvainIpCy = null;
     window.currentGroupingApplied = false;
     window.lastAppliedThreshold = 100;
@@ -1293,9 +1343,10 @@
             'height': 'mapData(NodeWeight, 0, 1, 15, 60)',
             'font-size': 10, 'color': '#000',
             'text-valign': 'bottom', 'text-halign': 'center', 'text-margin-y': 4,
-            'border-width': 0,
+            'border-width': 0.5,
+            'border-color': '#555',
             'shape': 'ellipse',
-            'transition-property': 'background-color, shape',
+            'transition-property': 'background-color, shape, border-color, border-width',
             'transition-duration': '0.15s'
         }},
         { selector: 'edge', style: {
@@ -1311,7 +1362,15 @@
         }},
         { selector: 'node[Classification = "External"]', style: {
             'shape': 'ellipse'
-        }}
+        }},
+        {
+            selector: 'node[?is_attacker]',
+            style: {
+                'border-color': '#FF3333',
+                'border-width': 3,
+                'border-style': 'solid'
+            }
+        }
     ];
 
     function generateUniqueHighlightColor() {
@@ -1383,8 +1442,8 @@
     }
 
     function visualizeClusterInSidebar(clusterID, nodeColor, isAnomalous) {
-        return new Promise((resolve, reject) => { // Wrap in a Promise
-            const stringClusterID = String(clusterID); // Ensure consistent string IDs
+        return new Promise((resolve, reject) => {
+            const stringClusterID = String(clusterID);
 
             if (sidebarCy && sidebarCy.nodes(`[clusterID = "${stringClusterID}"]`).length > 0 && addedSidebarClusters.has(stringClusterID)) {
                 console.log(`Cluster ${stringClusterID} elements already in sidebar. Re-focusing/styling.`);
@@ -1393,17 +1452,10 @@
                     if (!node.scratch('_originalColor')) {
                         node.scratch('_originalColor', nodeColor);
                     }
-                    if (isAnomalous) {
-                        node.style({ 'border-color': 'red', 'border-width': 2, 'border-style': 'solid' });
-                    }
                 });
-                // If no nodes or edges are specifically selected, load the table for this cluster.
-                // If selections exist, updateSidebarTableForSelectedNodesAndEdges will handle the table.
                 if (selectedSidebarNodes.size === 0 && selectedSidebarEdges.size === 0) {
                     loadSidebarClusterTable(stringClusterID, 1);
                 } else {
-                    // If there are selections, let the existing selection logic handle the table.
-                    // This prevents overriding a specific node/edge table view when just re-focusing a cluster.
                     console.log("Selections exist, table update will be handled by selection logic if necessary.");
                 }
                 resolve({ clusterId: stringClusterID, status: 're-focused' });
@@ -1428,7 +1480,6 @@
                         sidebarInfoDiv.innerHTML = `Cluster ${stringClusterID}: No network data.`;
                         sidebarInfoDiv.style.display = 'block';
                         addedSidebarClusters.add(stringClusterID);
-                        // Load its table (which will likely be empty or show "no data")
                         if (selectedSidebarNodes.size === 0 && selectedSidebarEdges.size === 0) {
                             loadSidebarClusterTable(stringClusterID, 1);
                         }
@@ -1440,8 +1491,7 @@
                         group: 'nodes',
                         data: { ...node.data, clusterID: stringClusterID, Classification: node.data.Classification || 'Unknown' },
                         style: {
-                            'background-color': nodeColor,
-                            ...(isAnomalous && { 'border-color': 'red', 'border-width': 2, 'border-style': 'solid' })
+                            'background-color': nodeColor
                         },
                         scratch: { _originalColor: nodeColor }
                     }));
@@ -1484,12 +1534,9 @@
                         sidebarCy.layout(sidebarLayoutOptions[currentLayout]).run();
                     }
                     
-                    // Load table for the newly visualized cluster if no specific nodes/edges are selected.
                     if (selectedSidebarNodes.size === 0 && selectedSidebarEdges.size === 0) {
                         loadSidebarClusterTable(stringClusterID, 1);
                     }
-
-
                     resolve({ clusterId: stringClusterID, status: 'loaded' });
                 })
                 .catch(error => {
@@ -1499,7 +1546,7 @@
                     sidebarInfoDiv.style.display = 'block';
                     addedSidebarClusters.add(stringClusterID);
                     if (selectedSidebarNodes.size === 0 && selectedSidebarEdges.size === 0) {
-                       loadSidebarClusterTable(stringClusterID, 1); // Attempt to load table even on error
+                       loadSidebarClusterTable(stringClusterID, 1);
                     }
                     reject(error);
                 });
@@ -1595,40 +1642,33 @@
 
             let tooltipHTML = `Node: ${nodeData.label || nodeData.id}<br>` +
                         `Class: ${nodeData.Classification || 'N/A'}<br>` +
-                        `Cluster: ${nodeData.clusterID}<br>` +
-                        `Packets In: ${packetsIn}<br>` +
-                        `Packets Out: ${packetsOut}`;
+                        `Cluster: ${nodeData.clusterID}<br>`;
+
+            if (nodeData.is_attacker) {
+                tooltipHTML += `<strong style="color:#FF3333;">Role: Attacker</strong><br>`;
+            }
+
+            tooltipHTML += `Packets In: ${packetsIn}<br>` +
+                           `Packets Out: ${packetsOut}`;
 
             if (nodeData.InvolvedAttackTypes && nodeData.InvolvedAttackTypes.length > 0) {
-                tooltipHTML += `<br><strong style="color:crimson;">Node Attacks: ${nodeData.InvolvedAttackTypes.join(', ')}</strong>`;
+                tooltipHTML += `<br><strong style="color:crimson;">Node Involved in Attacks: ${nodeData.InvolvedAttackTypes.join(', ')}</strong>`;
             }
-
-            if (nodeData.clusterAnomaly === 'anomaly' && nodeData.clusterAttackType) {
-                tooltipHTML += `<br><strong style="color:red;">Cluster Attack Type: ${nodeData.clusterAttackType}</strong>`;
-            }
-
+            
             tooltip.style("display", "block")
                 .html(tooltipHTML);
-
-            // UPDATED SECTION FOR TOOLTIP POSITIONING
+            
             if (event.originalEvent && typeof event.originalEvent.pageX === 'number' && typeof event.originalEvent.pageY === 'number') {
                 tooltip.style("left", (event.originalEvent.pageX + 10) + "px")
                        .style("top", (event.originalEvent.pageY + 10) + "px");
-                console.log("[DEBUG] Tooltip on node (mouse event): Positioned at", event.originalEvent.pageX, event.originalEvent.pageY);
             } else if (event.renderedPosition) {
-                // Fallback for triggered events: position relative to the node's rendered position
-                // This requires the viewport dimensions to be accessible or use fixed offset
                 const sidebarCyContainer = document.getElementById('sidebar-cy');
                 const containerRect = sidebarCyContainer.getBoundingClientRect();
                 tooltip.style("left", (containerRect.left + event.renderedPosition.x + 10) + "px")
                        .style("top", (containerRect.top + event.renderedPosition.y + 10) + "px");
-                console.log("[DEBUG] Tooltip on node (triggered event): Positioned via renderedPosition at", event.renderedPosition.x, event.renderedPosition.y);
             } else {
-                console.warn("[DEBUG] Tooltip on node: Could not determine position (no originalEvent or renderedPosition).");
-                // Optionally, hide tooltip or position it statically if positioning fails
-                // tooltip.style("display", "none");
+                console.warn("Tooltip on node: Could not determine position.");
             }
-            // END UPDATED SECTION
         });
 
         sidebarCy.on('mouseover', 'edge', (event) => {
@@ -1648,22 +1688,17 @@
             tooltip.style("display", "block")
                 .html(edgeTooltipHTML);
 
-            // UPDATED SECTION FOR TOOLTIP POSITIONING
             if (event.originalEvent && typeof event.originalEvent.pageX === 'number' && typeof event.originalEvent.pageY === 'number') {
                 tooltip.style("left", (event.originalEvent.pageX + 10) + "px")
                        .style("top", (event.originalEvent.pageY + 10) + "px");
-                console.log("[DEBUG] Tooltip on edge (mouse event): Positioned at", event.originalEvent.pageX, event.originalEvent.pageY);
             } else if (event.renderedPosition) {
-                 // Fallback for triggered events (less common for edges but good practice)
                 const sidebarCyContainer = document.getElementById('sidebar-cy');
                 const containerRect = sidebarCyContainer.getBoundingClientRect();
                 tooltip.style("left", (containerRect.left + event.renderedPosition.x + 10) + "px")
-                       .style("top", (containerRect.top + event.renderedPosition.y - 15) + "px"); // Adjusted y for edge midpoints
-                console.log("[DEBUG] Tooltip on edge (triggered event): Positioned via renderedPosition at", event.renderedPosition.x, event.renderedPosition.y);
+                       .style("top", (containerRect.top + event.renderedPosition.y - 15) + "px");
             } else {
-                console.warn("[DEBUG] Tooltip on edge: Could not determine position.");
+                console.warn("Tooltip on edge: Could not determine position.");
             }
-            // END UPDATED SECTION
         });
 
         sidebarCy.on('mouseout', 'node, edge', () => {
@@ -1687,10 +1722,10 @@
                     if (!clusterHighlightColors.has(String(clusterID))) {
                         const highlightColor = generateUniqueHighlightColor();
                         clusterHighlightColors.set(String(clusterID), highlightColor);
-                        visualizeClusterInSidebar(clusterID, highlightColor, clickedNode.data('clusterAnomaly') === 'anomaly');
+                        visualizeClusterInSidebar(clusterID, highlightColor, clickedNode.data('is_attacker')); // Pass node's attacker status
                         highlightTreeClusters(new Set(clusterHighlightColors.keys()));
                     } else {
-                        visualizeClusterInSidebar(clusterID, clusterHighlightColors.get(String(clusterID)), clickedNode.data('clusterAnomaly') === 'anomaly');
+                        visualizeClusterInSidebar(clusterID, clusterHighlightColors.get(String(clusterID)), clickedNode.data('is_attacker'));
                     }
                 }
                 loadSidebarClusterTable(clusterID, 1);
@@ -2114,7 +2149,14 @@
         });
     }
 
-    function showLoading() { document.getElementById('loading-overlay').style.display = 'flex'; }
+    function showLoading() {
+        globalAbortController = new AbortController();
+        document.getElementById('loading-overlay').style.display = 'flex';
+        const cancelBtn = document.getElementById('cancelLoadingBtn');
+        if (cancelBtn) {
+            cancelBtn.disabled = false;
+        }
+    }
     function hideLoading() { document.getElementById('loading-overlay').style.display = 'none'; }
 
     function updateLegend(cyEdges = null) {
@@ -2242,44 +2284,47 @@
                 minDestinationAmt: document.getElementById('minDestinationAmtFilter').value,
                 maxDestinationAmt: document.getElementById('maxDestinationAmtFilter').value
             };
-            console.log("updateHeatmap - Filter parameters:", JSON.parse(JSON.stringify(filterParamsBase)));
 
             Promise.all(metrics.map(m => {
                 const filterParams = { ...filterParamsBase, metric: m.value };
-                console.log(`Workspaceing heatmap data for metric: ${m.label} (value: ${m.value}) with params:`, JSON.parse(JSON.stringify(filterParams)));
                 return fetch(`${API_BASE_URL}/filter_and_aggregate`, {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify(filterParams)
+                        body: JSON.stringify(filterParams),
+                        signal: globalAbortController.signal
                     })
                     .then(response => {
                         if (!response.ok) {
-                            console.error(`Failed to fetch heatmap data for metric: ${m.label}. Status: ${response.status}`);
                             return response.json().catch(() => response.text()).then(errBody => {
-                                throw new Error(`Workspace failed for ${m.label}: ${errBody.error || errBody || response.statusText}`);
+                                throw new Error(`Fetch failed for ${m.label}: ${errBody.error || errBody || response.statusText}`);
                             });
                         }
                         return response.json();
                     })
                     .then(data => {
-                        console.log(`Data received for metric: ${m.label}`, data ? data.slice(0, Math.min(data.length, 5)) : 'No data'); // Log first 5 items or 'No data'
                         if (data && data.length > 0) {
                             const values = data.map(d => d.value);
                             const minVal = Math.min(...values);
                             const maxVal = Math.max(...values);
-                            console.log(`Metric: ${m.label}, Min value: ${minVal}, Max value: ${maxVal}, Count: ${data.length}`);
-                        } else {
-                            console.log(`Metric: ${m.label}, No data entries received or empty array.`);
                         }
                         return { metric: m.label, pivotData: data };
                     })
                     .catch(error => {
+                        if (error.name === 'AbortError') {
+                            console.log(`Heatmap fetch for metric ${m.label} aborted.`);
+                            return { metric: m.label, pivotData: [], error: true, aborted: true };
+                        }
                         console.error(`Error fetching or processing data for metric ${m.label}:`, error);
                         return { metric: m.label, pivotData: [], error: true };
                     });
             }))
             .then(results => {
-                const validResults = results.filter(r => !r.error);
+                if (globalAbortController.signal.aborted) {
+                    console.log("Heatmap update cancelled before processing results.");
+                    reject(new DOMException("Operation aborted by user.", "AbortError"));
+                    return;
+                }
+                const validResults = results.filter(r => !r.error && !r.aborted);
                 const orderOption = document.getElementById("rowOrderSelect")?.value || "descending";
                 const comparator = orderOption === "descending" ? (a, b) => (b.value ?? -Infinity) - (a.value ?? -Infinity) : (a, b) => (a.value ?? Infinity) - (b.value ?? Infinity);
 
@@ -2295,26 +2340,21 @@
                             window.heatmapSortOrders[metricName] = [];
                             window.fullHeatmapData[metricName] = [];
                             if(metricName === 'Count') { window.heatmapCountSortOrder = []; }
-                            console.warn(`No pivotData (or empty array) for metric: ${metricName} after fetch.`);
                         }
                     } else {
-                        console.warn(`Invalid or missing pivotData structure for metric: ${metricName}`);
                         window.heatmapSortOrders[metricName] = [];
                         window.fullHeatmapData[metricName] = [];
                         if(metricName === 'Count') { window.heatmapCountSortOrder = []; }
                     }
                 });
-
-                console.log("updateHeatmap - All metric data fetched and processed for heatmap.");
-                console.log("window.fullHeatmapData (sample):", Object.fromEntries(Object.entries(window.fullHeatmapData).map(([k, v]) => [k, v.slice(0,3)])));
-                console.log("window.heatmapSortOrders (sample):", Object.fromEntries(Object.entries(window.heatmapSortOrders).map(([k, v]) => [k, v.slice(0,3)])));
-                if (window.heatmapCountSortOrder) {
-                    console.log("window.heatmapCountSortOrder (first 10):", window.heatmapCountSortOrder.slice(0, 10));
-                }
                 resolve(validResults);
             })
             .catch(error => {
-                console.error("Major error fetching one or more heatmap data components:", error);
+                if (error.name === 'AbortError') {
+                    console.log("Heatmap update process aborted.");
+                } else {
+                    console.error("Major error fetching one or more heatmap data components:", error);
+                }
                 window.fullHeatmapData = {}; window.heatmapSortOrders = {}; window.heatmapCountSortOrder = [];
                 reject(error);
             });
@@ -2626,7 +2666,7 @@
      }
 
     document.addEventListener('DOMContentLoaded', async () => {
-        tooltip = d3.select("#tooltip"); 
+        tooltip = d3.select("#tooltip");
 
         const fileInput = document.getElementById('fileInput');
         const downloadButton = document.getElementById('downloadButton');
@@ -2657,7 +2697,36 @@
         const acknowledgeBtn = document.getElementById('acknowledgeNewClustersBtn');
         const messageDivForAcknowledge = document.getElementById('reclusterMessage');
         const saveSelectionBtn = document.getElementById('saveSelectionBtn');
-        
+        const cancelLoadingBtn = document.getElementById('cancelLoadingBtn');
+        const showSankeyBtn = document.getElementById('showSankeyBtn');
+        const refreshSankeyBtn = document.getElementById('refreshSankeyBtn');
+        const sankeyDimSelectors = document.querySelectorAll('.sankey-dim-select');
+        const sankeyCard = document.getElementById('sankeyCard');
+
+
+        if (cancelLoadingBtn) {
+            cancelLoadingBtn.addEventListener('click', () => {
+                console.log("Cancel button clicked.");
+                if (globalAbortController) {
+                    globalAbortController.abort();
+                }
+                hideLoading();
+
+                const reclusterMessageDiv = document.getElementById('reclusterMessage');
+                if (reclusterMessageDiv) {
+                    reclusterMessageDiv.textContent = "Operation cancelled by user.";
+                    reclusterMessageDiv.style.color = "#757575";
+                } else {
+                    const treeInfoSpan = document.getElementById('treeInfoSpan');
+                    if (treeInfoSpan) {
+                        treeInfoSpan.textContent = "Operation cancelled.";
+                    }
+                }
+                cancelLoadingBtn.disabled = true;
+                console.log("Loading operation cancelled by user.");
+            });
+        }
+
         renderSavedItemsList();
 
         try {
@@ -2669,90 +2738,107 @@
             updateControlsState();
             updateRowOrderSelectState();
         } catch (error) {
-            console.error("Error during initial page load sequence:", error);
-            const dendroCard = document.getElementById('dendrogramCard');
-            if(dendroCard) {
-                dendroCard.innerHTML = `<p style="color:red; padding: 20px;">Error loading initial data: ${error.message || 'Unknown error'}. Please try uploading a CSV file.</p>`;
-                dendroCard.style.display = 'block';
+            if (error.name !== 'AbortError') {
+                console.error("Error during initial page load sequence:", error);
+                const dendroCardElement = document.getElementById('dendrogramCard'); // Renamed to avoid conflict
+                if(dendroCardElement) { // Use renamed variable
+                    dendroCardElement.innerHTML = `<p style="color:red; padding: 20px;">Error loading initial data: ${error.message || 'Unknown error'}. Please try uploading a CSV file.</p>`;
+                    dendroCardElement.style.display = 'block';
+                } else {
+                    alert(`Error loading initial data: ${error.message || 'Unknown error'}. Please try uploading a CSV file.`);
+                }
             } else {
-                alert(`Error loading initial data: ${error.message || 'Unknown error'}. Please try uploading a CSV file.`);
+                console.log("Initial page load aborted by user.");
             }
         } finally {
-            hideLoading();
+            if (!globalAbortController.signal.aborted) {
+                hideLoading();
+            }
         }
 
         if(fileInput) {
-            fileInput.addEventListener('change', function(event) {
+            fileInput.addEventListener('change', async function(event) {
                 const file = event.target.files[0];
                 if (file) {
                     showLoading();
                     const reader = new FileReader();
-                    reader.onload = function(e) {
+                    reader.onload = async function(e) {
                         const csvText = e.target.result;
-                        fetch(`${API_BASE_URL}/process_csv`, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ csv_text: csvText }),
-                        })
-                        .then(response => {
-                            if (!response.ok) {
-                                return response.json().catch(() => response.text()).then(err => {
-                                    let errorMsg = err.error || err || `Processing failed (${response.status})`;
-                                    throw new Error(errorMsg);
-                                });
+                        try {
+                            const processResponse = await fetch(`${API_BASE_URL}/process_csv`, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ csv_text: csvText }),
+                                signal: globalAbortController.signal
+                            });
+
+                            if (globalAbortController.signal.aborted) {
+                                throw new DOMException("Operation aborted by user.", "AbortError");
                             }
-                            return response.json();
-                        })
-                        .then(async (confirmationData) => {
+
+                            if (!processResponse.ok) {
+                                const err = await processResponse.json().catch(() => ({ error: processResponse.statusText }));
+                                let errorMsg = err.error || `Processing failed (${processResponse.status})`;
+                                throw new Error(errorMsg);
+                            }
+                            const confirmationData = await processResponse.json();
                             console.log('CSV processed successfully:', confirmationData.message);
                             protocolColorMap = {};
                             currentNewClusterIds.clear();
 
-                            try {
-                                updateLegend();
-                                await updateHeatmap();
-                                await loadInlineDendrogram();
-                                await updateTimeInfoDisplay();
-                                clearSidebarVisualization();
-                                if(isSidebarOpen) toggleSidebar(false);
-                                const localThresholdSlider = document.getElementById('thresholdSlider');
-                                if (localThresholdSlider && window.lastTreeRoot) {
-                                    requestAnimationFrame(() => { localThresholdSlider.dispatchEvent(new Event('input')); });
-                                }
-                                updateControlsState();
-                                updateRowOrderSelectState();
-                            } catch (loadError) {
-                                console.error("Error loading visualizations after file processing:", loadError);
-                                alert(`Error updating display after file processing: ${loadError.message}`);
-                                const dendroCardElem = document.getElementById('dendrogramCard');
-                                if(dendroCardElem) dendroCardElem.innerHTML = '<p style="color:red; padding: 20px;">Error updating display.</p>';
-                            } finally {
-                                hideLoading();
-                            }
-                        })
-                        .catch(error => {
-                            hideLoading();
-                            console.error('Error processing file or updating display:', error);
-                            alert(`Error: ${error.message}`);
-                            const dendroCardElem = document.getElementById('dendrogramCard');
-                            if(dendroCardElem) dendroCardElem.innerHTML = '<p style="color: red; text-align: center;">Could not process CSV data or update display.</p>';
-                            const timeInfoSpanElem = document.getElementById('timeInfoSpan');
-                            if(timeInfoSpanElem) timeInfoSpanElem.textContent = '';
-                            window.originalTreeData = null;
-                            window.lastTreeData = null;
-                            window.lastTreeRoot = null;
-                            window.fullHeatmapData = {};
-                            currentNewClusterIds.clear();
+                            if (globalAbortController.signal.aborted) throw new DOMException("Operation aborted by user.", "AbortError");
                             updateLegend();
+
+                            if (globalAbortController.signal.aborted) throw new DOMException("Operation aborted by user.", "AbortError");
+                            await updateHeatmap();
+
+                            if (globalAbortController.signal.aborted) throw new DOMException("Operation aborted by user.", "AbortError");
+                            await loadInlineDendrogram();
+
+                            if (globalAbortController.signal.aborted) throw new DOMException("Operation aborted by user.", "AbortError");
+                            await updateTimeInfoDisplay();
+
                             clearSidebarVisualization();
+                            if(isSidebarOpen) toggleSidebar(false);
+                            const localThresholdSlider = document.getElementById('thresholdSlider');
+                            if (localThresholdSlider && window.lastTreeRoot) {
+                                requestAnimationFrame(() => { localThresholdSlider.dispatchEvent(new Event('input')); });
+                            }
                             updateControlsState();
                             updateRowOrderSelectState();
-                        });
+
+                        } catch (error) {
+                            if (error.name === 'AbortError') {
+                                console.log("File processing and visualization update sequence aborted by user.");
+                            } else {
+                                console.error('Error processing file or updating display:', error);
+                                alert(`Error: ${error.message}`);
+                                const dendroCardElem = document.getElementById('dendrogramCard');
+                                if(dendroCardElem) dendroCardElem.innerHTML = '<p style="color: red; text-align: center;">Could not process CSV data or update display.</p>';
+                                const timeInfoSpanElem = document.getElementById('timeInfoSpan');
+                                if(timeInfoSpanElem) timeInfoSpanElem.textContent = '';
+                                window.originalTreeData = null;
+                                window.lastTreeData = null;
+                                window.lastTreeRoot = null;
+                                window.fullHeatmapData = {};
+                                currentNewClusterIds.clear();
+                                updateLegend();
+                                clearSidebarVisualization();
+                                updateControlsState();
+                                updateRowOrderSelectState();
+                            }
+                        } finally {
+                            if (!globalAbortController.signal.aborted) {
+                                hideLoading();
+                            }
+                        }
                     };
                     reader.onerror = function(e) {
                         console.error("Error reading file:", e);
                         alert("Error reading file.");
-                        hideLoading();
+                        if (!globalAbortController.signal.aborted) {
+                             hideLoading();
+                        }
                     };
                     reader.readAsText(file);
                 }
@@ -2762,7 +2848,7 @@
 
         if(downloadButton) {
             downloadButton.addEventListener('click', function() {
-                if (window.originalTreeData) { // Check if data has been loaded
+                if (window.originalTreeData) {
                     window.location.href = `${API_BASE_URL}/download_csv`;
                 } else {
                     alert("No processed data available to download. Please upload a CSV file first.");
@@ -2775,20 +2861,32 @@
                 showLoading();
                 try {
                     await updateHeatmap();
+                     if (globalAbortController.signal.aborted) throw new DOMException("Operation aborted by user.", "AbortError");
+
                     if (window.lastTreeData) {
                         showInlineDendrogram(window.lastTreeData, currentDendrogramHeight, currentNewClusterIds);
                     } else {
-                        await loadInlineDendrogram(); // If no tree data, try to load it
+                        await loadInlineDendrogram();
                     }
-                    highlightTreeClusters(new Set(clusterHighlightColors.keys())); // Re-apply highlights
+                     if (globalAbortController.signal.aborted) throw new DOMException("Operation aborted by user.", "AbortError");
+
+                    highlightTreeClusters(new Set(clusterHighlightColors.keys()));
                     const localThresholdSlider = document.getElementById('thresholdSlider');
-                    if (localThresholdSlider && window.lastTreeRoot) { // Ensure tree root is available
+                    if (localThresholdSlider && window.lastTreeRoot) {
                         requestAnimationFrame(() => { localThresholdSlider.dispatchEvent(new Event('input')); });
                     }
                 } catch (error) {
-                    console.error("Error applying filters and updating visualizations:", error);
-                    alert(`Error applying filters: ${error.message || 'Unknown error'}`);
-                } finally { hideLoading(); }
+                     if (error.name === 'AbortError') {
+                        console.log("Filter application aborted by user.");
+                    } else {
+                        console.error("Error applying filters and updating visualizations:", error);
+                        alert(`Error applying filters: ${error.message || 'Unknown error'}`);
+                    }
+                } finally {
+                    if (!globalAbortController.signal.aborted) {
+                         hideLoading();
+                    }
+                }
             });
         }
 
@@ -2799,26 +2897,25 @@
         if(resetSidebarBtn) {
             resetSidebarBtn.addEventListener('click', () => {
                 clearSidebarVisualization();
-                updateLegend(); // Reset legend to global
-                // No need to call updateHeatmap here as sidebar reset doesn't change main heatmap filters
+                updateLegend();
             });
         }
 
         if (sidebarFullscreenBtn) {
             sidebarFullscreenBtn.addEventListener('click', toggleSidebarFullscreen);
         }
-        
+
         if (saveSelectionBtn) {
             saveSelectionBtn.addEventListener('click', handleSaveSelection);
         }
 
         document.addEventListener('fullscreenchange', () => {
             if (!document.fullscreenElement && isSidebarFullscreen) {
-                cleanupFullscreenStyles(); 
+                cleanupFullscreenStyles();
                 if (sidebarCy) { setTimeout(() => { sidebarCy.resize(); sidebarCy.fit(null, 50); }, 400); }
-            } else if (document.fullscreenElement === sidebar && !isSidebarFullscreen) { // Re-entering
+            } else if (document.fullscreenElement === sidebar && !isSidebarFullscreen) {
                 isSidebarFullscreen = true;
-                sidebar.classList.add('fullscreen'); 
+                sidebar.classList.add('fullscreen');
                 legendContainer.classList.add('fullscreen-active');
                 document.body.classList.add('sidebar-fullscreen');
                 sidebarFullscreenBtn.innerHTML = '&#x274C;';
@@ -2835,7 +2932,7 @@
             sidebarSearchInput.addEventListener('input', filterSidebarTable);
         }
 
-        if(sidebarGoPageBtn) { // This listener was duplicated, ensuring only one correct version
+        if(sidebarGoPageBtn) {
             sidebarGoPageBtn.addEventListener('click', function () {
                 let pageInput = document.getElementById('sidebarCurrentPageInput');
                 let page = parseInt(pageInput.value, 10);
@@ -2847,12 +2944,12 @@
                         loadSidebarClusterTable(currentSidebarTableClusterId, page);
                     } else if (sidebarTableMode === 'edges') {
                         let edgeList = [];
-                        if (selectedNodeId && sidebarCy) { // Check selectedNodeId first
+                        if (selectedNodeId && sidebarCy) {
                             const node = sidebarCy.getElementById(selectedNodeId);
                             if (node && node.length > 0) {
                                 edgeList = node.connectedEdges().map(edge => ({ source: edge.data('source'), destination: edge.data('target'), protocol: edge.data('Protocol') }));
                             }
-                         } else if (selectedSidebarEdges.size > 0) { // Then check selectedSidebarEdges
+                         } else if (selectedSidebarEdges.size > 0) {
                             edgeList = Array.from(selectedSidebarEdges).map(key => {
                                 const parts = key.split('|');
                                 return { source: parts[0], destination: parts[1], protocol: parts[2] };
@@ -2886,9 +2983,9 @@
                 updateRowOrderSelectState();
                 if (window.lastTreeData) {
                     showInlineDendrogram(window.lastTreeData, currentDendrogramHeight, currentNewClusterIds);
-                    highlightTreeClusters(new Set(clusterHighlightColors.keys())); // Re-apply highlights
+                    highlightTreeClusters(new Set(clusterHighlightColors.keys()));
                     const localThresholdSlider = document.getElementById('thresholdSlider');
-                    requestAnimationFrame(() => { // Ensure slider update happens after DOM is stable
+                    requestAnimationFrame(() => {
                         if (localThresholdSlider) localThresholdSlider.dispatchEvent(new Event('input'));
                     });
                 }
@@ -2899,9 +2996,9 @@
             reorderTreeCheckbox.addEventListener('change', () => {
                 if (window.lastTreeData) {
                     showInlineDendrogram(window.lastTreeData, currentDendrogramHeight, currentNewClusterIds);
-                    highlightTreeClusters(new Set(clusterHighlightColors.keys())); // Re-apply highlights
+                    highlightTreeClusters(new Set(clusterHighlightColors.keys()));
                     const localThresholdSlider = document.getElementById('thresholdSlider');
-                    requestAnimationFrame(() => { // Ensure slider update
+                    requestAnimationFrame(() => {
                         if (localThresholdSlider) localThresholdSlider.dispatchEvent(new Event('input'));
                     });
                 }
@@ -2918,10 +3015,10 @@
                 const svgInstance = d3.select("#inlineDendrogramSvg");
                 const svgNodeInstance = svgInstance.node();
                 if (!svgNodeInstance) return;
-                const svgContentInstance = svgInstance.select("g"); // The main transformed group
-                const rootInstance = window.lastTreeRoot; // Root of the D3 hierarchy
-                const layoutHeightInstance = window.currentD3LayoutHeight; // The height used for d3.cluster().size
-                const treeLayoutWidthInstance = window.currentLayoutWidth; // The width for X positions
+                const svgContentInstance = svgInstance.select("g");
+                const rootInstance = window.lastTreeRoot;
+                const layoutHeightInstance = window.currentD3LayoutHeight;
+                const treeLayoutWidthInstance = window.currentLayoutWidth;
 
                 if (!layoutHeightInstance || layoutHeightInstance <= 0 || !rootInstance || svgContentInstance.empty() || treeLayoutWidthInstance === undefined) {
                     svgInstance.select("#threshold-bar").style("display", "none");
@@ -2929,21 +3026,19 @@
                 }
 
                 const physicalPercentageForBar = physicalValue / 100;
-                const thresholdLayoutYForBar = layoutHeightInstance * physicalPercentageForBar; // Y in layout coordinates
+                const thresholdLayoutYForBar = layoutHeightInstance * physicalPercentageForBar;
 
-                // Update node visual state based on threshold (graying out)
                 svgContentInstance.selectAll('.node').each(function(dNode) {
                     if (dNode && typeof dNode.structuralY === 'number' && isFinite(dNode.structuralY)) {
                         d3.select(this).classed('grayed-out', dNode.structuralY > thresholdLayoutYForBar + 1e-6);
                     } else {
-                        d3.select(this).classed('grayed-out', false); // Default if structuralY is invalid
+                        d3.select(this).classed('grayed-out', false);
                     }
                 });
 
-                // Update threshold bar position considering SVG zoom/pan
                 try {
-                    const transform = d3.zoomTransform(svgNodeInstance); // Get current zoom transform of the SVG
-                    const thresholdVisualY = ((thresholdLayoutYForBar + margin.top) * transform.k) + transform.y; // Apply transform
+                    const transform = d3.zoomTransform(svgNodeInstance);
+                    const thresholdVisualY = ((thresholdLayoutYForBar + margin.top) * transform.k) + transform.y;
                     const barX1 = (margin.left * transform.k) + transform.x;
                     const barX2 = (margin.left + treeLayoutWidthInstance) * transform.k + transform.x;
 
@@ -2953,12 +3048,11 @@
                     .attr("x1", barX1).attr("x2", barX2);
                 } catch (e) {
                     console.error("Error updating threshold bar position:", e);
-                    svgInstance.select("#threshold-bar").style("display", "none"); // Hide bar on error
+                    svgInstance.select("#threshold-bar").style("display", "none");
                 }
             });
 
-            // Trigger initial update if tree is already loaded
-             requestAnimationFrame(() => { // Ensure it runs after initial render potentially
+             requestAnimationFrame(() => {
                 if (window.lastTreeRoot) { thresholdSlider.dispatchEvent(new Event('input')); }
             });
         }
@@ -2970,7 +3064,7 @@
         if (resetGroupingBtn) {
             resetGroupingBtn.addEventListener('click', resetGroupingAndRedraw);
         }
-        
+
         const mainGoPageBtn = document.getElementById('goPageBtn');
         if (mainGoPageBtn) {
             mainGoPageBtn.addEventListener('click', function() {
@@ -2988,7 +3082,6 @@
         const mainTableSearchInput = document.getElementById('tableSearchInput');
         if (mainTableSearchInput) {
             mainTableSearchInput.addEventListener('input', function() {
-                // Placeholder for main table search, if implemented
                 console.log("Main table search not implemented in this example.");
             });
         }
@@ -2996,15 +3089,14 @@
         if (acknowledgeBtn && messageDivForAcknowledge) {
             acknowledgeBtn.addEventListener('click', () => {
                 console.log("New clusters acknowledged by user.");
-                currentNewClusterIds.clear(); // Clear the set of new IDs
+                currentNewClusterIds.clear();
 
-                acknowledgeBtn.style.display = 'none'; // Hide button
-                messageDivForAcknowledge.textContent = 'Changes acknowledged.'; 
-                messageDivForAcknowledge.style.color = '#333'; // Reset color
+                acknowledgeBtn.style.display = 'none';
+                messageDivForAcknowledge.textContent = 'Changes acknowledged.';
+                messageDivForAcknowledge.style.color = '#333';
 
-                // Redraw the dendrogram without the new cluster highlighting
                 if (window.lastTreeData) {
-                    showInlineDendrogram(window.lastTreeData, currentDendrogramHeight, currentNewClusterIds); // Pass empty set
+                    showInlineDendrogram(window.lastTreeData, currentDendrogramHeight, currentNewClusterIds);
                     const thresholdSliderElem = document.getElementById('thresholdSlider');
                     if (thresholdSliderElem && window.lastTreeRoot) {
                         requestAnimationFrame(() => { thresholdSliderElem.dispatchEvent(new Event('input')); });
@@ -3015,31 +3107,30 @@
             });
         }
 
-        // --- START: MODIFIED/ADDED Listeners for Louvain IP Community Graph ---
-        const togglePacketBtn = document.getElementById('showPacketSimilarityBtn'); // This ID is for "Show Community IP Graph" button
+        const togglePacketBtn = document.getElementById('showPacketSimilarityBtn');
         if (togglePacketBtn) {
             togglePacketBtn.addEventListener('click', function() {
-                const card = document.getElementById('packetSimilarityCard'); // This is the card for the IP Community Graph
-                if (!card) { console.error("packetSimilarityCard not found!"); return; }
+                const cardElement = document.getElementById('packetSimilarityCard'); // Renamed to avoid conflict
+                if (!cardElement) { console.error("packetSimilarityCard not found!"); return; } // Use renamed variable
 
-                if (card.style.display === 'none' || card.style.display === '') {
-                    if (!window.originalTreeData && !window.lastTreeData) { // Check if any CSV data is loaded
+                if (cardElement.style.display === 'none' || cardElement.style.display === '') {
+                    if (!window.originalTreeData && !window.lastTreeData) {
                         alert("Please upload and process a CSV file first.");
                         return;
                     }
-                    card.style.display = 'block';
-                    this.textContent = 'Hide Community IP Graph'; // Update button text
-                    
+                    cardElement.style.display = 'block';
+                    this.textContent = 'Hide Community IP Graph';
+
                     if (typeof fetchAndRenderLouvainIpGraph === 'function') {
-                        if (louvainIpCy === null) { // Only fetch and render if graph isn't initialized
+                        if (louvainIpCy === null) {
                             fetchAndRenderLouvainIpGraph();
                         }
                     } else {
                         console.error("fetchAndRenderLouvainIpGraph function not defined.");
                     }
                 } else {
-                    card.style.display = 'none';
-                    this.textContent = 'Show Community IP Graph'; // Update button text
+                    cardElement.style.display = 'none';
+                    this.textContent = 'Show Community IP Graph';
                 }
             });
         }
@@ -3058,19 +3149,94 @@
         const ipGraphLayoutSelect = document.getElementById('ipGraphLayoutSelect');
         if (ipGraphLayoutSelect) {
             ipGraphLayoutSelect.addEventListener('change', () => {
-                if (louvainIpCy) { // Check if the Cytoscape instance exists
+                if (window.louvainIpCy) {
                     const selectedLayout = ipGraphLayoutSelect.value;
-                    let layoutOptions = {
-                        name: selectedLayout,
-                        idealEdgeLength: 120, nodeRepulsion: node => node.isParent() ? 800000 : 40000,
-                        edgeElasticity: 100, gravity: 60, numIter: 1500,
-                        fit: true, padding: 50, animate: true, animationDuration: 600,
-                        quality: "default", randomize: true, tile: true, nodeSeparation: 75, packComponents: true
-                    };
-                    louvainIpCy.layout(layoutOptions).run();
+                    let layoutOptions;
+                    console.log(`Changing IP Graph layout to: ${selectedLayout}`);
+
+                    switch (selectedLayout) {
+                        case 'cose':
+                            layoutOptions = {
+                                name: 'cose',
+                                idealEdgeLength: 100,
+                                nodeRepulsion: node => 400000,
+                                edgeElasticity: edge => 100,
+                                numIter: 1000,
+                                gravity: 80,
+                                fit: true,
+                                padding: 50,
+                                animate: true,
+                                animationDuration: 800,
+                                randomize: false
+                            };
+                            break;
+                        case 'circle':
+                            layoutOptions = { name: 'circle', padding: 30, fit: true, animate: true, animationDuration: 500 };
+                            break;
+                        case 'grid':
+                            layoutOptions = { name: 'grid', padding: 30, fit: true, animate: true, animationDuration: 500 };
+                            break;
+                        case 'preset':
+                            if (window.louvainIpCy.nodes().every(n => n.data('x_original') !== undefined && n.data('y_original') !== undefined)) {
+                                layoutOptions = {
+                                    name: 'preset',
+                                    positions: n => ({ x: n.data('x_original'), y: n.data('y_original') }),
+                                    fit: true,
+                                    padding: 50,
+                                    animate: true,
+                                    animationDuration: 600
+                                };
+                            } else {
+                                console.warn("Preset layout chosen, but original_x/y not found for all nodes. Applying 'cose'.");
+                                layoutOptions = { name: 'cose', fit: true, padding: 50, animate: true, animationDuration: 800, randomize: true };
+                            }
+                            break;
+                        default:
+                            layoutOptions = { name: 'cose', fit: true, padding: 50, animate: true, animationDuration: 800, randomize: true };
+                    }
+                    window.louvainIpCy.layout(layoutOptions).run();
                 }
             });
         }
+        
+        if (showSankeyBtn) {
+            showSankeyBtn.addEventListener('click', function() {
+                if (!sankeyCard) { console.error("sankeyCard not found!"); return; }
+
+                if (sankeyCard.style.display === 'none' || sankeyCard.style.display === '') {
+                    if (!window.originalTreeData && !window.lastTreeData && (!globalCy || globalCy.nodes().length === 0)) {
+                        alert("Please upload and process a CSV file first to generate data for the Sankey diagram.");
+                        return;
+                    }
+                    sankeyCard.style.display = 'block';
+                    this.textContent = 'Hide Sankey Diagram';
+                    updateSankeyDimensionOptions(); 
+                    fetchAndRenderSankeyDiagram();
+
+                } else {
+                    sankeyCard.style.display = 'none';
+                    this.textContent = 'Show Sankey Diagram';
+                }
+            });
+        }
+
+        if (refreshSankeyBtn) {
+            refreshSankeyBtn.addEventListener('click', () => {
+                updateSankeyDimensionOptions(); 
+                fetchAndRenderSankeyDiagram();
+            });
+        }
+
+        sankeyDimSelectors.forEach(selector => {
+            selector.addEventListener('change', () => {
+                updateSankeyDimensionOptions(); 
+                const sankeyCardElement = document.getElementById('sankeyCard'); 
+                if (sankeyCardElement && sankeyCardElement.style.display !== 'none') {
+                     fetchAndRenderSankeyDiagram();
+                }
+            });
+        });
+        updateSankeyDimensionOptions();
 
     }); // End of DOMContentLoaded
 
@@ -4372,8 +4538,8 @@
 
     function loadInlineDendrogram() {
         console.log("Attempting to load inline dendrogram data...");
-        currentNewClusterIds.clear(); // Reset for a fresh load scenario
-        return fetch(`${API_BASE_URL}/hierarchical_clusters`)
+        currentNewClusterIds.clear();
+        return fetch(`${API_BASE_URL}/hierarchical_clusters`, { signal: globalAbortController.signal })
             .then(response => {
                 if (!response.ok) {
                     return response.json().catch(() => response.text())
@@ -4385,29 +4551,27 @@
                 return response.json();
             })
             .then(data => {
+                if (globalAbortController.signal.aborted) {
+                    console.log("Dendrogram loading aborted before processing data.");
+                    throw new DOMException("Operation aborted by user.", "AbortError");
+                }
                 console.log("Dendrogram data received:", data);
                 if (Object.keys(data).length === 0 || (data.error)) {
-                    console.error("Empty or error data received for dendrogram:", data.error || "Empty object");
                     window.originalTreeData = null;
                     window.lastTreeData = null;
                     window.originalLeafCount = 0;
-                    showInlineDendrogram(null, undefined, currentNewClusterIds); // Pass empty set
+                    showInlineDendrogram(null, undefined, currentNewClusterIds);
                 } else {
                     try {
                         window.originalTreeData = structuredClone(data);
-                        console.log("Stored original tree data.");
                         const originalRoot = d3.hierarchy(window.originalTreeData);
                         window.originalLeafCount = originalRoot.leaves().length;
-                        console.log(`Stored original leaf count: ${window.originalLeafCount}`);
                     } catch (cloneError) {
-                        console.error("Error cloning original tree data:", cloneError);
                         window.originalTreeData = data;
                         try {
                             const originalRoot = d3.hierarchy(window.originalTreeData);
                             window.originalLeafCount = originalRoot.leaves().length;
-                            console.warn(`Stored original leaf count from shallow copy: ${window.originalLeafCount}`);
                         } catch (countError) {
-                            console.error("Could not count leaves even from shallow copy.", countError);
                             window.originalLeafCount = 0;
                         }
                     }
@@ -4419,17 +4583,20 @@
                     if(thresholdValue) thresholdValue.textContent = '100%';
                     const reclusterMsg = document.getElementById('reclusterMessage');
                     if (reclusterMsg) reclusterMsg.textContent = '';
-                    console.log("Reset grouping state after loading new original dendrogram data.");
-                    showInlineDendrogram(data, undefined, currentNewClusterIds); // Pass empty set
+                    showInlineDendrogram(data, undefined, currentNewClusterIds);
                 }
                 return Promise.resolve();
             })
             .catch(err => {
-                console.error("Failed to load or render inline dendrogram:", err);
+                if (err.name === 'AbortError') {
+                    console.log("Dendrogram loading was aborted.");
+                } else {
+                    console.error("Failed to load or render inline dendrogram:", err);
+                }
                 window.originalTreeData = null;
                 window.lastTreeData = null;
                 window.originalLeafCount = 0;
-                showInlineDendrogram(null, undefined, currentNewClusterIds); // Pass empty set on error
+                showInlineDendrogram(null, undefined, currentNewClusterIds);
                 return Promise.reject(err);
             });
     }
@@ -4523,11 +4690,9 @@
         const inputValue = resolutionInput.value.trim();
 
         if (inputValue === "") {
-            resolution = 2.5; // Default resolution
-            console.log("Resolution input is empty, using default: 2.5");
+            resolution = 2.5;
         } else {
             resolution = parseFloat(inputValue);
-            console.log(`Using user-provided resolution: ${resolution}`);
         }
 
         if (isNaN(resolution) || resolution <= 0) {
@@ -4541,14 +4706,14 @@
         messageDiv.textContent = "Applying resolution and reclustering...";
         messageDiv.style.color = '#333';
         if (acknowledgeBtn) acknowledgeBtn.style.display = 'none';
-        if (treeInfoSpan) treeInfoSpan.textContent = ''; // Clear previous info
+        if (treeInfoSpan) treeInfoSpan.textContent = '';
         console.log(`Requesting recluster with resolution: ${resolution}`);
         showLoading();
 
         previousClusterIdsBeforeRecluster.clear();
-        if (window.originalTreeData) { // Check if there's any original data to get IDs from
+        if (window.originalTreeData) {
             try {
-                const oldRoot = d3.hierarchy(window.originalTreeData); // Use originalTreeData
+                const oldRoot = d3.hierarchy(window.originalTreeData);
                 oldRoot.leaves().forEach(leaf => {
                     if (leaf.data && leaf.data.cluster_id !== undefined) {
                         previousClusterIdsBeforeRecluster.add(String(leaf.data.cluster_id));
@@ -4556,13 +4721,15 @@
                 });
             } catch (e) {
                 console.warn("Could not get previous cluster IDs from originalTreeData:", e);
-                // Proceeding without previous IDs if originalTreeData was problematic
             }
         }
 
-
         try {
-            const response = await fetch(`${API_BASE_URL}/hierarchical_clusters?resolution=${resolution}`);
+            const response = await fetch(`${API_BASE_URL}/hierarchical_clusters?resolution=${resolution}`, { signal: globalAbortController.signal });
+            if (globalAbortController.signal.aborted) {
+                console.log("Recluster fetch completed but operation was aborted before processing.");
+                throw new DOMException("Operation aborted by user.", "AbortError");
+            }
             if (!response.ok) {
                 const errBody = await response.json().catch(() => response.text());
                 throw new Error(errBody.error || errBody || `HTTP error ${response.status}`);
@@ -4570,27 +4737,31 @@
             const treeData = await response.json();
             console.log("Reclustered tree data received:", treeData);
 
-            // Update originalTreeData with the new structure from re-clustering
+            if (globalAbortController.signal.aborted) {
+                console.log("Reclustering aborted before updating heatmap and dendrogram.");
+                throw new DOMException("Operation aborted by user.", "AbortError");
+            }
+
             window.originalTreeData = structuredClone(treeData);
             const newOriginalRoot = d3.hierarchy(window.originalTreeData);
-            window.originalLeafCount = newOriginalRoot.leaves().length; // Update original leaf count
+            window.originalLeafCount = newOriginalRoot.leaves().length;
 
-            // Fetch new heatmap data as clustering might have changed cluster IDs and their compositions
-            await updateHeatmap(); // This is crucial
+            await updateHeatmap();
 
-            // Reset grouping state as this is a fresh tree structure
+            if (globalAbortController.signal.aborted) {
+                throw new DOMException("Operation aborted by user.", "AbortError");
+            }
             window.currentGroupingApplied = false;
-            window.lastAppliedThreshold = 100; // Reset display threshold logic
+            window.lastAppliedThreshold = 100;
             const thresholdSlider = document.getElementById('thresholdSlider');
             const thresholdValueSpan = document.getElementById('thresholdValue');
-            if(thresholdSlider) thresholdSlider.value = 100; // Reset slider visuals
+            if(thresholdSlider) thresholdSlider.value = 100;
             if(thresholdValueSpan) thresholdValueSpan.textContent = '100%';
             
-            updateControlsState(); // Update button states based on new tree
+            updateControlsState();
 
-            // Determine new cluster IDs for highlighting
             const currentClusterIdsFromNewTree = new Set();
-            const rootOfNewTree = d3.hierarchy(treeData); // Use the newly fetched treeData
+            const rootOfNewTree = d3.hierarchy(treeData);
             rootOfNewTree.leaves().forEach(leaf => {
                 if (leaf.data && leaf.data.cluster_id !== undefined) {
                     currentClusterIdsFromNewTree.add(String(leaf.data.cluster_id));
@@ -4600,13 +4771,12 @@
             const newIdsForThisOperation = new Set(
                 [...currentClusterIdsFromNewTree].filter(id => !previousClusterIdsBeforeRecluster.has(id))
             );
-            currentNewClusterIds = newIdsForThisOperation; // Update global set of new IDs for this operation
+            currentNewClusterIds = newIdsForThisOperation;
 
-            // Count leaves in the currently displayed tree (which is treeData now)
             let currentLeafDisplayCount = 0;
-            (function countLeaves(node) { // IIFE to count leaves in the current tree structure
+            (function countLeaves(node) {
                 if (!node || typeof node !== 'object') return;
-                if ((!node.children || node.children.length === 0) && node.id !== "empty_root" && node.id !== "empty_root_no_data" && node.id !== "error_root" && node.id !== "error_scipy_tree" ) { // Check it's a leaf and not an error/empty node
+                if ((!node.children || node.children.length === 0) && node.id !== "empty_root" && node.id !== "empty_root_no_data" && node.id !== "error_root" && node.id !== "error_scipy_tree" ) {
                     if(node.cluster_id !== undefined && node.cluster_id !== null) currentLeafDisplayCount++;
                 } else if (node.children) {
                     node.children.forEach(countLeaves);
@@ -4615,11 +4785,9 @@
             
             if (currentNewClusterIds.size > 0) {
                 messageDiv.textContent = `Reclustering complete. ${currentLeafDisplayCount} leaf clusters found (${currentNewClusterIds.size} new).`;
-                messageDiv.style.color = '#e53e3e'; // Highlight that there are new clusters
+                messageDiv.style.color = '#e53e3e';
                 if (acknowledgeBtn) acknowledgeBtn.style.display = 'inline-block';
             } else if (previousClusterIdsBeforeRecluster.size > 0 && currentClusterIdsFromNewTree.size !== previousClusterIdsBeforeRecluster.size) {
-                // This case means the number of clusters changed, but none are "new" by ID comparison
-                // (e.g. some old ones disappeared, some new ones appeared but their IDs were recycled or already seen)
                 messageDiv.textContent = `Reclustering complete. ${currentLeafDisplayCount} leaf clusters found. Structure changed.`;
                 messageDiv.style.color = '#333';
                 if (acknowledgeBtn) acknowledgeBtn.style.display = 'none';
@@ -4630,31 +4798,35 @@
                 if (acknowledgeBtn) acknowledgeBtn.style.display = 'none';
             }
 
-            showInlineDendrogram(treeData, currentDendrogramHeight, currentNewClusterIds); // Pass the new IDs
-            resetInlineZoom(); // Optional: fit view to new tree
-            updateLegend(); // Update legend as cluster compositions might have changed protocol distributions
-            clearSidebarVisualization(); // Clear sidebar as old selections are invalid for new tree
+            showInlineDendrogram(treeData, currentDendrogramHeight, currentNewClusterIds);
+            resetInlineZoom();
+            updateLegend();
+            clearSidebarVisualization();
 
-            // Ensure threshold bar is updated based on the new tree
             const thresholdSliderElem = document.getElementById('thresholdSlider');
-            if (thresholdSliderElem && window.lastTreeRoot) { // Check window.lastTreeRoot which is set by showInlineDendrogram
+            if (thresholdSliderElem && window.lastTreeRoot) {
                 requestAnimationFrame(() => { thresholdSliderElem.dispatchEvent(new Event('input')); });
             }
 
         } catch (err) {
-            console.error("Error during recluster/redraw:", err);
-            messageDiv.textContent = `Error: ${err.message || "Failed to recluster."}`;
-            messageDiv.style.color = '#e53e3e';
-            if (acknowledgeBtn) acknowledgeBtn.style.display = 'none';
-            if (treeInfoSpan) treeInfoSpan.textContent = ''; // Clear info on error
-            // Potentially reset or clear tree display on error
-            window.originalTreeData = null; // Invalidate old data
-            window.lastTreeData = null;
-            window.originalLeafCount = 0;
-            currentNewClusterIds.clear();
-            showInlineDendrogram(null, currentDendrogramHeight, currentNewClusterIds); // Show an empty/error state for dendrogram
+            if (err.name === 'AbortError') {
+                console.log("Recluster and redraw operation aborted.");
+            } else {
+                console.error("Error during recluster/redraw:", err);
+                messageDiv.textContent = `Error: ${err.message || "Failed to recluster."}`;
+                messageDiv.style.color = '#e53e3e';
+                if (acknowledgeBtn) acknowledgeBtn.style.display = 'none';
+                if (treeInfoSpan) treeInfoSpan.textContent = '';
+                window.originalTreeData = null;
+                window.lastTreeData = null;
+                window.originalLeafCount = 0;
+                currentNewClusterIds.clear();
+                showInlineDendrogram(null, currentDendrogramHeight, currentNewClusterIds);
+            }
         } finally {
-            hideLoading();
+            if (!globalAbortController.signal.aborted) {
+                hideLoading();
+            }
         }
     }
 
@@ -5024,174 +5196,416 @@
     }
 
     async function fetchAndRenderLouvainIpGraph() {
-        const loadingIndicator = document.getElementById('packetSimilarityLoading'); // ID of your loading div
-        const graphContainerDiv = document.getElementById('louvain-ip-graph-container'); // ID of the div for Cytoscape
+        const graphLoadingIndicator = document.getElementById('packetSimilarityLoading');
+        const graphContainerDiv = document.getElementById('louvain-ip-graph-container');
+        const ipGraphLayoutSelect = document.getElementById('ipGraphLayoutSelect');
 
-        if (!loadingIndicator || !graphContainerDiv) {
+        if (!graphLoadingIndicator || !graphContainerDiv) {
             console.error("Required HTML elements for IP graph are missing.");
             return;
         }
 
-        loadingIndicator.style.display = 'flex';
-        if (louvainIpCy) { // louvainIpCy is your global Cytoscape instance variable
-            louvainIpCy.destroy();
-            louvainIpCy = null;
+        showLoading();
+        graphLoadingIndicator.style.display = 'flex';
+
+        if (window.louvainIpCy) {
+            window.louvainIpCy.destroy();
+            window.louvainIpCy = null;
         }
-        graphContainerDiv.innerHTML = ''; // Clear previous content
+        graphContainerDiv.innerHTML = '';
 
         try {
-            const response = await fetch(`${API_BASE_URL}/louvain_ip_graph_data`); // Call the new backend endpoint
+            const response = await fetch(`${API_BASE_URL}/louvain_ip_graph_data`, { signal: globalAbortController.signal });
+
+            if (globalAbortController.signal.aborted) {
+                throw new DOMException("Operation aborted by user.", "AbortError");
+            }
 
             if (!response.ok) {
-                const errData = await response.json().catch(() => ({error: "Failed to fetch Louvain IP graph data. Server returned an error."}));
+                const errData = await response.json().catch(() => ({ error: "Failed to fetch Louvain IP graph data." }));
                 throw new Error(errData.error || `HTTP error ${response.status}`);
             }
             const graphData = await response.json();
 
-            // You can use packetSimilarityDataCache or rename it, e.g., louvainIpGraphDataCache = graphData;
-
             if (!graphData || !graphData.nodes || graphData.nodes.length === 0) {
-                graphContainerDiv.innerHTML = '<p style="text-align:center; padding-top:50px;">No IP graph data to display. Ensure data is processed and contains multiple IPs/clusters.</p>';
+                graphContainerDiv.innerHTML = '<p style="text-align:center; padding-top:50px;">No IP graph data to display.</p>';
                 return;
             }
-
-            const parentNodeElements = [];
-            const uniqueClusterIds = new Set(graphData.nodes.map(n => n.data.clusterId).filter(id => id && id !== 'N/A'));
-            uniqueClusterIds.forEach(clusterId => {
-                parentNodeElements.push({
-                    data: { id: `cluster_parent_${clusterId}`, label: `Cluster ${clusterId}` },
-                    classes: 'cluster-parent'
-                });
-            });
-
-            louvainIpCy = cytoscape({
+            
+            window.louvainIpCy = cytoscape({
                 container: graphContainerDiv,
                 elements: {
-                    nodes: graphData.nodes.concat(parentNodeElements),
+                    nodes: graphData.nodes,
                     edges: graphData.edges
                 },
-                style: [
-                    { // General style for IP nodes (non-parents)
+                style: [ // Using the simplified style from the previous step
+                    {
                         selector: 'node',
                         style: {
-                            'background-color': '#888', // Default, will be overridden by cluster/classification color
-                            'label': 'data(label)',    // Display node ID (IP address)
-                            'width': ele => Math.max(10, Math.min(50, (ele.data('packet_count') || 10) / 20 + 5)),
-                            'height': ele => Math.max(10, Math.min(50, (ele.data('packet_count') || 10) / 20 + 5)),
-                            'font-size': '9px',
-                            'color': '#000',
-                            'text-valign': 'bottom',
-                            'text-halign': 'center',
-                            'text-margin-y': 1,
-                            'border-width': ele => (ele.data('classification') === 'Internal' ? 1.5 : 0.5),
-                            'border-color': ele => (ele.data('classification') === 'Internal' ? '#3182ce' : '#718096'),
-                            'shape': ele => (ele.data('classification') === 'Internal' ? 'square' : 'ellipse')
+                            'background-color': 'data(node_color)', 
+                            'width': 25, 
+                            'height': 25, 
+                            'shape': 'ellipse'
                         }
                     },
-                    { // Style for parent (cluster) nodes - these will override the 'node' style above for parent nodes
-                        selector: '.cluster-parent', // Selects nodes with the class 'cluster-parent'
-                        style: {
-                            'background-color': '#f0f8ff', // Light alice blue
-                            'label': 'data(label)',         // e.g., "Cluster 123"
-                            'font-size': '12px',
-                            'font-weight': 'bold',
-                            'color': '#333',
-                            'text-valign': 'top',
-                            'text-halign': 'center',
-                            'border-width': 1.5,
-                            'border-color': '#adb5bd',
-                            'shape': 'roundrectangle',
-                            'padding': '20px', // Space around children
-                            'ghost': 'yes',    // Enable ghosting for better performance with compound nodes
-                            'ghost-offset-x': 0,
-                            'ghost-offset-y': 0,
-                            'ghost-opacity': 0.1
-                        }
-                    },
-                    { // Style for edges
+                    {
                         selector: 'edge',
                         style: {
-                            'width': ele => Math.max(0.5, Math.min(8, (ele.data('packet_count') || 1) / 100 + 0.5)),
-                            'line-color': '#b3b3b3',
-                            'target-arrow-color': '#b3b3b3',
-                            'target-arrow-shape': 'triangle',
-                            'curve-style': 'bezier'
+                            'line-color': '#888', 
+                            'width': 2
                         }
                     }
                 ],
+                layout: {
+                    name: 'preset',
+                    fit: true,
+                    padding: 50,
+                    animate: false
+                },
+                minZoom: 0.05,
+                maxZoom: 5,
+                wheelSensitivity: 0.2,
+                autoungrabify: true, 
             });
+            
+            window.louvainIpCy.fit(undefined, 50);
 
-            louvainIpCy.nodes().filter(node => !node.hasClass('cluster-parent')).forEach(node => {
-                const clusterId = node.data('clusterId');
-                if (clusterId && clusterId !== 'N/A') {
-                    node.move({ parent: `cluster_parent_${clusterId}` });
-                    let color = protocolColorMap[clusterId]; // protocolColorMap is global
-                    if (!color) {
-                        let hash = 0;
-                        for (let i = 0; i < clusterId.length; i++) {
-                            hash = clusterId.charCodeAt(i) + ((hash << 5) - hash);
-                        }
-                        const c = (hash & 0x00FFFFFF).toString(16).toUpperCase();
-                        color = "#" + "00000".substring(0, 6 - c.length) + c;
-                        protocolColorMap[clusterId] = color;
-                    }
-                    node.style('background-color', color);
+            const tooltip = d3.select("#tooltip");
+
+            window.louvainIpCy.removeListener('mouseover mouseout click'); 
+
+            window.louvainIpCy.on('mouseover', 'node', (event) => {
+                const el = event.target;
+                const data = el.data();
+
+                let content = `<b>IP:</b> ${data.label || data.id}`; 
+                if (data.is_attacker) {
+                    content += ` <strong style="color:#FF3333;">(Attacker)</strong>`;
+                }
+                content += `<br><b>Community:</b> ${data.clusterId || 'N/A'}`;
+                if (data.is_community_anomalous && !data.is_attacker) {
+                    content += ` <strong style="color:orange;">(In Anomalous Community)</strong>`;
+                }
+                content += `<br><b>Class:</b> ${data.classification || 'N/A'}`;
+                content += `<br><b>Total Pkts (Graph):</b> ${data.packet_count || 0}`;
+
+                if (data.features_for_pca) {
+                    content += `<br>--- PCA Input Features ---`;
+                    content += `<br>Outgoing Pkts: ${data.features_for_pca.outgoing_packets}`;
+                    content += `<br>Incoming Pkts: ${data.features_for_pca.incoming_packets}`;
+                    content += `<br>Outgoing Bytes: ${data.features_for_pca.outgoing_bytes}`;
+                    content += `<br>Incoming Bytes: ${data.features_for_pca.incoming_bytes}`;
+                    content += `<br>Distinct Dests: ${data.features_for_pca.distinct_destinations}`;
+                    content += `<br>Distinct Srcs (contacted by): ${data.features_for_pca.distinct_sources_contacted_by}`;
+                    content += `<br>Src Sessions: ${data.features_for_pca.source_sessions}`;
+                    content += `<br>Dest Sessions: ${data.features_for_pca.destination_sessions}`;
+                }
+                
+                if (content && event.originalEvent) { 
+                    tooltip.html(content).style("display", "block")
+                        .style("left", (event.originalEvent.pageX + 10) + "px")
+                        .style("top", (event.originalEvent.pageY - 15) + "px");
+                } else if (content && event.renderedPosition) { 
+                     const graphContainerRect = graphContainerDiv.getBoundingClientRect();
+                     tooltip.html(content).style("display", "block")
+                        .style("left", (graphContainerRect.left + event.renderedPosition.x + window.scrollX + 10) + "px")
+                        .style("top", (graphContainerRect.top + event.renderedPosition.y + window.scrollY - 15) + "px");
                 } else {
-                    node.style('background-color', DEFAULT_UNKNOWN_COLOR);
+                    tooltip.style("display", "none");
+                }
+            });
+            
+            window.louvainIpCy.on('mouseover', 'edge', (event) => {
+                const el = event.target;
+                const data = el.data();
+                let content = `<b>Source:</b> ${data.source}`;
+                content += `<br><b>Target:</b> ${data.target}`;
+                content += `<br><b>Packets:</b> ${data.packet_count || 0}`;
+                content += `<br><b>Total Bytes:</b> ${data.total_length || 0}`;
+                 if (content && event.originalEvent) { 
+                    tooltip.html(content).style("display", "block")
+                        .style("left", (event.originalEvent.pageX + 10) + "px")
+                        .style("top", (event.originalEvent.pageY - 15) + "px");
+                } else if (content && event.renderedPosition) {
+                     const graphContainerRect = graphContainerDiv.getBoundingClientRect();
+                     tooltip.html(content).style("display", "block")
+                        .style("left", (graphContainerRect.left + event.renderedPosition.x + window.scrollX + 10) + "px")
+                        .style("top", (graphContainerRect.top + event.renderedPosition.y + window.scrollY - 15) + "px");
+                } else {
+                    tooltip.style("display", "none");
                 }
             });
 
-            const selectedLayoutName = document.getElementById('ipGraphLayoutSelect')?.value || 'cose';
-            louvainIpCy.layout({
-                name: selectedLayoutName, idealEdgeLength: 120,
-                nodeRepulsion: node => node.isParent() ? 800000 : 40000,
-                edgeElasticity: 100, gravity: 60, numIter: 1500,
-                fit: true, padding: 50, animate: true, animationDuration: 600,
-                quality: "default", randomize: true, tile: true, nodeSeparation: 75, packComponents: true
-            }).run();
-
-            const tooltip = d3.select("#tooltip"); // Ensure global tooltip is used
-            louvainIpCy.elements().unbind('mouseover mouseout click');
-            louvainIpCy.elements().on('mouseover', (event) => {
-                const el = event.target;
-                if (el.hasClass('cluster-parent')) return;
-                const data = el.data();
-                let content = `<b>IP:</b> ${data.label || data.id}`;
-                content += `<br><b>Cluster:</b> ${data.clusterId || 'N/A'}`;
-                content += `<br><b>Class:</b> ${data.classification || 'N/A'}`;
-                content += `<br><b>Packets:</b> ${data.packet_count || 0}`;
-                tooltip.style("display", "block").html(content)
-                    .style("left", (event.originalEvent.pageX + 10) + "px")
-                    .style("top", (event.originalEvent.pageY - 15) + "px");
+            window.louvainIpCy.on('mouseout', 'node, edge', (event) => { 
+                tooltip.style("display", "none");
             });
-            louvainIpCy.elements().on('mouseout', () => { tooltip.style("display", "none"); });
-            louvainIpCy.on('click', 'node[!$id^="cluster_parent_"]', function(event){ // Only non-parent nodes
+
+            window.louvainIpCy.on('click', 'node', function(event) {
                 const node = event.target;
-                console.log("Clicked IP Node in Main Graph:", node.id(), "Data:", node.data());
-                if(sidebarCy) { // Interaction with sidebar graph
-                    const sidebarNode = sidebarCy.getElementById(node.id());
-                    if(sidebarNode.length > 0) {
-                        toggleSidebar(true); sidebarNode.trigger('click');
-                        sidebarCy.animate({ fit: { eles: sidebarNode, padding: 100 } }, { duration: 400 });
+                if (window.sidebarCy) {
+                    const sidebarNode = window.sidebarCy.getElementById(node.id());
+                    if (sidebarNode.length > 0) {
+                        toggleSidebar(true);
+                        sidebarNode.trigger('click');
+                        window.sidebarCy.animate({ fit: { eles: sidebarNode, padding: 100 } }, { duration: 400 });
                     } else {
                         const clusterToLoad = node.data('clusterId');
-                        if(clusterToLoad && clusterToLoad !== 'N/A') {
-                            const highlightColor = clusterHighlightColors.get(clusterToLoad) || generateUniqueHighlightColor();
-                            if(!clusterHighlightColors.has(clusterToLoad)) clusterHighlightColors.set(clusterToLoad, highlightColor);
-                            visualizeClusterInSidebar(clusterToLoad, highlightColor, node.data('clusterAnomaly') === 'anomaly')
-                                .then(() => { /* ... further actions if needed ... */ });
+                        if (clusterToLoad && clusterToLoad !== 'N/A') {
+                            let highlightColor = clusterHighlightColors.get(clusterToLoad);
+                            if (!highlightColor) {
+                                highlightColor = generateUniqueHighlightColor();
+                                clusterHighlightColors.set(clusterToLoad, highlightColor);
+                            }
+                            const isAnomalousCommunity = node.data('is_community_anomalous') || false;
+                            visualizeClusterInSidebar(clusterToLoad, highlightColor, isAnomalousCommunity)
+                                .then(() => {
+                                    const newlyAddedNodeInSidebar = window.sidebarCy.getElementById(node.id());
+                                    if(newlyAddedNodeInSidebar && newlyAddedNodeInSidebar.length > 0){
+                                       newlyAddedNodeInSidebar.trigger('click');
+                                       window.sidebarCy.animate({ fit: { eles: newlyAddedNodeInSidebar, padding: 100 } }, { duration: 400 });
+                                    }
+                                });
                             highlightTreeClusters(new Set(clusterHighlightColors.keys()));
                         }
                     }
                 }
             });
+            if (ipGraphLayoutSelect && ipGraphLayoutSelect.value !== 'preset') {
+                ipGraphLayoutSelect.value = 'preset';
+            }
 
         } catch (error) {
-            console.error("Error fetching/rendering Louvain IP graph:", error);
-            graphContainerDiv.innerHTML = `<p style="text-align:center; padding-top:50px;">Error loading IP Community Graph: ${error.message}</p>`;
+            if (error.name === 'AbortError') {
+                console.log("Louvain IP graph loading aborted by user.");
+                graphContainerDiv.innerHTML = `<p style="text-align:center; padding-top:50px;">Operation Cancelled by user.</p>`;
+            } else {
+                console.error("Error fetching/rendering Louvain IP graph:", error);
+                graphContainerDiv.innerHTML = `<p style="text-align:center; padding-top:50px;">Error loading IP Graph: ${error.message}</p>`;
+            }
         } finally {
-            loadingIndicator.style.display = 'none';
+            graphLoadingIndicator.style.display = 'none';
+            if (!globalAbortController.signal.aborted) {
+                hideLoading();
+            }
         }
+    }
+
+    async function fetchAndRenderSankeyDiagram() {
+        const sankeyContainer = d3.select("#sankey-diagram-container");
+        const loadingIndicator = document.getElementById('sankeyLoading'); // Corrected ID
+        const sankeyCardElement = document.getElementById('sankeyCard');
+
+        if (!sankeyContainer.node()) {
+            console.error("Sankey container not found.");
+            return;
+        }
+        sankeyContainer.html(""); // Clear previous diagram
+        if(loadingIndicator) loadingIndicator.style.display = 'flex';
+        sankeyDiagramRendered = false; // Will be set to true on successful render
+
+        const dim1 = document.getElementById('sankeyDim1').value;
+        const dim2 = document.getElementById('sankeyDim2').value;
+        const dim3 = document.getElementById('sankeyDim3').value;
+
+        let dimensions = [dim1, dim2];
+        if (dim3 && dim3 !== "") {
+            dimensions.push(dim3);
+        }
+        
+        // Basic validation: ensure no duplicate consecutive dimensions
+        for (let i = 0; i < dimensions.length - 1; i++) {
+            if (dimensions[i] === dimensions[i+1]) {
+                alert("Consecutive Sankey dimensions cannot be the same. Please select different attributes.");
+                if(loadingIndicator) loadingIndicator.style.display = 'none';
+                sankeyContainer.html("<p style='color:red; text-align:center; padding-top: 50px;'>Error: Consecutive dimensions cannot be the same.</p>");
+                return;
+            }
+        }
+        // More general duplicate check if three dimensions are chosen (A-B-A is allowed, but A-A-B or A-B-B is not via consecutive check)
+        // A-C-A is okay if A != C, C != A. But if A=B=C, the consecutive check handles A=B. If A=C but A!=B, it's a valid A-B-A.
+        if (dimensions.length === 3 && (dimensions[0] === dimensions[1] || dimensions[1] === dimensions[2] )) {
+             // This is already caught by consecutive check
+        } else if (dimensions.length === 3 && dimensions[0] === dimensions[2] && dimensions[0] === dimensions[1]) {
+            // A-A-A case, also caught by consecutive
+        }
+
+
+        try {
+            const response = await fetch(`${API_BASE_URL}/sankey_data?dimensions=${dimensions.join(',')}`);
+            if (!response.ok) {
+                const errData = await response.json().catch(() => ({error: `HTTP error ${response.status}`}));
+                throw new Error(errData.error || `Failed to fetch Sankey data.`);
+            }
+            const data = await response.json();
+
+            if (data.error) {
+                throw new Error(data.error);
+            }
+            if (!data.nodes || data.nodes.length === 0 || !data.links || data.links.length === 0) {
+                sankeyContainer.html("<p style='text-align:center; padding-top:50px;'>No data available for the selected Sankey dimensions.</p>");
+                sankeyDiagramRendered = false; // No diagram rendered
+                return;
+            }
+
+            renderSankey(data, "#sankey-diagram-container");
+            sankeyDiagramRendered = true;
+
+        } catch (error) {
+            console.error("Error fetching or rendering Sankey diagram:", error);
+            sankeyContainer.html(`<p style='color:red; text-align:center; padding-top: 50px;'>Error: ${error.message}</p>`);
+            sankeyDiagramRendered = false;
+        } finally {
+            if(loadingIndicator) loadingIndicator.style.display = 'none';
+        }
+    }
+
+    function renderSankey(data, containerSelector) {
+        const container = d3.select(containerSelector);
+        // SVG already cleared by fetchAndRenderSankeyDiagram
+        // container.selectAll("svg").remove(); 
+
+        const containerNode = container.node();
+        if (!containerNode) {
+            console.error("Sankey container node not found in renderSankey.");
+            return;
+        }
+        const containerRect = containerNode.getBoundingClientRect();
+        const margin = {top: 30, right: 200, bottom: 30, left: 200}; // Increased margins for labels
+        
+        // Ensure width and height are positive. If containerRect.width is 0, use a default.
+        const svgWidth = containerRect.width > 0 ? containerRect.width : 800; // Default width if container not sized
+        const svgHeight = containerRect.height > 0 ? containerRect.height : 700; // Default height
+
+        const width = svgWidth - margin.left - margin.right;
+        const height = svgHeight - margin.top - margin.bottom;
+
+
+        if (width <= 0 || height <= 0) {
+            console.warn("Sankey drawing area has zero or negative dimensions after margin.", {svgWidth, svgHeight, margin, width, height});
+            container.html("<p style='text-align:center; color:orange; padding-top:50px;'>Cannot render Sankey: container too small or not visible.</p>");
+            return;
+        }
+
+        const svg = container.append("svg")
+            .attr("width", svgWidth)
+            .attr("height", svgHeight)
+            .style("font", "10px sans-serif") // Base font for the SVG
+          .append("g")
+            .attr("transform", `translate(${margin.left},${margin.top})`);
+
+        const sankeyLayout = d3.sankey() // Renamed from 'sankey' to avoid conflict with d3.sankey module itself
+            .nodeId(d => d.node) 
+            .nodeAlign(d3.sankeyJustify) // Justify alignment is often good for readability
+            .nodeWidth(20)      
+            .nodePadding(12)    
+            .extent([[1, 5], [width - 1, height - 5]]); // Use extent for bounding box
+
+        const {nodes, links} = sankeyLayout(data);
+
+        const colorScale = d3.scaleOrdinal(d3.schemeCategory10);
+        nodes.forEach(node => {
+            // Assign color based on the dimension prefix of the node name
+            const dimensionPrefix = node.name.split(":")[0];
+            node.color = colorScale(dimensionPrefix);
+        });
+        
+        // Links
+        svg.append("g")
+            .attr("fill", "none")
+            .attr("stroke-opacity", 0.4) // Slightly less transparent for better visibility
+          .selectAll("g.link-group") // More specific selector for links
+          .data(links)
+          .join("g")
+            .attr("class", "link-group") // Class for styling or selection
+            .style("mix-blend-mode", "multiply") // Keep blend mode if desired
+          .append("path")
+            .attr("d", d3.sankeyLinkHorizontal())
+            .attr("stroke", d => d.source.color || d.target.color || "#777") // Use node's assigned color
+            .attr("stroke-width", d => Math.max(1.5, d.width)) // Ensure minimum width for visibility
+            .on("mouseover", function(event, d) {
+                d3.select(this.parentNode).attr("stroke-opacity", 0.7); // Highlight parent group
+                tooltip.style("display", "block")
+                    .html(`<strong>${d.source.name}</strong> → <strong>${d.target.name}</strong><br>Value: ${d.value.toLocaleString()}`)
+                    .style("left", (event.pageX + 10) + "px")
+                    .style("top", (event.pageY - 15) + "px");
+            })
+            .on("mouseout", function() {
+                d3.select(this.parentNode).attr("stroke-opacity", 0.4);
+                tooltip.style("display", "none");
+            })
+            .append("title") // Add SVG title for default browser tooltip (accessibility)
+                .text(d => `${d.source.name} → ${d.target.name}\nValue: ${d.value.toLocaleString()}`);
+
+        // Nodes
+        const nodeGroup = svg.append("g")
+          .selectAll("g.node-group") // More specific selector
+          .data(nodes)
+          .join("g")
+            .attr("class", "node-group") // Class for styling or selection
+            .attr("transform", d => `translate(${d.x0}, ${d.y0})`); // Position the group
+
+        nodeGroup.append("rect")
+            .attr("height", d => Math.max(1, d.y1 - d.y0)) // Ensure rect has at least 1px height
+            .attr("width", d => d.x1 - d.x0)
+            .attr("fill", d => d.color)
+            .attr("stroke", "#333") // Add a subtle border to nodes
+            .attr("stroke-width", 0.5)
+            .on("mouseover", function(event, d) {
+                tooltip.style("display", "block")
+                    .html(`<strong>${d.name}</strong><br>Total Value: ${d.value.toLocaleString()}`)
+                    .style("left", (event.pageX + 10) + "px")
+                    .style("top", (event.pageY - 15) + "px");
+            })
+            .on("mouseout", function() {
+                tooltip.style("display", "none");
+            })
+            .append("title")
+                .text(d => `${d.name}\nTotal Value: ${d.value.toLocaleString()}`);
+        
+        // Node Labels
+        nodeGroup.append("text")
+            .attr("x", d => d.x0 < width / 2 ? (d.x1 - d.x0 + 8) : -8) // Position text outside the node rect
+            .attr("y", d => (d.y1 - d.y0) / 2)
+            .attr("dy", "0.35em")
+            .attr("text-anchor", d => d.x0 < width / 2 ? "start" : "end")
+            .style("font-size", "11px")
+            .style("fill", "#000")
+            .style("pointer-events", "none") // So text doesn't block mouseover on rect
+            .text(d => {
+                const MAX_LABEL_LENGTH = 30; // Adjust as needed
+                return d.name.length > MAX_LABEL_LENGTH ? d.name.substring(0, MAX_LABEL_LENGTH - 3) + "..." : d.name;
+            });
+    }
+
+    function updateSankeyDimensionOptions() {
+        const dimSelects = [
+            document.getElementById('sankeyDim1'),
+            document.getElementById('sankeyDim2'),
+            document.getElementById('sankeyDim3')
+        ];
+
+        const selectedValues = dimSelects.map(sel => sel.value);
+
+        dimSelects.forEach((currentSelect, currentIndex) => {
+            // Values selected in *other* dropdowns (excluding empty/None)
+            const otherSelectedValuesInUse = selectedValues.filter((val, idx) => idx !== currentIndex && val !== "");
+
+            Array.from(currentSelect.options).forEach(option => {
+                if (option.value === "") { // "None" option for Dim3 should always be enabled
+                    option.disabled = false;
+                    option.style.color = '';
+                    return;
+                }
+                // Disable option if its value is currently selected in another dropdown
+                if (otherSelectedValuesInUse.includes(option.value)) {
+                    option.disabled = true;
+                    option.style.color = 'lightgrey'; // Visually indicate disabled
+                } else {
+                    option.disabled = false;
+                    option.style.color = '';
+                }
+            });
+        });
     }
 
     document.getElementById('entropyMinFilter').style.display = 'none';
