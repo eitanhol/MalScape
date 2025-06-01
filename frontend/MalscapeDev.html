@@ -789,48 +789,10 @@
 
     <div id="sankeyCard" style="display:none; background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-top: 20px;">
         <h3>Sankey Diagram</h3>
-        <div style="margin-bottom:10px; display: flex; flex-wrap: wrap; align-items: center; gap: 10px;">
-            <div>
-                <label for="sankeyDim1">Level 1:</label>
-                <select id="sankeyDim1" class="sankey-dim-select" title="Select first dimension for Sankey flow.">
-                    <option value="Protocol" selected>Protocol</option>
-                    <option value="SourceClassification">Source Type</option>
-                    <option value="DestinationClassification">Destination Type</option>
-                    <option value="SourcePort_Group">Src Port Group</option>
-                    <option value="DestinationPort_Group">Dst Port Group</option>
-                    <option value="Len_Group">Payload Length Group</option>
-                    <option value="ClusterID">Cluster ID</option>
-                    <option value="Anomaly">Anomaly Status</option>
-                </select>
-            </div>
-            <div>
-                <label for="sankeyDim2">Level 2:</label>
-                <select id="sankeyDim2" class="sankey-dim-select" title="Select second dimension for Sankey flow.">
-                    <option value="SourceClassification" selected>Source Type</option>
-                    <option value="Protocol">Protocol</option>
-                    <option value="DestinationClassification">Destination Type</option>
-                    <option value="SourcePort_Group">Src Port Group</option>
-                    <option value="DestinationPort_Group">Dst Port Group</option>
-                    <option value="Len_Group">Payload Length Group</option>
-                    <option value="ClusterID">Cluster ID</option>
-                    <option value="Anomaly">Anomaly Status</option>
-                </select>
-            </div>
-            <div>
-                <label for="sankeyDim3">Level 3 (Optional):</label>
-                <select id="sankeyDim3" class="sankey-dim-select" title="Select third dimension for Sankey flow (optional).">
-                    <option value="" selected>None</option>
-                    <option value="DestinationClassification">Destination Type</option>
-                    <option value="Protocol">Protocol</option>
-                    <option value="SourceClassification">Source Type</option>
-                    <option value="SourcePort_Group">Src Port Group</option>
-                    <option value="DestinationPort_Group">Dst Port Group</option>
-                    <option value="Len_Group">Payload Length Group</option>
-                    <option value="ClusterID">Cluster ID</option>
-                    <option value="Anomaly">Anomaly Status</option>
-                </select>
-            </div>
-            <button id="refreshSankeyBtn" title="Refresh Sankey diagram with selected dimensions.">Refresh Sankey</button>
+        <div style="margin-bottom:10px;">
+            <div style="margin-bottom: 8px;"><strong>Select dimensions:</strong></div>
+            <div id="sankeyDimensionCheckboxes" style="display: flex; flex-wrap: wrap; gap: 10px; margin-bottom:10px;">
+                </div>
         </div>
         <div id="sankey-diagram-container" style="width: 100%; height: 700px; position: relative; border: 1px solid #ccc; margin-top:10px; background-color: #fdfdfd; overflow: auto;">
             </div>
@@ -990,6 +952,17 @@
             animate: true, animationDuration: 500
         }
     };
+
+    const ALL_SANKEY_DIMENSIONS = [
+        { value: "Protocol", label: "Protocol", defaultChecked: true },
+        { value: "SourceClassification", label: "Source Type", defaultChecked: true },
+        { value: "DestinationClassification", label: "Dest. Type", defaultChecked: true },
+        { value: "SourcePort_Group", label: "Src Port Grp", defaultChecked: true },
+        { value: "DestinationPort_Group", label: "Dst Port Grp", defaultChecked: true },
+        { value: "Len_Group", label: "Pkt Len Grp", defaultChecked: true },
+        { value: "Anomaly", label: "Anomaly", defaultChecked: true },
+        { value: "ClusterID", label: "Cluster ID", defaultChecked: false }
+    ];
 
     function applySidebarLayout() {
         if (!sidebarCy) {
@@ -2699,10 +2672,9 @@
         const saveSelectionBtn = document.getElementById('saveSelectionBtn');
         const cancelLoadingBtn = document.getElementById('cancelLoadingBtn');
         const showSankeyBtn = document.getElementById('showSankeyBtn');
-        const refreshSankeyBtn = document.getElementById('refreshSankeyBtn');
-        const sankeyDimSelectors = document.querySelectorAll('.sankey-dim-select');
         const sankeyCard = document.getElementById('sankeyCard');
 
+        populateSankeyDimensionCheckboxes();
 
         if (cancelLoadingBtn) {
             cancelLoadingBtn.addEventListener('click', () => {
@@ -2740,8 +2712,8 @@
         } catch (error) {
             if (error.name !== 'AbortError') {
                 console.error("Error during initial page load sequence:", error);
-                const dendroCardElement = document.getElementById('dendrogramCard'); // Renamed to avoid conflict
-                if(dendroCardElement) { // Use renamed variable
+                const dendroCardElement = document.getElementById('dendrogramCard');
+                if(dendroCardElement) {
                     dendroCardElement.innerHTML = `<p style="color:red; padding: 20px;">Error loading initial data: ${error.message || 'Unknown error'}. Please try uploading a CSV file.</p>`;
                     dendroCardElement.style.display = 'block';
                 } else {
@@ -2848,7 +2820,7 @@
 
         if(downloadButton) {
             downloadButton.addEventListener('click', function() {
-                if (window.originalTreeData) {
+                if (window.originalTreeData) { 
                     window.location.href = `${API_BASE_URL}/download_csv`;
                 } else {
                     alert("No processed data available to download. Please upload a CSV file first.");
@@ -2897,28 +2869,29 @@
         if(resetSidebarBtn) {
             resetSidebarBtn.addEventListener('click', () => {
                 clearSidebarVisualization();
-                updateLegend();
+                updateLegend(); 
+                resetHeatmapHighlights(); 
             });
         }
 
         if (sidebarFullscreenBtn) {
             sidebarFullscreenBtn.addEventListener('click', toggleSidebarFullscreen);
         }
-
+        
         if (saveSelectionBtn) {
             saveSelectionBtn.addEventListener('click', handleSaveSelection);
         }
 
         document.addEventListener('fullscreenchange', () => {
             if (!document.fullscreenElement && isSidebarFullscreen) {
-                cleanupFullscreenStyles();
+                cleanupFullscreenStyles(); 
                 if (sidebarCy) { setTimeout(() => { sidebarCy.resize(); sidebarCy.fit(null, 50); }, 400); }
             } else if (document.fullscreenElement === sidebar && !isSidebarFullscreen) {
-                isSidebarFullscreen = true;
+                isSidebarFullscreen = true; 
                 sidebar.classList.add('fullscreen');
                 legendContainer.classList.add('fullscreen-active');
                 document.body.classList.add('sidebar-fullscreen');
-                sidebarFullscreenBtn.innerHTML = '&#x274C;';
+                sidebarFullscreenBtn.innerHTML = '&#x274C;'; 
                 sidebarFullscreenBtn.title = "Exit Sidebar Fullscreen";
                 if (sidebarCy) { setTimeout(() => { sidebarCy.resize(); sidebarCy.fit(null, 50); }, 100); }
             }
@@ -2944,17 +2917,26 @@
                         loadSidebarClusterTable(currentSidebarTableClusterId, page);
                     } else if (sidebarTableMode === 'edges') {
                         let edgeList = [];
-                        if (selectedNodeId && sidebarCy) {
-                            const node = sidebarCy.getElementById(selectedNodeId);
-                            if (node && node.length > 0) {
-                                edgeList = node.connectedEdges().map(edge => ({ source: edge.data('source'), destination: edge.data('target'), protocol: edge.data('Protocol') }));
-                            }
-                         } else if (selectedSidebarEdges.size > 0) {
+                        if (selectedSidebarNodes.size > 0 && sidebarCy) { 
+                             selectedSidebarNodes.forEach(nodeId => {
+                                const node = sidebarCy.getElementById(nodeId);
+                                if (node && node.length > 0) {
+                                    node.connectedEdges().forEach(edge => {
+                                        edgeList.push({ source: edge.data('source'), destination: edge.data('target'), protocol: edge.data('Protocol') });
+                                    });
+                                }
+                             });
+                             edgeList = edgeList.filter((edge, index, self) =>
+                                index === self.findIndex((e) => (
+                                  e.source === edge.source && e.destination === edge.destination && e.protocol === edge.protocol
+                                ))
+                             );
+                        } else if (selectedSidebarEdges.size > 0) {
                             edgeList = Array.from(selectedSidebarEdges).map(key => {
                                 const parts = key.split('|');
                                 return { source: parts[0], destination: parts[1], protocol: parts[2] };
                             });
-                         }
+                        }
                          if (edgeList.length > 0) {
                              loadSidebarMultiEdgeTable(edgeList, page);
                          } else {
@@ -2978,94 +2960,94 @@
         if(sidebarEdgeWidthMin) sidebarEdgeWidthMin.addEventListener('input', applySidebarSizeControls);
         if(sidebarEdgeWidthMax) sidebarEdgeWidthMax.addEventListener('input', applySidebarSizeControls);
 
-        if (metricSelect) {
+        if (metricSelect) { 
             metricSelect.addEventListener('change', () => {
-                updateRowOrderSelectState();
+                updateRowOrderSelectState(); 
                 if (window.lastTreeData) {
                     showInlineDendrogram(window.lastTreeData, currentDendrogramHeight, currentNewClusterIds);
-                    highlightTreeClusters(new Set(clusterHighlightColors.keys()));
+                    highlightTreeClusters(new Set(clusterHighlightColors.keys())); 
                     const localThresholdSlider = document.getElementById('thresholdSlider');
-                    requestAnimationFrame(() => {
-                        if (localThresholdSlider) localThresholdSlider.dispatchEvent(new Event('input'));
+                    requestAnimationFrame(() => { 
+                        if (localThresholdSlider && window.lastTreeRoot) localThresholdSlider.dispatchEvent(new Event('input'));
                     });
                 }
             });
         }
 
-        if (reorderTreeCheckbox) {
+        if (reorderTreeCheckbox) { 
             reorderTreeCheckbox.addEventListener('change', () => {
                 if (window.lastTreeData) {
                     showInlineDendrogram(window.lastTreeData, currentDendrogramHeight, currentNewClusterIds);
                     highlightTreeClusters(new Set(clusterHighlightColors.keys()));
                     const localThresholdSlider = document.getElementById('thresholdSlider');
                     requestAnimationFrame(() => {
-                        if (localThresholdSlider) localThresholdSlider.dispatchEvent(new Event('input'));
+                        if (localThresholdSlider && window.lastTreeRoot) localThresholdSlider.dispatchEvent(new Event('input'));
                     });
                 }
             });
         }
 
-        if (thresholdSlider && thresholdValueSpan) {
+        if (thresholdSlider && thresholdValueSpan) { 
             thresholdSlider.addEventListener('input', () => {
                 const physicalValue = parseInt(thresholdSlider.value, 10);
-                const currentDisplayMax = window.lastAppliedThreshold || 100;
+                const currentDisplayMax = window.lastAppliedThreshold || 100; 
                 const scaledDisplayValue = Math.round((physicalValue / 100) * currentDisplayMax);
                 thresholdValueSpan.textContent = scaledDisplayValue + '%';
 
                 const svgInstance = d3.select("#inlineDendrogramSvg");
-                const svgNodeInstance = svgInstance.node();
-                if (!svgNodeInstance) return;
-                const svgContentInstance = svgInstance.select("g");
+                const svgNodeInstance = svgInstance.node(); 
+                if (!svgNodeInstance) return; 
+
+                const svgContentInstance = svgInstance.select("g"); 
                 const rootInstance = window.lastTreeRoot;
                 const layoutHeightInstance = window.currentD3LayoutHeight;
-                const treeLayoutWidthInstance = window.currentLayoutWidth;
+                const treeLayoutWidthInstance = window.currentLayoutWidth; 
 
                 if (!layoutHeightInstance || layoutHeightInstance <= 0 || !rootInstance || svgContentInstance.empty() || treeLayoutWidthInstance === undefined) {
-                    svgInstance.select("#threshold-bar").style("display", "none");
+                    svgInstance.select("#threshold-bar").style("display", "none"); 
                     return;
                 }
-
                 const physicalPercentageForBar = physicalValue / 100;
                 const thresholdLayoutYForBar = layoutHeightInstance * physicalPercentageForBar;
 
                 svgContentInstance.selectAll('.node').each(function(dNode) {
                     if (dNode && typeof dNode.structuralY === 'number' && isFinite(dNode.structuralY)) {
-                        d3.select(this).classed('grayed-out', dNode.structuralY > thresholdLayoutYForBar + 1e-6);
+                        d3.select(this).classed('grayed-out', dNode.structuralY > thresholdLayoutYForBar + 1e-6); 
                     } else {
-                        d3.select(this).classed('grayed-out', false);
+                        d3.select(this).classed('grayed-out', false); 
                     }
                 });
 
                 try {
-                    const transform = d3.zoomTransform(svgNodeInstance);
+                    const transform = d3.zoomTransform(svgNodeInstance); 
                     const thresholdVisualY = ((thresholdLayoutYForBar + margin.top) * transform.k) + transform.y;
                     const barX1 = (margin.left * transform.k) + transform.x;
                     const barX2 = (margin.left + treeLayoutWidthInstance) * transform.k + transform.x;
 
                     svgInstance.select("#threshold-bar")
-                    .style("display", null)
-                    .attr("y1", thresholdVisualY).attr("y2", thresholdVisualY)
-                    .attr("x1", barX1).attr("x2", barX2);
+                        .style("display", null) 
+                        .attr("y1", thresholdVisualY).attr("y2", thresholdVisualY)
+                        .attr("x1", barX1).attr("x2", barX2);
+
                 } catch (e) {
                     console.error("Error updating threshold bar position:", e);
                     svgInstance.select("#threshold-bar").style("display", "none");
                 }
             });
-
-             requestAnimationFrame(() => {
+             requestAnimationFrame(() => { 
                 if (window.lastTreeRoot) { thresholdSlider.dispatchEvent(new Event('input')); }
             });
         }
 
-        if (applyThresholdBtn) {
+        if (applyThresholdBtn) { 
             applyThresholdBtn.addEventListener('click', applyThresholdGrouping);
         }
 
-        if (resetGroupingBtn) {
+        if (resetGroupingBtn) { 
             resetGroupingBtn.addEventListener('click', resetGroupingAndRedraw);
         }
 
-        const mainGoPageBtn = document.getElementById('goPageBtn');
+        const mainGoPageBtn = document.getElementById('goPageBtn'); 
         if (mainGoPageBtn) {
             mainGoPageBtn.addEventListener('click', function() {
                 const currentPageInput = document.getElementById('currentPageInput');
@@ -3086,17 +3068,17 @@
             });
         }
 
-        if (acknowledgeBtn && messageDivForAcknowledge) {
+        if (acknowledgeBtn && messageDivForAcknowledge) { 
             acknowledgeBtn.addEventListener('click', () => {
                 console.log("New clusters acknowledged by user.");
-                currentNewClusterIds.clear();
+                currentNewClusterIds.clear(); 
 
                 acknowledgeBtn.style.display = 'none';
                 messageDivForAcknowledge.textContent = 'Changes acknowledged.';
-                messageDivForAcknowledge.style.color = '#333';
+                messageDivForAcknowledge.style.color = '#333'; 
 
                 if (window.lastTreeData) {
-                    showInlineDendrogram(window.lastTreeData, currentDendrogramHeight, currentNewClusterIds);
+                    showInlineDendrogram(window.lastTreeData, currentDendrogramHeight, currentNewClusterIds); 
                     const thresholdSliderElem = document.getElementById('thresholdSlider');
                     if (thresholdSliderElem && window.lastTreeRoot) {
                         requestAnimationFrame(() => { thresholdSliderElem.dispatchEvent(new Event('input')); });
@@ -3107,22 +3089,21 @@
             });
         }
 
-        const togglePacketBtn = document.getElementById('showPacketSimilarityBtn');
+        const togglePacketBtn = document.getElementById('showPacketSimilarityBtn'); 
         if (togglePacketBtn) {
             togglePacketBtn.addEventListener('click', function() {
-                const cardElement = document.getElementById('packetSimilarityCard'); // Renamed to avoid conflict
-                if (!cardElement) { console.error("packetSimilarityCard not found!"); return; } // Use renamed variable
+                const cardElement = document.getElementById('packetSimilarityCard');
+                if (!cardElement) { console.error("packetSimilarityCard not found!"); return; }
 
                 if (cardElement.style.display === 'none' || cardElement.style.display === '') {
-                    if (!window.originalTreeData && !window.lastTreeData) {
+                     if (!window.originalTreeData && !window.lastTreeData) { 
                         alert("Please upload and process a CSV file first.");
                         return;
                     }
                     cardElement.style.display = 'block';
                     this.textContent = 'Hide Community IP Graph';
-
                     if (typeof fetchAndRenderLouvainIpGraph === 'function') {
-                        if (louvainIpCy === null) {
+                        if (louvainIpCy === null) { 
                             fetchAndRenderLouvainIpGraph();
                         }
                     } else {
@@ -3139,7 +3120,7 @@
         if (refreshIpGraphBtn) {
             refreshIpGraphBtn.addEventListener('click', () => {
                 if (typeof fetchAndRenderLouvainIpGraph === 'function') {
-                    fetchAndRenderLouvainIpGraph();
+                    fetchAndRenderLouvainIpGraph(); 
                 } else {
                     console.error("fetchAndRenderLouvainIpGraph function not defined.");
                 }
@@ -3153,22 +3134,9 @@
                     const selectedLayout = ipGraphLayoutSelect.value;
                     let layoutOptions;
                     console.log(`Changing IP Graph layout to: ${selectedLayout}`);
-
                     switch (selectedLayout) {
                         case 'cose':
-                            layoutOptions = {
-                                name: 'cose',
-                                idealEdgeLength: 100,
-                                nodeRepulsion: node => 400000,
-                                edgeElasticity: edge => 100,
-                                numIter: 1000,
-                                gravity: 80,
-                                fit: true,
-                                padding: 50,
-                                animate: true,
-                                animationDuration: 800,
-                                randomize: false
-                            };
+                            layoutOptions = { name: 'cose', idealEdgeLength: 100, nodeRepulsion: node => 400000, edgeElasticity: edge => 100, numIter: 1000, gravity: 80, fit: true, padding: 50, animate: true, animationDuration: 800, randomize: false };
                             break;
                         case 'circle':
                             layoutOptions = { name: 'circle', padding: 30, fit: true, animate: true, animationDuration: 500 };
@@ -3176,68 +3144,40 @@
                         case 'grid':
                             layoutOptions = { name: 'grid', padding: 30, fit: true, animate: true, animationDuration: 500 };
                             break;
-                        case 'preset':
-                            if (window.louvainIpCy.nodes().every(n => n.data('x_original') !== undefined && n.data('y_original') !== undefined)) {
-                                layoutOptions = {
-                                    name: 'preset',
-                                    positions: n => ({ x: n.data('x_original'), y: n.data('y_original') }),
-                                    fit: true,
-                                    padding: 50,
-                                    animate: true,
-                                    animationDuration: 600
-                                };
+                        case 'preset': 
+                             if (window.louvainIpCy.nodes().every(n => n.data('x_original') !== undefined && n.data('y_original') !== undefined)) {
+                                layoutOptions = { name: 'preset', positions: n => ({ x: n.data('x_original'), y: n.data('y_original') }), fit: true, padding: 50, animate: true, animationDuration: 600 };
                             } else {
                                 console.warn("Preset layout chosen, but original_x/y not found for all nodes. Applying 'cose'.");
                                 layoutOptions = { name: 'cose', fit: true, padding: 50, animate: true, animationDuration: 800, randomize: true };
                             }
                             break;
-                        default:
+                        default: 
                             layoutOptions = { name: 'cose', fit: true, padding: 50, animate: true, animationDuration: 800, randomize: true };
                     }
                     window.louvainIpCy.layout(layoutOptions).run();
                 }
             });
         }
-        
+
         if (showSankeyBtn) {
             showSankeyBtn.addEventListener('click', function() {
                 if (!sankeyCard) { console.error("sankeyCard not found!"); return; }
 
                 if (sankeyCard.style.display === 'none' || sankeyCard.style.display === '') {
-                    if (!window.originalTreeData && !window.lastTreeData && (!globalCy || globalCy.nodes().length === 0)) {
+                    if (!window.originalTreeData && !window.lastTreeData && (!globalCy || globalCy.nodes().length === 0) ) {
                         alert("Please upload and process a CSV file first to generate data for the Sankey diagram.");
                         return;
                     }
                     sankeyCard.style.display = 'block';
                     this.textContent = 'Hide Sankey Diagram';
-                    updateSankeyDimensionOptions(); 
                     fetchAndRenderSankeyDiagram();
-
                 } else {
                     sankeyCard.style.display = 'none';
                     this.textContent = 'Show Sankey Diagram';
                 }
             });
         }
-
-        if (refreshSankeyBtn) {
-            refreshSankeyBtn.addEventListener('click', () => {
-                updateSankeyDimensionOptions(); 
-                fetchAndRenderSankeyDiagram();
-            });
-        }
-
-        sankeyDimSelectors.forEach(selector => {
-            selector.addEventListener('change', () => {
-                updateSankeyDimensionOptions(); 
-                const sankeyCardElement = document.getElementById('sankeyCard'); 
-                if (sankeyCardElement && sankeyCardElement.style.display !== 'none') {
-                     fetchAndRenderSankeyDiagram();
-                }
-            });
-        });
-        updateSankeyDimensionOptions();
-
     }); // End of DOMContentLoaded
 
     function showInlineDendrogram(data, svgH = 400, newClusterIds = new Set()) {
@@ -5392,8 +5332,8 @@
 
     async function fetchAndRenderSankeyDiagram() {
         const sankeyContainer = d3.select("#sankey-diagram-container");
-        const loadingIndicator = document.getElementById('sankeyLoading'); // Corrected ID
-        const sankeyCardElement = document.getElementById('sankeyCard');
+        const loadingIndicator = document.getElementById('sankeyLoading');
+        // const sankeyCardElement = document.getElementById('sankeyCard'); // Not directly used here but good to have
 
         if (!sankeyContainer.node()) {
             console.error("Sankey container not found.");
@@ -5401,34 +5341,36 @@
         }
         sankeyContainer.html(""); // Clear previous diagram
         if(loadingIndicator) loadingIndicator.style.display = 'flex';
-        sankeyDiagramRendered = false; // Will be set to true on successful render
+        sankeyDiagramRendered = false;
 
-        const dim1 = document.getElementById('sankeyDim1').value;
-        const dim2 = document.getElementById('sankeyDim2').value;
-        const dim3 = document.getElementById('sankeyDim3').value;
+        let dimensions = [];
+        const checkboxes = document.querySelectorAll('#sankeyDimensionCheckboxes input[type="checkbox"]');
+        
+        // Collect dimensions in the order they appear in ALL_SANKEY_DIMENSIONS
+        ALL_SANKEY_DIMENSIONS.forEach(dimDefinition => {
+            const checkbox = document.getElementById(`sankey_dim_cb_${dimDefinition.value}`);
+            if (checkbox && checkbox.checked) {
+                dimensions.push(dimDefinition.value);
+            }
+        });
 
-        let dimensions = [dim1, dim2];
-        if (dim3 && dim3 !== "") {
-            dimensions.push(dim3);
+        if (dimensions.length < 2) {
+            alert("Please select at least two dimensions for the Sankey diagram.");
+            if(loadingIndicator) loadingIndicator.style.display = 'none';
+            sankeyContainer.html("<p style='color:red; text-align:center; padding-top: 50px;'>Error: Please select at least two dimensions.</p>");
+            return;
         }
         
-        // Basic validation: ensure no duplicate consecutive dimensions
+        // Basic validation: ensure no duplicate consecutive dimensions (should be less of an issue with fixed order)
+        // This backend already handles complex dimension logic, client-side is mostly for minimum selection.
         for (let i = 0; i < dimensions.length - 1; i++) {
-            if (dimensions[i] === dimensions[i+1]) {
-                alert("Consecutive Sankey dimensions cannot be the same. Please select different attributes.");
+            if (dimensions[i] === dimensions[i+1]) { // Should not happen if ALL_SANKEY_DIMENSIONS has unique values
+                alert("Error in dimension setup: Consecutive dimensions are the same. This should not occur.");
                 if(loadingIndicator) loadingIndicator.style.display = 'none';
-                sankeyContainer.html("<p style='color:red; text-align:center; padding-top: 50px;'>Error: Consecutive dimensions cannot be the same.</p>");
+                sankeyContainer.html("<p style='color:red; text-align:center; padding-top: 50px;'>Error: Configuration error, duplicate consecutive dimensions.</p>");
                 return;
             }
         }
-        // More general duplicate check if three dimensions are chosen (A-B-A is allowed, but A-A-B or A-B-B is not via consecutive check)
-        // A-C-A is okay if A != C, C != A. But if A=B=C, the consecutive check handles A=B. If A=C but A!=B, it's a valid A-B-A.
-        if (dimensions.length === 3 && (dimensions[0] === dimensions[1] || dimensions[1] === dimensions[2] )) {
-             // This is already caught by consecutive check
-        } else if (dimensions.length === 3 && dimensions[0] === dimensions[2] && dimensions[0] === dimensions[1]) {
-            // A-A-A case, also caught by consecutive
-        }
-
 
         try {
             const response = await fetch(`${API_BASE_URL}/sankey_data?dimensions=${dimensions.join(',')}`);
@@ -5443,7 +5385,7 @@
             }
             if (!data.nodes || data.nodes.length === 0 || !data.links || data.links.length === 0) {
                 sankeyContainer.html("<p style='text-align:center; padding-top:50px;'>No data available for the selected Sankey dimensions.</p>");
-                sankeyDiagramRendered = false; // No diagram rendered
+                sankeyDiagramRendered = false; 
                 return;
             }
 
@@ -5461,24 +5403,22 @@
 
     function renderSankey(data, containerSelector) {
         const container = d3.select(containerSelector);
-        // SVG already cleared by fetchAndRenderSankeyDiagram
-        // container.selectAll("svg").remove(); 
-
         const containerNode = container.node();
         if (!containerNode) {
             console.error("Sankey container node not found in renderSankey.");
             return;
         }
+        // Clear previous SVG content explicitly at the start of rendering a new diagram
+        container.selectAll("svg").remove();
+
         const containerRect = containerNode.getBoundingClientRect();
-        const margin = {top: 30, right: 200, bottom: 30, left: 200}; // Increased margins for labels
+        const margin = {top: 30, right: 200, bottom: 30, left: 200};
         
-        // Ensure width and height are positive. If containerRect.width is 0, use a default.
-        const svgWidth = containerRect.width > 0 ? containerRect.width : 800; // Default width if container not sized
-        const svgHeight = containerRect.height > 0 ? containerRect.height : 700; // Default height
+        const svgWidth = containerRect.width > 0 ? containerRect.width : 800;
+        const svgHeight = containerRect.height > 0 ? containerRect.height : 700;
 
         const width = svgWidth - margin.left - margin.right;
         const height = svgHeight - margin.top - margin.bottom;
-
 
         if (width <= 0 || height <= 0) {
             console.warn("Sankey drawing area has zero or negative dimensions after margin.", {svgWidth, svgHeight, margin, width, height});
@@ -5489,122 +5429,241 @@
         const svg = container.append("svg")
             .attr("width", svgWidth)
             .attr("height", svgHeight)
-            .style("font", "10px sans-serif") // Base font for the SVG
+            .style("font", "10px sans-serif")
           .append("g")
             .attr("transform", `translate(${margin.left},${margin.top})`);
 
-        const sankeyLayout = d3.sankey() // Renamed from 'sankey' to avoid conflict with d3.sankey module itself
-            .nodeId(d => d.node) 
-            .nodeAlign(d3.sankeyJustify) // Justify alignment is often good for readability
-            .nodeWidth(20)      
-            .nodePadding(12)    
-            .extent([[1, 5], [width - 1, height - 5]]); // Use extent for bounding box
+        // Add this click listener to SVG for clearing focus
+        svg.on("click", function(event) {
+            // Check if the click was directly on the svg's <g> element (background)
+            // and not on a node or link group, though node click will stop propagation.
+            if (event.target === this && focusedNode) { 
+                clearFocusHighlight();
+            }
+        });
+
+        const sankeyLayout = d3.sankey()
+            .nodeId(d => d.node)
+            .nodeAlign(d3.sankeyJustify)
+            .nodeWidth(20)
+            .nodePadding(12)
+            .extent([[1, 5], [width - 1, height - 5]]);
 
         const {nodes, links} = sankeyLayout(data);
 
         const colorScale = d3.scaleOrdinal(d3.schemeCategory10);
         nodes.forEach(node => {
-            // Assign color based on the dimension prefix of the node name
             const dimensionPrefix = node.name.split(":")[0];
             node.color = colorScale(dimensionPrefix);
         });
         
+        // --- State for focus highlighting ---
+        let focusedNode = null;
+        const highlightedLinks = new Set(); // Will store link objects
+        const highlightedNodes = new Set(); // Will store node objects
+
+        function clearFocusHighlight() {
+            focusedNode = null;
+            highlightedLinks.clear();
+            highlightedNodes.clear();
+
+            svg.selectAll(".link-group path")
+                .transition().duration(200)
+                .attr("stroke-opacity", 0.4);
+
+            svg.selectAll(".node-group rect")
+                .transition().duration(200)
+                .attr("opacity", 1.0);
+
+            svg.selectAll(".node-group text")
+                .transition().duration(200)
+                .attr("opacity", 1.0);
+            console.log("Sankey focus cleared.");
+        }
+
+        function applyFocusHighlight() {
+            const dimOpacity = 0.1; // Make non-focused very transparent
+            const highlightLinkOpacity = 0.7; // Focused links a bit more prominent
+            const highlightNodeOpacity = 1.0; // Focused nodes fully opaque
+
+            svg.selectAll(".link-group path")
+                .transition().duration(300)
+                .attr("stroke-opacity", d_link => highlightedLinks.has(d_link) ? highlightLinkOpacity : dimOpacity);
+
+            svg.selectAll(".node-group rect")
+                .transition().duration(300)
+                .attr("opacity", d_node => highlightedNodes.has(d_node) ? highlightNodeOpacity : dimOpacity);
+            
+            svg.selectAll(".node-group text")
+                .transition().duration(300)
+                .attr("opacity", d_node => highlightedNodes.has(d_node) ? highlightNodeOpacity : dimOpacity);
+            console.log("Sankey focus applied. Highlighted nodes:", highlightedNodes.size, "links:", highlightedLinks.size);
+        }
+
         // Links
-        svg.append("g")
+        const linkGroups = svg.append("g")
             .attr("fill", "none")
-            .attr("stroke-opacity", 0.4) // Slightly less transparent for better visibility
-          .selectAll("g.link-group") // More specific selector for links
+            .attr("stroke-opacity", 0.4)
+          .selectAll("g.link-group")
           .data(links)
           .join("g")
-            .attr("class", "link-group") // Class for styling or selection
-            .style("mix-blend-mode", "multiply") // Keep blend mode if desired
-          .append("path")
+            .attr("class", "link-group")
+            .style("mix-blend-mode", "multiply");
+
+        linkGroups.append("path")
             .attr("d", d3.sankeyLinkHorizontal())
-            .attr("stroke", d => d.source.color || d.target.color || "#777") // Use node's assigned color
-            .attr("stroke-width", d => Math.max(1.5, d.width)) // Ensure minimum width for visibility
-            .on("mouseover", function(event, d) {
-                d3.select(this.parentNode).attr("stroke-opacity", 0.7); // Highlight parent group
+            .attr("stroke", d => d.source.color || d.target.color || "#777")
+            .attr("stroke-width", d => Math.max(1.5, d.width))
+            .on("mouseover", function(event, d_link_hovered) {
+                if (!focusedNode || highlightedLinks.has(d_link_hovered)) {
+                    d3.select(this).attr("stroke-opacity", focusedNode ? 0.9 : 0.7); // Use parentNode if group has opacity
+                }
                 tooltip.style("display", "block")
-                    .html(`<strong>${d.source.name}</strong> → <strong>${d.target.name}</strong><br>Value: ${d.value.toLocaleString()}`)
+                    .html(`<strong>${d_link_hovered.source.name}</strong> → <strong>${d_link_hovered.target.name}</strong><br>Value: ${d_link_hovered.value.toLocaleString()}`)
                     .style("left", (event.pageX + 10) + "px")
                     .style("top", (event.pageY - 15) + "px");
             })
-            .on("mouseout", function() {
-                d3.select(this.parentNode).attr("stroke-opacity", 0.4);
+            .on("mouseout", function(event, d_link_hovered) {
+                if (!focusedNode || highlightedLinks.has(d_link_hovered)) {
+                     d3.select(this).attr("stroke-opacity", focusedNode ? 0.7 : 0.4);
+                }
                 tooltip.style("display", "none");
             })
-            .append("title") // Add SVG title for default browser tooltip (accessibility)
+            .append("title")
                 .text(d => `${d.source.name} → ${d.target.name}\nValue: ${d.value.toLocaleString()}`);
 
         // Nodes
         const nodeGroup = svg.append("g")
-          .selectAll("g.node-group") // More specific selector
+          .selectAll("g.node-group")
           .data(nodes)
           .join("g")
-            .attr("class", "node-group") // Class for styling or selection
-            .attr("transform", d => `translate(${d.x0}, ${d.y0})`); // Position the group
+            .attr("class", "node-group")
+            .attr("transform", d_node => `translate(${d_node.x0}, ${d_node.y0})`);
 
         nodeGroup.append("rect")
-            .attr("height", d => Math.max(1, d.y1 - d.y0)) // Ensure rect has at least 1px height
-            .attr("width", d => d.x1 - d.x0)
-            .attr("fill", d => d.color)
-            .attr("stroke", "#333") // Add a subtle border to nodes
+            .attr("height", d_node => Math.max(1, d_node.y1 - d_node.y0))
+            .attr("width", d_node => d_node.x1 - d_node.x0)
+            .attr("fill", d_node => d_node.color)
+            .attr("stroke", "#333")
             .attr("stroke-width", 0.5)
-            .on("mouseover", function(event, d) {
+            .on("mouseover", function(event, d_node_hovered) {
+                // No change to opacity on hover if in focus mode, unless it's the focused node
                 tooltip.style("display", "block")
-                    .html(`<strong>${d.name}</strong><br>Total Value: ${d.value.toLocaleString()}`)
+                    .html(`<strong>${d_node_hovered.name}</strong><br>Total Value: ${d_node_hovered.value.toLocaleString()}`)
                     .style("left", (event.pageX + 10) + "px")
                     .style("top", (event.pageY - 15) + "px");
             })
             .on("mouseout", function() {
                 tooltip.style("display", "none");
             })
+            .on("click", function(event, d_node_clicked) {
+                event.stopPropagation(); // Important to prevent SVG background click
+                console.log("Node clicked:", d_node_clicked.name);
+
+                if (focusedNode === d_node_clicked) {
+                    clearFocusHighlight();
+                } else {
+                    focusedNode = d_node_clicked;
+                    highlightedNodes.clear();
+                    highlightedLinks.clear();
+
+                    highlightedNodes.add(focusedNode);
+
+                    // Trace backwards (upstream) using targetLinks
+                    let currentGenNodes_bwd = [focusedNode];
+                    let safetyBwd = 0;
+                    while (currentGenNodes_bwd.length > 0 && safetyBwd < nodes.length) {
+                        let nextGenNodes_bwd = new Set();
+                        currentGenNodes_bwd.forEach(node => {
+                            (node.targetLinks || []).forEach(link => { // targetLinks are incoming links
+                                highlightedLinks.add(link);
+                                if (!highlightedNodes.has(link.source)) {
+                                    nextGenNodes_bwd.add(link.source);
+                                    highlightedNodes.add(link.source);
+                                }
+                            });
+                        });
+                        currentGenNodes_bwd = Array.from(nextGenNodes_bwd);
+                        safetyBwd++;
+                    }
+                    if (safetyBwd >= nodes.length && currentGenNodes_bwd.length > 0) console.warn("Sankey backward trace safety break.");
+
+
+                    // Trace forwards (downstream) using sourceLinks
+                    let currentGenNodes_fwd = [focusedNode];
+                    let safetyFwd = 0;
+                    while (currentGenNodes_fwd.length > 0 && safetyFwd < nodes.length) {
+                        let nextGenNodes_fwd = new Set();
+                        currentGenNodes_fwd.forEach(node => {
+                            (node.sourceLinks || []).forEach(link => { // sourceLinks are outgoing links
+                                highlightedLinks.add(link);
+                                if (!highlightedNodes.has(link.target)) {
+                                    nextGenNodes_fwd.add(link.target);
+                                    highlightedNodes.add(link.target);
+                                }
+                            });
+                        });
+                        currentGenNodes_fwd = Array.from(nextGenNodes_fwd);
+                        safetyFwd++;
+                    }
+                     if (safetyFwd >= nodes.length && currentGenNodes_fwd.length > 0) console.warn("Sankey forward trace safety break.");
+
+                    applyFocusHighlight();
+                }
+            })
             .append("title")
-                .text(d => `${d.name}\nTotal Value: ${d.value.toLocaleString()}`);
+                .text(d_node => `${d_node.name}\nTotal Value: ${d_node.value.toLocaleString()}`);
         
-        // Node Labels
         nodeGroup.append("text")
-            .attr("x", d => d.x0 < width / 2 ? (d.x1 - d.x0 + 8) : -8) // Position text outside the node rect
-            .attr("y", d => (d.y1 - d.y0) / 2)
+            .attr("x", d_node => d_node.x0 < width / 2 ? (d_node.x1 - d_node.x0 + 8) : -8)
+            .attr("y", d_node => (d_node.y1 - d_node.y0) / 2)
             .attr("dy", "0.35em")
-            .attr("text-anchor", d => d.x0 < width / 2 ? "start" : "end")
+            .attr("text-anchor", d_node => d_node.x0 < width / 2 ? "start" : "end")
             .style("font-size", "11px")
             .style("fill", "#000")
-            .style("pointer-events", "none") // So text doesn't block mouseover on rect
-            .text(d => {
-                const MAX_LABEL_LENGTH = 30; // Adjust as needed
-                return d.name.length > MAX_LABEL_LENGTH ? d.name.substring(0, MAX_LABEL_LENGTH - 3) + "..." : d.name;
+            .style("pointer-events", "none")
+            .text(d_node => {
+                const MAX_LABEL_LENGTH = 30;
+                return d_node.name.length > MAX_LABEL_LENGTH ? d_node.name.substring(0, MAX_LABEL_LENGTH - 3) + "..." : d_node.name;
             });
     }
 
-    function updateSankeyDimensionOptions() {
-        const dimSelects = [
-            document.getElementById('sankeyDim1'),
-            document.getElementById('sankeyDim2'),
-            document.getElementById('sankeyDim3')
-        ];
+    function populateSankeyDimensionCheckboxes() {
+        const container = document.getElementById('sankeyDimensionCheckboxes');
+        if (!container) {
+            console.error("Sankey dimension checkbox container not found.");
+            return;
+        }
+        container.innerHTML = ''; // Clear existing
 
-        const selectedValues = dimSelects.map(sel => sel.value);
+        ALL_SANKEY_DIMENSIONS.forEach(dim => {
+            const div = document.createElement('div');
+            div.style.marginRight = "15px"; 
 
-        dimSelects.forEach((currentSelect, currentIndex) => {
-            // Values selected in *other* dropdowns (excluding empty/None)
-            const otherSelectedValuesInUse = selectedValues.filter((val, idx) => idx !== currentIndex && val !== "");
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.id = `sankey_dim_cb_${dim.value}`;
+            checkbox.value = dim.value;
+            checkbox.checked = dim.defaultChecked;
+            checkbox.setAttribute('data-label', dim.label);
 
-            Array.from(currentSelect.options).forEach(option => {
-                if (option.value === "") { // "None" option for Dim3 should always be enabled
-                    option.disabled = false;
-                    option.style.color = '';
-                    return;
-                }
-                // Disable option if its value is currently selected in another dropdown
-                if (otherSelectedValuesInUse.includes(option.value)) {
-                    option.disabled = true;
-                    option.style.color = 'lightgrey'; // Visually indicate disabled
-                } else {
-                    option.disabled = false;
-                    option.style.color = '';
+            // Add event listener for live update
+            checkbox.addEventListener('change', () => {
+                const sankeyCard = document.getElementById('sankeyCard');
+                // Only update if the Sankey diagram card is currently visible
+                if (sankeyCard && sankeyCard.style.display !== 'none' && sankeyCard.style.display !== '') {
+                    fetchAndRenderSankeyDiagram();
                 }
             });
+
+            const label = document.createElement('label');
+            label.htmlFor = checkbox.id;
+            label.textContent = dim.label;
+            label.style.marginLeft = "5px";
+
+            div.appendChild(checkbox);
+            div.appendChild(label);
+            container.appendChild(div);
         });
     }
 

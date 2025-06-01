@@ -1,5 +1,12 @@
 # Changelog
 
+## [2025-06-01]
+### Changed
+- Sankey diagram now shows all dimensions
+
+### Fixed
+- Issue where anomaly infromation between heatmap and cluster view were inconsistent with large csv
+
 ## [2025-05-29]
 ### Changed
 - Sankey diagram updates
