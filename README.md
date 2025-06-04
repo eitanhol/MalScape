@@ -1,4 +1,15 @@
 # Changelog
+## [2025-06-03]
+### Added
+- Reorganize arrows to Sankey diagram
+
+### In Progress
+- Highlight heatmap clusters that are selected in Sankey diagram
+- Added button to apply selected clusters
+
+## [2025-06-02]
+### Attempted
+- Optimization of CSV processing
 
 ## [2025-06-01]
 ### Changed
