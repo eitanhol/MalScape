@@ -683,12 +683,13 @@
     <h2>MalScape</h2>
     <div id="topControls">
         <div style="margin-bottom: 16px; background: #fff; padding: 12px; border-radius: 4px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-            <label for="fileInput"><strong>Upload CSV File:</strong></label>
-            <input type="file" id="fileInput" accept=".csv" title="Select CSV file to visualize.">
-            <button id="downloadButton" title="Download currently loaded data as CSV.">Download Processed CSV File</button>
+            <label for="fileInput"><strong>Upload Parquet File:</strong></label>
+            <input type="file" id="fileInput" accept=".parquet" title="Select Parquet file to visualize.">
+            <button id="downloadProcessedDataBtn" title="Download currently loaded data as CSV.">Download Processed Data (CSV)</button>
             <button id="showPacketSimilarityBtn" title="Visualize Louvain IP Communities" style="margin-left: 8px;">Show Community IP Graph</button>
             <button id="showSankeyBtn" title="Visualize data flows with Sankey diagram" style="margin-left: 8px;">Show Sankey Diagram</button>
         </div>
+        <div id="csvProcessTime" style="font-size: 0.75em; color: #555; margin-top: -12px; margin-bottom: 12px; padding-left: 2px; text-align: left; display: none; height: 1.2em;"></div>
       <div class="control-group" title="Filter data displayed in heatmap.">
         <label for="rowOrderSelect">Order Cells By:</label>
         <select id="rowOrderSelect" title="Order heatmap rows by metric value."> <option value="descending">Descending</option> <option value="ascending">Ascending</option> </select>
@@ -700,30 +701,36 @@
         <input type="number" id="minDestinationAmtFilter" placeholder="1" step="1" style="width:60px;" title="Minimum destination appearances.">
         <label for="maxDestinationAmtFilter">Max Dst:</label>
         <input type="number" id="maxDestinationAmtFilter" placeholder="Inf" step="1" style="width:60px;" title="Maximum destination appearances.">
-        <label for="payloadSearch">Payload:</label>
-        <input type="text" id="payloadSearch" placeholder="Keyword" style="width:100px;" title="Filter by payload keyword.">
+        
+        <label for="payloadSearch" style="display:none;">Payload:</label>
+        <input type="text" id="payloadSearch" placeholder="Keyword" style="width:100px; display:none;" title="Filter by payload keyword (disabled for current CSV format).">
+        
         <label for="sourceFilter">Src IP:</label>
         <input type="text" id="sourceFilter" placeholder="IP" style="width:100px;" title="Filter by source IP/subnet.">
         <label for="destinationFilter">Dst IP:</label>
         <input type="text" id="destinationFilter" placeholder="IP" style="width:100px;" title="Filter by destination IP/subnet.">
         <label for="protocolFilter">Proto:</label>
         <input type="text" id="protocolFilter" placeholder="TCP" style="width:60px;" title="Filter by protocol name.">
-        <label for="entropyMinFilter">Min Ent:</label>
-        <input type="number" id="entropyMinFilter" placeholder="0.0" step="0.1" style="width:60px;" title="Minimum payload entropy.">
-        <label for="entropyMaxFilter">Max Ent:</label>
-        <input type="number" id="entropyMaxFilter" placeholder="Inf" step="0.1" style="width:60px;" title="Maximum payload entropy.">
+        
+        <label for="entropyMinFilter" style="display:none;">Min Ent:</label> <input type="number" id="entropyMinFilter" placeholder="0.0" step="0.1" style="width:60px; display:none;" title="Minimum payload entropy.">
+        <label for="entropyMaxFilter" style="display:none;">Max Ent:</label> <input type="number" id="entropyMaxFilter" placeholder="Inf" step="0.1" style="width:60px; display:none;" title="Maximum payload entropy.">
+        
         <button id="applyFiltersBtn" style="margin-left: 10px;" title="Apply selected filters to heatmap.">Apply Filters</button>
       </div>
     </div>
     <div id="dendrogramCard" style="display: none; background: #fff; box-shadow: 0 2px 10px rgba(0,0,0,0.1); padding: 20px; border-radius: 12px; margin: 20px 0; border: 1px solid #e2e8f0;">
-        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px;">
-            <div>
-                <h3>Hierarchical Cluster Tree</h3>
-                <span id="treeInfoSpan" style="font-size: 12px; color: #555; margin-left: 10px;"></span>
-                <span id="timeInfoSpan" style="font-size: 12px; color: #555; margin-left: 15px;"></span>
-            </div>
-            <button onclick="resetInlineZoom()" style="padding: 6px 12px; margin-left: auto;">Reset Zoom</button>
+        <div class="dendro-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
+            <h3>Hierarchical Cluster Tree</h3>
+            <button onclick="resetInlineZoom()" style="padding: 6px 12px; background-color: #6c757d; color: white; border: none; border-radius: 4px; font-family: 'Inter', sans-serif; font-size: 14px; font-weight: 500; cursor: pointer;">Reset Zoom</button>
         </div>
+
+        <div id="dendrogramMetaDataLine" style="font-size: 12px; color: #555; margin-left: 0px; line-height: 1.4; font-weight: normal; margin-bottom: 10px; padding-left: 2px;">
+            </div>
+        
+        <span id="treeInfoSpan" style="display:none;"></span>
+        <span id="timeInfoSpan" style="display:none;"></span>
+        <span id="packetCountSpan" style="display:none;"></span>
+
         <div id="inline-dendrogram-container" style="margin-bottom: 10px; width: 100%; height: 400px; overflow: hidden; border: 1px solid #dee2e6; border-radius: 6px; position: relative;">
             <svg id="inlineDendrogramSvg" style="width: 100%; height: 100%; display: block; cursor: grab;"></svg>
         </div>
@@ -775,11 +782,12 @@
             <div class="control-section">
                 <label for="thresholdSlider">Visual Threshold:</label>
                 <input type="range" id="thresholdSlider" min="0" max="100" value="100" style="width: 150px; vertical-align: middle;">
-                <span id="thresholdValue" style="min-width: 35px; display: inline-block; text-align: right;">100%</span>
+                <span id="thresholdValue" style="min-width: 35px; display: inline-block; text-align: right; font-size: 14px; vertical-align: middle;">100%</span>
                 <button id="applyThresholdBtn" style="padding: 6px 12px;" title="Group clusters below the current threshold line">Apply Threshold</button>
                 <button id="resetGroupingBtn" style="padding: 6px 12px; background-color: #f56565;" title="Revert tree to its original state before thresholding">Reset Grouping</button>
             </div>
         </div>
+        
         <div id="reclusterMessageContainer" style="display: flex; align-items: center; gap: 10px; margin-top: 10px; width: fit-content;">
             <div id="reclusterMessage" style="color: #e53e3e; font-size: 13px; font-weight: 500; min-height: 1em;"></div>
             <button id="acknowledgeNewClustersBtn" style="display: none; padding: 4px 8px; font-size: 12px; background-color: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer;">Acknowledge</button>
@@ -806,6 +814,9 @@
                     </div>
                 <button id="applySankeyToHeatmapBtn" disabled style="margin-top: 10px; margin-bottom: 10px; background-color: #6c757d;">
                     Apply Sankey Selection to Heatmap
+                </button>
+                <button id="revertSankeyFilterBtn" disabled title="Revert the heatmap to its state before the Sankey filter was applied" style="margin-top: 10px; margin-bottom: 10px; background-color: #6c757d;">
+                    Revert Sankey Filter
                 </button>
             </div>
             <div id="sankey-diagram-container" style="width: 100%; height: 700px; position: relative; border: 1px solid #ccc; margin-top:10px; background-color: #fdfdfd; overflow: auto;">
@@ -893,18 +904,25 @@
     window.fullHeatmapData = {};
     window.heatmapSortOrders = {};
     const metrics = [
-     { label: "Count", value: "count" }, { label: "Unique IPs", value: "Unique IPs" },
-     { label: "Unique Sources", value: "Unique Sources" }, { label: "Unique Destinations", value: "Unique Destinations" },
-     { label: "Packet Length", value: "Length" }, { label: "Payload Length", value: "Len" },
-     { label: "Payload Size Variance", value: "Payload Size Variance" },
-     { label: "Start Time", value: "Start Time" },
-     { label: "Duration", value: "Duration" },
-     { label: "Average Inter-Arrival Time", value: "Average Inter-Arrival Time" },
-     { label: "Packets per Second", value: "Packets per Second" },
-     { label: "Total Data Sent", value: "Total Data Sent" },
-     { label: "% SYN packets", value: "% SYN packets" }, { label: "% RST packets", value: "% RST packets" },
-     { label: "% ACK packets", value: "% ACK packets" }, { label: "% PSH packets", value: "% PSH packets" }
- ];
+        { label: "Count", value: "count" }, { label: "Unique IPs", value: "Unique IPs" },
+        { label: "Unique Sources", value: "Unique Sources" }, { label: "Unique Destinations", value: "Unique Destinations" },
+        { label: "Packet Length", value: "Length" }, { label: "Payload Length", value: "Len" },
+        { label: "Payload Size Variance", value: "Payload Size Variance" },
+        { label: "Start Time", value: "Start Time" },
+        { label: "Duration", value: "Duration" },
+        { label: "Average Inter-Arrival Time", value: "Average Inter-Arrival Time" },
+        { label: "Packets per Second", value: "Packets per Second" },
+        { label: "Total Data Sent", value: "Total Data Sent" },
+        { label: "% SYN packets", value: "% SYN packets" }, { label: "% RST packets", value: "% RST packets" },
+        { label: "% ACK packets", value: "% ACK packets" }, { label: "% PSH packets", value: "% PSH packets" }
+    ];
+
+    var currentDisplayableTimeInfo = {
+        start: "Start: N/A",
+        end: "End: N/A",
+        duration: "Duration: N/A",
+        isSet: false
+    };
 
     let protocolColorMap = {};
     let globalCy;
@@ -1526,6 +1544,8 @@
                         sidebarCy.layout(sidebarLayoutOptions[currentLayout]).run();
                     }
                     
+                    updateLegend(sidebarCy.edges());
+
                     if (selectedSidebarNodes.size === 0 && selectedSidebarEdges.size === 0) {
                         loadSidebarClusterTable(stringClusterID, 1);
                     }
@@ -2669,10 +2689,18 @@
      }
 
     document.addEventListener('DOMContentLoaded', async () => {
+        const page_load_render_start_time = performance.now();
+        const csvProcessTimeDiv = document.getElementById('csvProcessTime');
+        
+        if (csvProcessTimeDiv) {
+            csvProcessTimeDiv.style.display = 'none';
+            csvProcessTimeDiv.textContent = '';
+        }
+
         tooltip = d3.select("#tooltip");
 
         const fileInput = document.getElementById('fileInput');
-        const downloadButton = document.getElementById('downloadButton');
+        const downloadButton = document.getElementById('downloadProcessedDataBtn'); 
         const applyFiltersBtn = document.getElementById('applyFiltersBtn');
         const sidebarToggleBtn = document.getElementById('sidebar-toggle');
         const resetSidebarBtn = document.getElementById('resetSidebarBtn');
@@ -2697,14 +2725,60 @@
         const cancelLoadingBtn = document.getElementById('cancelLoadingBtn');
         const showSankeyBtn = document.getElementById('showSankeyBtn');
         const sankeyCard = document.getElementById('sankeyCard');
-        const applySankeyToHeatmapBtn = document.getElementById('applySankeyToHeatmapBtn'); // New button
+        const showPacketSimilarityBtn = document.getElementById('showPacketSimilarityBtn');
+        const refreshIpGraphBtn = document.getElementById('refreshIpGraphBtn');
+        const applySankeyToHeatmapBtn = document.getElementById('applySankeyToHeatmapBtn');
+        const revertSankeyFilterBtn = document.getElementById('revertSankeyFilterBtn');
 
-        window.currentSankeyDimensionsOrder = [...DEFAULT_SANKEY_DIMENSIONS]; // Ensure this uses the globally defined DEFAULT_SANKEY_DIMENSIONS
-        populateSankeyDimensionCheckboxes(); 
+        if (applySankeyToHeatmapBtn) {
+            applySankeyToHeatmapBtn.addEventListener('click', async () => {
+                if (window.activeSankeyNodeFilter) {
+                    await updateMainViewAfterSankeyFilter();
+                    if (revertSankeyFilterBtn) revertSankeyFilterBtn.disabled = false;
+                } else {
+                    alert("No Sankey node selected to apply as filter.");
+                }
+            });
+        }
+
+        if (revertSankeyFilterBtn) {
+            revertSankeyFilterBtn.addEventListener('click', async () => {
+                showLoading(); // Show loading screen immediately
+                try {
+                    // Clear the filter state
+                    window.activeSankeyNodeFilter = null;
+                    window.sankeyMatchingClusterIds.clear();
+
+                    // Redraw the heatmap without highlights, which is the async part
+                    await loadInlineDendrogram();
+
+                    // Reset button states after the heatmap is redrawn
+                    revertSankeyFilterBtn.disabled = true;
+                    if (applySankeyToHeatmapBtn) {
+                        applySankeyToHeatmapBtn.disabled = true;
+                        // Explicitly set style to grayed out
+                        applySankeyToHeatmapBtn.style.backgroundColor = "#6c757d";
+                    }
+
+                    // Also clear the visual focus in the Sankey diagram itself
+                    const sankeySVG = d3.select("#sankey-diagram-container svg");
+                    if (!sankeySVG.empty()) {
+                        sankeySVG.dispatch('click'); // Simulates clicking the background to clear focus
+                    }
+                } catch (error) {
+                    console.error("Error during Sankey filter revert:", error);
+                    alert("An error occurred while reverting the filter.");
+                } finally {
+                    hideLoading(); // Hide loading screen after everything is done
+                }
+            });
+        }
+
+        window.currentSankeyDimensionsOrder = [...DEFAULT_SANKEY_DIMENSIONS];
+        populateSankeyDimensionCheckboxes();
 
         if (cancelLoadingBtn) {
             cancelLoadingBtn.addEventListener('click', () => {
-                console.log("Cancel button clicked.");
                 if (globalAbortController) {
                     globalAbortController.abort();
                 }
@@ -2713,12 +2787,8 @@
                 if (reclusterMessageDiv) {
                     reclusterMessageDiv.textContent = "Operation cancelled by user.";
                     reclusterMessageDiv.style.color = "#757575";
-                } else {
-                    const treeInfoSpan = document.getElementById('treeInfoSpan');
-                    if (treeInfoSpan) treeInfoSpan.textContent = "Operation cancelled.";
                 }
-                cancelLoadingBtn.disabled = true;
-                console.log("Loading operation cancelled by user.");
+                if (cancelLoadingBtn) cancelLoadingBtn.disabled = true;
             });
         }
 
@@ -2728,126 +2798,213 @@
             showLoading();
             updateLegend();
             await updateHeatmap();
-            
+            await updateTimeInfoDisplay();
+
             if (window.heatmapCountSortOrder && window.heatmapCountSortOrder.length > 0) {
                 window.allClusterIdsMasterList = [...new Set(window.heatmapCountSortOrder.map(String))];
-                console.log("Master cluster ID list populated on initial load:", window.allClusterIdsMasterList.length);
             } else {
-                console.warn("Initial heatmapCountSortOrder was empty after first updateHeatmap.");
                 if (window.fullHeatmapData && window.fullHeatmapData['Count']) {
                     window.allClusterIdsMasterList = window.fullHeatmapData['Count'].map(d => String(d.cluster));
-                    console.log("Master cluster ID list populated from fullHeatmapData['Count'] on initial load:", window.allClusterIdsMasterList.length);
                 } else {
                     window.allClusterIdsMasterList = [];
                 }
             }
-
+            
             await loadInlineDendrogram();
-            await updateTimeInfoDisplay();
+            
             updateControlsState();
             updateRowOrderSelectState();
+
         } catch (error) {
             if (error.name !== 'AbortError') {
                 console.error("Error during initial page load sequence:", error);
                 const dendroCardElement = document.getElementById('dendrogramCard');
-                if(dendroCardElement) {
-                    dendroCardElement.innerHTML = `<p style="color:red; padding: 20px;">Error loading initial data: ${error.message || 'Unknown error'}. Please try uploading a CSV file.</p>`;
+                if (dendroCardElement) {
+                    const errorDisplay = `<p style="color:red; padding: 20px; text-align:center;">Error loading initial data: ${error.message || 'Unknown error'}. Please try uploading a file.</p>`;
+                    const dendroHeader = dendroCardElement.querySelector('.dendro-header');
+                    const metaDataLine = document.getElementById('dendrogramMetaDataLine');
+                    const svgContainer = document.getElementById('inline-dendrogram-container');
+                    const treeControlsDiv = document.getElementById('treeControls');
+
+                    if (dendroHeader) dendroHeader.style.display = 'none';
+                    if (metaDataLine) metaDataLine.innerHTML = 'Metadata: Error';
+                    if (svgContainer) svgContainer.innerHTML = errorDisplay;
+                    if (treeControlsDiv) treeControlsDiv.style.display = 'none';
                     dendroCardElement.style.display = 'block';
                 } else {
-                    alert(`Error loading initial data: ${error.message || 'Unknown error'}. Please try uploading a CSV file.`);
+                    alert(`Error loading initial data: ${error.message || 'Unknown error'}. Please try uploading a file.`);
                 }
             } else {
                 console.log("Initial page load aborted by user.");
+                const dendroCardElement = document.getElementById('dendrogramCard');
+                if (dendroCardElement) dendroCardElement.style.display = 'none';
+                 if (csvProcessTimeDiv) {
+                    csvProcessTimeDiv.textContent = 'Initial load cancelled.';
+                    csvProcessTimeDiv.style.display = 'block';
+                }
             }
         } finally {
             if (!globalAbortController.signal.aborted) {
                 hideLoading();
             }
+
+            const page_load_render_end_time = performance.now();
+            const duration_s = ((page_load_render_end_time - page_load_render_start_time) / 1000).toFixed(2);
+            const localCsvProcessTimeDiv = document.getElementById('csvProcessTime'); 
+
+            if (localCsvProcessTimeDiv) {
+                if (!globalAbortController.signal.aborted && (window.lastTreeData || (window.fullHeatmapData && Object.keys(window.fullHeatmapData).length > 0))) {
+                    localCsvProcessTimeDiv.textContent = `Total time to display data: ${duration_s} s`;
+                    localCsvProcessTimeDiv.style.display = 'block';
+                } else if (globalAbortController.signal.aborted) {
+                }
+                 else {
+                    localCsvProcessTimeDiv.style.display = 'none';
+                    localCsvProcessTimeDiv.textContent = '';
+                }
+            }
         }
 
-        if(fileInput) {
+        if (fileInput) {
             fileInput.addEventListener('change', async function(event) {
                 const file = event.target.files[0];
+                const localProcessingTimeDiv = document.getElementById('csvProcessTime'); 
+                let client_total_processing_start_time;
+        
+                if (localProcessingTimeDiv) {
+                    localProcessingTimeDiv.style.display = 'none';
+                    localProcessingTimeDiv.textContent = '';
+                }
+        
                 if (file) {
-                    showLoading();
-                    const reader = new FileReader();
-                    reader.onload = async function(e) {
-                        const csvText = e.target.result;
-                        try {
-                            const processResponse = await fetch(`${API_BASE_URL}/process_csv`, {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ csv_text: csvText }),
-                                signal: globalAbortController.signal
-                            });
-                            if (globalAbortController.signal.aborted) throw new DOMException("Operation aborted by user.", "AbortError");
-                            if (!processResponse.ok) {
-                                const err = await processResponse.json().catch(() => ({ error: processResponse.statusText }));
-                                throw new Error(err.error || `Processing failed (${processResponse.status})`);
-                            }
-                            const confirmationData = await processResponse.json();
-                            console.log('CSV processed successfully:', confirmationData.message);
-                            protocolColorMap = {}; currentNewClusterIds.clear();
-                            window.activeSankeyNodeFilter = null; window.allClusterIdsMasterList = [];
-                            if(applySankeyToHeatmapBtn) {
-                                applySankeyToHeatmapBtn.disabled = true;
-                                applySankeyToHeatmapBtn.style.backgroundColor = "#6c757d";
-                            }
+                    if (!file.name.toLowerCase().endsWith('.parquet')) {
+                        alert("Invalid file type. Please select a .parquet file.");
+                        event.target.value = null; 
+                        return;
+                    }
 
-                            if (globalAbortController.signal.aborted) throw new DOMException("Operation aborted by user.", "AbortError");
-                            updateLegend();
-                            if (globalAbortController.signal.aborted) throw new DOMException("Operation aborted by user.", "AbortError");
-                            await updateHeatmap();
-                            if (window.heatmapCountSortOrder && window.heatmapCountSortOrder.length > 0) {
-                                window.allClusterIdsMasterList = [...new Set(window.heatmapCountSortOrder.map(String))];
-                                console.log("Master cluster ID list re-populated after file load:", window.allClusterIdsMasterList.length);
+                    client_total_processing_start_time = performance.now();
+                    showLoading();
+        
+                    const formData = new FormData();
+                    formData.append('file', file); 
+
+                    try {
+                        const processResponse = await fetch(`${API_BASE_URL}/process_uploaded_file`, { 
+                            method: 'POST',
+                            body: formData, 
+                            signal: globalAbortController.signal
+                        });
+        
+                        if (globalAbortController.signal.aborted) throw new DOMException("Operation aborted by user.", "AbortError");
+                        if (!processResponse.ok) {
+                            const errText = await processResponse.text();
+                            let errJson = {}; try { errJson = JSON.parse(errText); } catch (e) {}
+                            throw new Error(errJson.error || `Processing failed (${processResponse.status}): ${errText.substring(0, 200)}`);
+                        }
+                        
+                        const responseData = await processResponse.json(); 
+                        console.log("File processing response:", responseData);
+                        
+                        protocolColorMap = {};
+                        currentNewClusterIds.clear();
+                        window.activeSankeyNodeFilter = null;
+                        window.allClusterIdsMasterList = [];
+                        const applySankeyBtn = document.getElementById('applySankeyToHeatmapBtn');
+                        if (applySankeyBtn) {
+                            applySankeyBtn.disabled = true;
+                        }
+        
+                        if (globalAbortController.signal.aborted) throw new DOMException("Operation aborted by user.", "AbortError");
+                        updateLegend();
+                        if (globalAbortController.signal.aborted) throw new DOMException("Operation aborted by user.", "AbortError");
+                        await updateHeatmap();
+        
+                        if (window.heatmapCountSortOrder && window.heatmapCountSortOrder.length > 0) {
+                            window.allClusterIdsMasterList = [...new Set(window.heatmapCountSortOrder.map(String))];
+                        } else {
+                            if (window.fullHeatmapData && window.fullHeatmapData['Count']) {
+                                window.allClusterIdsMasterList = window.fullHeatmapData['Count'].map(d_item => String(d_item.cluster));
                             } else {
-                                if (window.fullHeatmapData && window.fullHeatmapData['Count']) {
-                                    window.allClusterIdsMasterList = window.fullHeatmapData['Count'].map(d_item => String(d_item.cluster));
-                                    console.log("Master cluster ID list re-populated from fullHeatmapData['Count'] post-file:", window.allClusterIdsMasterList.length);
+                                window.allClusterIdsMasterList = [];
+                            }
+                        }
+                        
+                        if (globalAbortController.signal.aborted) throw new DOMException("Operation aborted by user.", "AbortError");
+                        await updateTimeInfoDisplay();
+                        if (globalAbortController.signal.aborted) throw new DOMException("Operation aborted by user.", "AbortError");
+                        await loadInlineDendrogram();
+        
+                        clearSidebarVisualization(); 
+                        clusterHighlightColors.clear();
+                        if (isSidebarOpen) toggleSidebar(false);
+
+                        const localThresholdSlider = document.getElementById('thresholdSlider');
+                        if (localThresholdSlider && window.lastTreeRoot) {
+                            localThresholdSlider.value = 100;
+                            const thresholdValueSpan = document.getElementById('thresholdValue');
+                            if(thresholdValueSpan) thresholdValueSpan.textContent = '100%';
+                            requestAnimationFrame(() => { localThresholdSlider.dispatchEvent(new Event('input')); });
+                        }
+                        updateControlsState();
+                        updateRowOrderSelectState();
+        
+                    } catch (error) {
+                        if (error.name === 'AbortError') {
+                            console.log("File processing aborted by user.");
+                            if(localProcessingTimeDiv) {
+                                localProcessingTimeDiv.textContent = 'File processing cancelled.';
+                                localProcessingTimeDiv.style.display = 'block';
+                            }
+                        } else {
+                            alert(`Error processing Parquet file: ${error.message}`);
+                            const dendroCardElem = document.getElementById('dendrogramCard');
+                            if(dendroCardElem) dendroCardElem.innerHTML = '<p style="color: red; text-align: center;">Could not process uploaded file.</p>';
+                            const metaDataLine = document.getElementById('dendrogramMetaDataLine');
+                            if(metaDataLine) metaDataLine.innerHTML = 'Metadata: Error';
+                            
+                            window.originalTreeData = null; window.lastTreeData = null; window.lastTreeRoot = null;
+                            window.fullHeatmapData = {}; currentNewClusterIds.clear(); window.activeSankeyNodeFilter = null; window.allClusterIdsMasterList = [];
+                            updateLegend();
+                            clearSidebarVisualization();
+                            updateControlsState();
+                            updateRowOrderSelectState();
+                            if(localProcessingTimeDiv) localProcessingTimeDiv.style.display = 'none';
+                        }
+                    } finally {
+                        const client_total_processing_end_time = performance.now();
+                        if (typeof client_total_processing_start_time === 'number') {
+                            const duration_ms = client_total_processing_end_time - client_total_processing_start_time;
+                            const duration_s = (duration_ms / 1000).toFixed(2);
+                            
+                            if (!globalAbortController.signal.aborted) {
+                                if (localProcessingTimeDiv) {
+                                    localProcessingTimeDiv.textContent = `Total time to display data: ${duration_s} s`;
+                                    localProcessingTimeDiv.style.display = 'block';
                                 }
                             }
-                            if (globalAbortController.signal.aborted) throw new DOMException("Operation aborted by user.", "AbortError");
-                            await loadInlineDendrogram();
-                            if (globalAbortController.signal.aborted) throw new DOMException("Operation aborted by user.", "AbortError");
-                            await updateTimeInfoDisplay();
-                            clearSidebarVisualization();
-                            if(isSidebarOpen) toggleSidebar(false);
-                            const localThresholdSlider = document.getElementById('thresholdSlider');
-                            if (localThresholdSlider && window.lastTreeRoot) {
-                                requestAnimationFrame(() => { localThresholdSlider.dispatchEvent(new Event('input')); });
-                            }
-                            updateControlsState(); updateRowOrderSelectState();
-                        } catch (error) {
-                            if (error.name === 'AbortError') { console.log("File processing and visualization update sequence aborted by user."); } 
-                            else {
-                                console.error('Error processing file or updating display:', error); alert(`Error: ${error.message}`);
-                                const dendroCardElem = document.getElementById('dendrogramCard');
-                                if(dendroCardElem) dendroCardElem.innerHTML = '<p style="color: red; text-align: center;">Could not process CSV data or update display.</p>';
-                                const timeInfoSpanElem = document.getElementById('timeInfoSpan');
-                                if(timeInfoSpanElem) timeInfoSpanElem.textContent = '';
-                                window.originalTreeData = null; window.lastTreeData = null; window.lastTreeRoot = null;
-                                window.fullHeatmapData = {}; currentNewClusterIds.clear(); window.activeSankeyNodeFilter = null; window.allClusterIdsMasterList = [];
-                                updateLegend(); clearSidebarVisualization(); updateControlsState(); updateRowOrderSelectState();
-                            }
-                        } finally { if (!globalAbortController.signal.aborted) hideLoading(); }
-                    };
-                    reader.onerror = function(e_reader) {
-                        console.error("Error reading file:", e_reader); alert("Error reading file.");
-                        if (!globalAbortController.signal.aborted) hideLoading();
-                    };
-                    reader.readAsText(file);
+                        }
+        
+                        if (!globalAbortController.signal.aborted ||
+                            (globalAbortController.signal.aborted && document.getElementById('loading-overlay').style.display === 'flex')) {
+                            hideLoading();
+                        }
+                    }
+                } else { 
+                    if (localProcessingTimeDiv) { localProcessingTimeDiv.style.display = 'none';}
                 }
-                event.target.value = null;
+                if (event.target) event.target.value = null;
             });
         }
 
         if(downloadButton) {
             downloadButton.addEventListener('click', function() {
-                if (window.originalTreeData || global_df) { 
-                    window.location.href = `${API_BASE_URL}/download_csv`;
+                const dataLoadedCheck = window.originalTreeData && Object.keys(window.originalTreeData).length > 0 && !window.originalTreeData.error;
+
+                if (dataLoadedCheck) { 
+                    window.location.href = `${API_BASE_URL}/download_processed_data`; 
                 } else {
-                    alert("No processed data available to download. Please upload a CSV file first.");
+                    alert("No processed data available to download. Please upload a Parquet file first.");
                 }
             });
         }
@@ -2860,11 +3017,14 @@
                     window.sankeyMatchingClusterIds.clear();
                     if(applySankeyToHeatmapBtn) {
                         applySankeyToHeatmapBtn.disabled = true;
-                        applySankeyToHeatmapBtn.style.backgroundColor = "#6c757d";
                     }
-                    console.log("Sankey filter cleared by Apply Main Filters button. Apply button disabled.");
+                    if(revertSankeyFilterBtn) {
+                        revertSankeyFilterBtn.disabled = true;
+                    }
+                    
                     await updateHeatmap(); 
                     if (globalAbortController.signal.aborted) throw new DOMException("Operation aborted by user.", "AbortError");
+                    
                     if (window.heatmapCountSortOrder && window.heatmapCountSortOrder.length > 0) {
                         window.allClusterIdsMasterList = [...new Set(window.heatmapCountSortOrder.map(String))];
                     } else {
@@ -2872,9 +3032,13 @@
                             window.allClusterIdsMasterList = window.fullHeatmapData['Count'].map(d => String(d.cluster));
                         } else { window.allClusterIdsMasterList = []; }
                     }
-                    console.log("Master cluster ID list updated after applying main filters:", window.allClusterIdsMasterList.length);
+                    
+                    await updateTimeInfoDisplay();
+                    if (globalAbortController.signal.aborted) throw new DOMException("Operation aborted by user.", "AbortError");
+                    
                     await loadInlineDendrogram(); 
                     if (globalAbortController.signal.aborted) throw new DOMException("Operation aborted by user.", "AbortError");
+                    
                     highlightTreeClusters(new Set(clusterHighlightColors.keys()));
                     const localThresholdSlider = document.getElementById('thresholdSlider');
                     if (localThresholdSlider && window.lastTreeRoot) {
@@ -2882,13 +3046,21 @@
                     }
                 } catch (error) {
                     if (error.name === 'AbortError') { console.log("Filter application aborted by user."); } 
-                    else { console.error("Error applying filters and updating visualizations:", error); alert(`Error applying filters: ${error.message || 'Unknown error'}`); }
+                    else { alert(`Error applying filters: ${error.message || 'Unknown error'}`); }
                 } finally { if (!globalAbortController.signal.aborted) hideLoading(); }
             });
         }
 
         if(sidebarToggleBtn) { sidebarToggleBtn.addEventListener('click', () => toggleSidebar()); }
-        if(resetSidebarBtn) { resetSidebarBtn.addEventListener('click', () => { clearSidebarVisualization(); updateLegend(); resetHeatmapHighlights(); }); }
+        
+        if(resetSidebarBtn) { 
+            resetSidebarBtn.addEventListener('click', () => {
+                console.log("Resetting sidebar view and heatmap/tree selections.");
+                clearSidebarVisualization(); 
+                updateLegend();
+            }); 
+        }
+        
         if (sidebarFullscreenBtn) { sidebarFullscreenBtn.addEventListener('click', toggleSidebarFullscreen); }
         if (saveSelectionBtn) { saveSelectionBtn.addEventListener('click', handleSaveSelection); }
 
@@ -2905,7 +3077,44 @@
 
         if (sidebarTableContainer) { sidebarTableContainer.addEventListener('click', handleSidebarTableRowClick); }
         if (sidebarSearchInput) { sidebarSearchInput.addEventListener('input', filterSidebarTable); }
-        if(sidebarGoPageBtn) { /* ... (sidebarGoPageBtn event listener as before) ... */ }
+        
+        if(sidebarGoPageBtn) { 
+            sidebarGoPageBtn.addEventListener('click', function () {
+                let pageInput = document.getElementById('sidebarCurrentPageInput');
+                let page = parseInt(pageInput.value, 10);
+                const totalPagesStr = document.getElementById('sidebarTotalPages').textContent;
+                const totalPages = totalPagesStr === '?' ? Infinity : parseInt(totalPagesStr, 10);
+
+                if (!isNaN(page) && page >= 1 && (page <= totalPages || totalPages === Infinity)) {
+                    if (sidebarTableMode === 'cluster' && currentSidebarTableClusterId) {
+                        loadSidebarClusterTable(currentSidebarTableClusterId, page);
+                    } else if (sidebarTableMode === 'edges') {
+                        let edgeList = [];
+                        if (selectedNodeId && sidebarCy) { 
+                            const node = sidebarCy.getElementById(selectedNodeId);
+                            if (node && node.length > 0) {
+                                edgeList = node.connectedEdges().map(edge => ({ source: edge.data('source'), destination: edge.data('target'), protocol: edge.data('Protocol') }));
+                            }
+                        } else if (selectedSidebarEdges.size > 0) {
+                            edgeList = Array.from(selectedSidebarEdges).map(key => {
+                                const parts = key.split('|');
+                                return { source: parts[0], destination: parts[1], protocol: parts[2] };
+                            });
+                        }
+                        if (edgeList.length > 0) {
+                            loadSidebarMultiEdgeTable(edgeList, page);
+                        } else {
+                             console.warn("Sidebar pagination in edge mode, but no edges/nodes identified for table.");
+                        }
+                    } else {
+                         console.warn("Sidebar pagination clicked, but table context (cluster/edge) is unclear or no target ID.");
+                    }
+                } else {
+                    alert(`Please enter a valid page number between 1 and ${totalPagesStr}.`);
+                }
+            }); 
+        }
+        
         if(sidebarLayoutSelect) { sidebarLayoutSelect.addEventListener('change', applySidebarLayout); }
         if(sidebarNodeSizeMin) sidebarNodeSizeMin.addEventListener('input', applySidebarSizeControls);
         if(sidebarNodeSizeMax) sidebarNodeSizeMax.addEventListener('input', applySidebarSizeControls);
@@ -2916,10 +3125,36 @@
             metricSelect.addEventListener('change', async () => {
                 updateRowOrderSelectState(); 
                 if (window.lastTreeData) {
-                    await loadInlineDendrogram(); 
-                    highlightTreeClusters(new Set(clusterHighlightColors.keys())); 
-                    const localThresholdSlider = document.getElementById('thresholdSlider');
-                    requestAnimationFrame(() => { if (localThresholdSlider && window.lastTreeRoot) localThresholdSlider.dispatchEvent(new Event('input')); });
+                    showLoading();
+                    try {
+                        await loadInlineDendrogram(); 
+                        highlightTreeClusters(new Set(clusterHighlightColors.keys())); 
+                        const localThresholdSlider = document.getElementById('thresholdSlider');
+                        requestAnimationFrame(() => { if (localThresholdSlider && window.lastTreeRoot) localThresholdSlider.dispatchEvent(new Event('input')); });
+                    } catch(error) {
+                        if(error.name !== 'AbortError') console.error("Error reloading dendrogram on metric change:", error);
+                    } finally {
+                        if(!globalAbortController.signal.aborted) hideLoading();
+                    }
+                }
+            });
+        }
+        
+        const rowOrderSelect = document.getElementById("rowOrderSelect");
+        if (rowOrderSelect && metricSelect) {
+            rowOrderSelect.addEventListener('change', async () => {
+                if (metricSelect.value !== 'Default' && window.lastTreeData) {
+                    showLoading();
+                    try {
+                        await loadInlineDendrogram();
+                        highlightTreeClusters(new Set(clusterHighlightColors.keys()));
+                        const localThresholdSlider = document.getElementById('thresholdSlider');
+                        requestAnimationFrame(() => { if (localThresholdSlider && window.lastTreeRoot) localThresholdSlider.dispatchEvent(new Event('input')); });
+                    } catch(error) {
+                         if(error.name !== 'AbortError') console.error("Error reloading dendrogram on row order change:", error);
+                    } finally {
+                        if(!globalAbortController.signal.aborted) hideLoading();
+                    }
                 }
             });
         }
@@ -2927,68 +3162,148 @@
         if (reorderTreeCheckbox) { 
             reorderTreeCheckbox.addEventListener('change', async () => {
                 if (window.lastTreeData) {
-                    await loadInlineDendrogram(); 
-                    highlightTreeClusters(new Set(clusterHighlightColors.keys()));
-                    const localThresholdSlider = document.getElementById('thresholdSlider');
-                    requestAnimationFrame(() => { if (localThresholdSlider && window.lastTreeRoot) localThresholdSlider.dispatchEvent(new Event('input')); });
+                    showLoading();
+                     try {
+                        await loadInlineDendrogram(); 
+                        highlightTreeClusters(new Set(clusterHighlightColors.keys()));
+                        const localThresholdSlider = document.getElementById('thresholdSlider');
+                        requestAnimationFrame(() => { if (localThresholdSlider && window.lastTreeRoot) localThresholdSlider.dispatchEvent(new Event('input')); });
+                    } catch(error) {
+                        if(error.name !== 'AbortError') console.error("Error reloading dendrogram on reorder checkbox change:", error);
+                    } finally {
+                        if(!globalAbortController.signal.aborted) hideLoading();
+                    }
                 }
             });
         }
 
-        if (thresholdSlider && thresholdValueSpan) { /* ... (thresholdSlider event listener as before) ... */ }
+        if (thresholdSlider && thresholdValueSpan) {
+            thresholdSlider.addEventListener('input', function() {
+                const physicalValue = parseInt(this.value, 10);
+                const currentMaxDistForDisplay = window.lastAppliedThreshold || 100;
+                const scaledPercentage = Math.round((physicalValue / 100) * currentMaxDistForDisplay);
+                thresholdValueSpan.textContent = `${scaledPercentage}%`;
+                
+                const svgContent = d3.select("#inlineDendrogramSvg g");
+                const thresholdBar = d3.select("#threshold-bar");
+
+                if (!window.lastTreeRoot || svgContent.empty() || thresholdBar.empty()) {
+                    if(thresholdBar && !thresholdBar.empty()) thresholdBar.style("display", "none");
+                    return;
+                }
+                const layoutHeight = window.currentD3LayoutHeight;
+                const currentD3MarginTop = (typeof margin !== 'undefined' && margin.top) ? margin.top : 30;
+
+                if (layoutHeight && layoutHeight > 0) {
+                    const thresholdY_untransformed = layoutHeight * (scaledPercentage / 100) + currentD3MarginTop;
+                    
+                    const currentTransform = d3.zoomTransform(d3.select("#inlineDendrogramSvg").node());
+                    const transformedY = currentTransform.applyY(thresholdY_untransformed);
+
+                    const currentD3MarginLeft = (typeof margin !== 'undefined' && margin.left) ? margin.left : 30;
+                    const currentD3MarginRight = (typeof margin !== 'undefined' && margin.right) ? margin.right : 30;
+
+                    thresholdBar.attr("x1", currentTransform.applyX(0))
+                                .attr("x2", currentTransform.applyX((window.currentLayoutWidth || 0) + currentD3MarginLeft + currentD3MarginRight))
+                                .attr("y1", transformedY).attr("y2", transformedY)
+                                .style("display", "block");
+                } else {
+                    thresholdBar.style("display", "none");
+                }
+            });
+        }
         if (applyThresholdBtn) { applyThresholdBtn.addEventListener('click', applyThresholdGrouping); }
         if (resetGroupingBtn) { resetGroupingBtn.addEventListener('click', resetGroupingAndRedraw); }
         
         const mainGoPageBtn = document.getElementById('goPageBtn'); 
-        if (mainGoPageBtn) { /* ... (mainGoPageBtn event listener as before) ... */ }
+        if (mainGoPageBtn) { mainGoPageBtn.addEventListener('click', function() {
+            let pageInput = document.getElementById('currentPageInput');
+            let page = parseInt(pageInput.value, 10);
+            const totalPagesStr = document.getElementById('totalPages').textContent;
+            const totalPages = totalPagesStr === '?' ? Infinity : parseInt(totalPagesStr, 10);
+            if (!isNaN(page) && page >= 1 && (page <= totalPages || totalPages === Infinity) && currentClusterID) {
+                loadClusterTablePage(currentClusterID, page);
+            } else {
+                alert(`Please enter a valid page number between 1 and ${totalPagesStr}.`);
+            }
+        }); }
         const mainTableSearchInput = document.getElementById('tableSearchInput');
-        if (mainTableSearchInput) { mainTableSearchInput.addEventListener('input', function() { console.log("Main table search not active."); }); }
+        if (mainTableSearchInput) { mainTableSearchInput.addEventListener('input', function() { console.log("Main table search not active for this view (placeholder)."); }); }
 
-        if (acknowledgeBtn && messageDivForAcknowledge) { /* ... (acknowledgeBtn event listener as before) ... */ }
-        const togglePacketBtn = document.getElementById('showPacketSimilarityBtn'); 
-        if (togglePacketBtn) { /* ... (togglePacketBtn event listener as before) ... */ }
-        const refreshIpGraphBtn = document.getElementById('refreshIpGraphBtn');
-        if (refreshIpGraphBtn) { /* ... (refreshIpGraphBtn event listener as before) ... */ }
-        const ipGraphLayoutSelect = document.getElementById('ipGraphLayoutSelect');
-        if (ipGraphLayoutSelect) { /* ... (ipGraphLayoutSelect event listener as before) ... */ }
+        if (acknowledgeBtn && messageDivForAcknowledge) { 
+            acknowledgeBtn.addEventListener('click', () => {
+                messageDivForAcknowledge.textContent = '';
+                acknowledgeBtn.style.display = 'none';
+                currentNewClusterIds.clear();
+                if (window.lastTreeData) {
+                    showInlineDendrogram(window.lastTreeData, document.getElementById("inline-dendrogram-container").clientHeight, currentNewClusterIds);
+                }
+            });
+        }
+        if (showPacketSimilarityBtn) { 
+            showPacketSimilarityBtn.addEventListener('click', function() {
+                const card = document.getElementById('packetSimilarityCard');
+                if (!card) return;
+                if (card.style.display === 'none' || card.style.display === '') {
+                    const dataLoadedCheck = window.originalTreeData && Object.keys(window.originalTreeData).length > 0 && !window.originalTreeData.error;
 
+                    if (!dataLoadedCheck) { alert("Please upload data first."); return; }
+                    card.style.display = 'block'; this.textContent = 'Hide IP Community Graph';
+                    fetchAndRenderLouvainIpGraph();
+                } else {
+                    card.style.display = 'none'; this.textContent = 'Show Community IP Graph';
+                    if (window.louvainIpCy) { window.louvainIpCy.destroy(); window.louvainIpCy = null; }
+                }
+            });
+        }
+        if (refreshIpGraphBtn) { refreshIpGraphBtn.addEventListener('click', fetchAndRenderLouvainIpGraph); }
+        
         if (showSankeyBtn) {
             showSankeyBtn.addEventListener('click', function() {
-                if (!sankeyCard) { console.error("sankeyCard not found!"); return; }
+                if (!sankeyCard) { return; }
                 if (sankeyCard.style.display === 'none' || sankeyCard.style.display === '') {
-                    if (!window.originalTreeData && !window.lastTreeData && (!globalCy || globalCy.nodes().length === 0) ) {
-                        alert("Please upload and process a CSV file first to generate data for the Sankey diagram."); return;
+                    const dataLoadedCheckSankey = window.originalTreeData && Object.keys(window.originalTreeData).length > 0 && !window.originalTreeData.error;
+
+                    if (!dataLoadedCheckSankey) {
+                        alert("Please upload and process a file first to generate data for the Sankey diagram."); return;
                     }
                     sankeyCard.style.display = 'block'; this.textContent = 'Hide Sankey Diagram';
                     fetchAndRenderSankeyDiagram();
                 } else {
                     sankeyCard.style.display = 'none'; this.textContent = 'Show Sankey Diagram';
-                    window.activeSankeyNodeFilter = null; // Also clear filter when hiding Sankey
+                    window.activeSankeyNodeFilter = null; 
                     window.sankeyMatchingClusterIds.clear();
                     if(applySankeyToHeatmapBtn) {
                         applySankeyToHeatmapBtn.disabled = true;
-                        applySankeyToHeatmapBtn.style.backgroundColor = "#6c757d";
                     }
-                    // Optionally, trigger a heatmap redraw to remove any green highlighting
+                    if (revertSankeyFilterBtn) {
+                        revertSankeyFilterBtn.disabled = true;
+                    }
                     if (window.lastTreeData) { 
-                        loadInlineDendrogram(); // This will redraw heatmap without Sankey highlights
+                        loadInlineDendrogram(); 
                     }
                 }
             });
         }
 
-        // Event listener for the new "Apply Sankey Selection to Heatmap" button
         if (applySankeyToHeatmapBtn) {
             applySankeyToHeatmapBtn.addEventListener('click', () => {
                 if (window.activeSankeyNodeFilter) {
-                    console.log("Apply Sankey to Heatmap button clicked. Filter:", window.activeSankeyNodeFilter);
-                    updateMainViewAfterSankeyFilter(); 
+                    updateMainViewAfterSankeyFilter().then(() => {
+                         if (revertSankeyFilterBtn) {
+                             revertSankeyFilterBtn.disabled = false;
+                         }
+                    }); 
                 } else {
-                    console.log("Apply Sankey to Heatmap button clicked, but no Sankey node is active.");
-                    // Button should be disabled anyway, but good to log.
+                    alert("No Sankey node selected to apply as filter.");
                 }
             });
         }
+        
+        document.getElementById('entropyMinFilter').style.display = 'none';
+        document.getElementById('entropyMaxFilter').style.display = 'none';
+        document.querySelector('label[for="entropyMinFilter"]').style.display = 'none';
+        document.querySelector('label[for="entropyMaxFilter"]').style.display = 'none';
     });
 
     function showInlineDendrogram(data, svgH = 400, newClusterIds = new Set()) {
@@ -2997,9 +3312,11 @@
         const treeControls = document.getElementById('treeControls');
         const reorderCheckbox = document.getElementById('reorderTreeCheckbox');
         const svg = d3.select("#inlineDendrogramSvg");
-        const treeInfoSpan = document.getElementById('treeInfoSpan');
+        
+        const metaDataLineDiv = document.getElementById('dendrogramMetaDataLine');
 
-        svg.selectAll("*").remove();
+        svg.selectAll("*").remove(); 
+        if (metaDataLineDiv) metaDataLineDiv.innerHTML = '';
 
         svg.append("line").attr("id", "threshold-bar")
             .attr("stroke", "rgba(220, 53, 69, 0.7)")
@@ -3007,8 +3324,6 @@
             .attr("stroke-dasharray", "5 3")
             .style("pointer-events", "none")
             .style("display", "none");
-
-        if (treeInfoSpan) treeInfoSpan.textContent = '';
 
         const highlightStrokeWidth = 1.5;
         const defaultStrokeColor = '#fff';
@@ -3028,7 +3343,7 @@
             svg.append("text").attr("x", "50%").attr("y", "50%").attr("text-anchor", "middle").attr("dominant-baseline", "central")
                 .text("Error: Cannot calculate layout - missing elements.");
             if(treeControls) treeControls.style.display = "none";
-            if (treeInfoSpan) treeInfoSpan.textContent = '';
+            if (metaDataLineDiv) metaDataLineDiv.innerHTML = 'Error displaying metadata.';
             window.lastTreeRoot = null;
             window.lastTreeData = null;
             return;
@@ -3037,54 +3352,88 @@
         dendrogramCard.style.display = 'block';
 
         let calculatedHeight = svgH;
-        try {
-            const viewportHeight = window.innerHeight;
-            const cardRect = dendrogramCard.getBoundingClientRect();
-            const cardTopOffset = cardRect.top;
-            const cardStyle = window.getComputedStyle(dendrogramCard);
-            const cardMarginBottom = parseFloat(cardStyle.marginBottom) || 0;
-            const cardPaddingTop = parseFloat(cardStyle.paddingTop) || 0;
-            const cardPaddingBottom = parseFloat(cardStyle.paddingBottom) || 0;
-            const controlsHeight = treeControls.offsetHeight || 50; 
-            const estimatedTopSectionHeight = document.querySelector('#dendrogramCard .dendro-header')?.offsetHeight || 70;
-            const containerStyle = window.getComputedStyle(containerDiv);
-            const containerMarginBottom = parseFloat(containerStyle.marginBottom) || 10;
-            const safetyMargin = 30; 
-            const spaceBelowCardTop = viewportHeight - cardTopOffset - cardMarginBottom - safetyMargin;
-            const availableHeight = spaceBelowCardTop - cardPaddingTop - estimatedTopSectionHeight - containerMarginBottom - controlsHeight - cardPaddingBottom;
-            calculatedHeight = Math.max(250, Math.min(availableHeight, viewportHeight * 0.75));
-        } catch (e) {
-            console.warn("Could not calculate dynamic dendrogram height, using input svgH or default.", e);
-            calculatedHeight = svgH; 
+        if (typeof svgH !== 'number' || svgH < 200) {
+            try {
+                const viewportHeight = window.innerHeight;
+                const cardRect = dendrogramCard.getBoundingClientRect();
+                const cardTopOffset = cardRect.top;
+                const cardStyle = window.getComputedStyle(dendrogramCard);
+                const cardMarginBottom = parseFloat(cardStyle.marginBottom) || 0;
+                const cardPaddingTop = parseFloat(cardStyle.paddingTop) || 0;
+                const cardPaddingBottom = parseFloat(cardStyle.paddingBottom) || 0;
+                const controlsHeight = treeControls.offsetHeight || 50; 
+                const estimatedTopSectionHeight = document.querySelector('#dendrogramCard .dendro-header')?.offsetHeight || 70;
+                const containerStyle = window.getComputedStyle(containerDiv);
+                const containerMarginBottom = parseFloat(containerStyle.marginBottom) || 10;
+                const safetyMargin = 30; 
+                const spaceBelowCardTop = viewportHeight - cardTopOffset - cardMarginBottom - safetyMargin;
+                const availableHeight = spaceBelowCardTop - cardPaddingTop - estimatedTopSectionHeight - containerMarginBottom - controlsHeight - cardPaddingBottom;
+                calculatedHeight = Math.max(250, Math.min(availableHeight, viewportHeight * 0.75));
+            } catch (e) {
+                console.warn("Could not calculate dynamic dendrogram height, using default.", e);
+                calculatedHeight = 400; // A fixed fallback default
+            }
         }
         window.currentDendrogramHeight = calculatedHeight;
         svgH = calculatedHeight; 
         containerDiv.style.height = `${svgH}px`;
 
-        if (!data || data.id === undefined || data.dist === undefined || data.is_minimal === true || (data.children && data.children.length === 0 && data.id && data.cluster_id) ) {
+        if (!data || data.id === undefined || data.is_minimal === true || (data.children && data.children.length === 0 && data.id && data.cluster_id) || data.no_tree || data.error ) {
             let message = "No hierarchical data available or error loading.";
-            let infoMessage = '0 Clusters';
+            let metaPartsForEmpty = [];
+            let clusterInfoText = '0 Clusters';
+            let packetInfoText = "Packets: N/A";
+
             if (data && data.is_minimal === true) {
                 message = `Tree cannot be built: Only one cluster (${data.cluster_id || 'N/A'}) found.`;
-                infoMessage = `1 Cluster (${data.cluster_id || 'N/A'})`;
-            } else if (data && data.error) { message = `Error loading tree data: ${data.error}`;
+                clusterInfoText = `1 Cluster (${data.cluster_id || 'N/A'})`;
+                if (window.fullHeatmapData && window.fullHeatmapData['Count'] && data.cluster_id) {
+                    const singleClusterEntry = window.fullHeatmapData['Count'].find(entry => String(entry.cluster) === String(data.cluster_id));
+                    if (singleClusterEntry && typeof singleClusterEntry.value === 'number') {
+                        packetInfoText = `Packets: ${singleClusterEntry.value.toLocaleString()}`;
+                    }
+                }
+            } else if (data && data.error) { 
+                message = `Error loading tree data: ${data.error}`;
             } else if (data && data.id && (!data.children || data.children.length === 0) && data.cluster_id) {
                 message = `Tree cannot be built: Only one cluster (${data.cluster_id}) found.`;
-                infoMessage = `1 Cluster (${data.cluster_id})`;
+                clusterInfoText = `1 Cluster (${data.cluster_id})`;
+                if (window.fullHeatmapData && window.fullHeatmapData['Count'] && data.cluster_id) {
+                    const singleClusterEntry = window.fullHeatmapData['Count'].find(entry => String(entry.cluster) === String(data.cluster_id));
+                    if (singleClusterEntry && typeof singleClusterEntry.value === 'number') {
+                        packetInfoText = `Packets: ${singleClusterEntry.value.toLocaleString()}`;
+                    }
+                }
             }
+            
+            metaPartsForEmpty.push(clusterInfoText);
+            if (typeof currentDisplayableTimeInfo !== 'undefined' && currentDisplayableTimeInfo.isSet) {
+                metaPartsForEmpty.push(currentDisplayableTimeInfo.start);
+                metaPartsForEmpty.push(currentDisplayableTimeInfo.end);
+                metaPartsForEmpty.push(currentDisplayableTimeInfo.duration);
+            } else {
+                metaPartsForEmpty.push("Start: N/A");
+                metaPartsForEmpty.push("End: N/A");
+                metaPartsForEmpty.push("Duration: N/A");
+            }
+            metaPartsForEmpty.push(packetInfoText);
+
             svg.append("text").attr("x", "50%").attr("y", "50%").attr("text-anchor", "middle").attr("dominant-baseline", "central").style("font-size", "16px").style("fill", "#555").text(message);
             if (treeControls) treeControls.style.display = "none";
-            if (treeInfoSpan) treeInfoSpan.textContent = infoMessage;
+            
+            if (metaDataLineDiv) {
+                const separator = "&nbsp;&nbsp;|&nbsp;&nbsp;";
+                metaDataLineDiv.innerHTML = metaPartsForEmpty.filter(p => p).join(separator);
+            }
             window.lastTreeRoot = null; window.lastTreeData = null;
-            console.warn("showInlineDendrogram: Not enough data to draw a tree. Displaying message:", message);
+            console.warn("showInlineDendrogram: Not enough data to draw a tree or error. Displaying message:", message);
             return;
         }
 
-        const containerWidth = containerDiv.clientWidth || 600;
         const internalTopMargin = 15; 
         const internalBottomMargin = 20;
         const dendrogramHeightInternal = Math.max(150, svgH - internalTopMargin - internalBottomMargin); 
-        const height = dendrogramHeightInternal; // This 'height' is for the D3 cluster layout (tree part)
+        const height = dendrogramHeightInternal; 
         window.currentD3LayoutHeight = height;
 
         const features = (typeof metrics !== 'undefined' && Array.isArray(metrics)) ? metrics.map(m => m.label) : [];
@@ -3092,40 +3441,18 @@
         const heatmapRowHeight = 15; 
         const heatmapSpacing = 5;   
 
-        // Define featureScale earlier
-        const featureScale = d3.scaleBand()
-            .domain(features)
-            // Range will be set after heatmapStartY and heatmapEndY are calculated
-            .paddingInner(0.1); 
-
-        // Calculate heatmap total height based on its content
-        // This uses featureScale.step() which is bandwidth + padding proportional to bandwidth
-        // Need to set range first for step() to be calculated correctly.
-        // Tentative Y start for heatmap (actual cells)
+        const featureScale = d3.scaleBand().domain(features).paddingInner(0.1); 
         const heatmapContentStartY = height + heatmapSpacing + margin.top;
-        // Tentative total height for heatmap cells based on rowHeight and number of features for now
-        // This is an approximation if precise padding calculation is circular.
         const approximateHeatmapContentHeight = numHeatmapFeatures * heatmapRowHeight;
         featureScale.range([heatmapContentStartY, heatmapContentStartY + approximateHeatmapContentHeight]);
-        
-        // More accurate height for the block of heatmap cells using scaleBand's step
         const finalHeatmapBlockHeight = (numHeatmapFeatures > 0) ? (featureScale.step() * numHeatmapFeatures) : 0;
-        const heatmapStartY = height + heatmapSpacing + margin.top; // Top of the first heatmap row (including its own top margin/padding from featureScale)
-        const heatmapEndY = heatmapStartY + finalHeatmapBlockHeight - (numHeatmapFeatures > 0 ? featureScale.paddingInner() * featureScale.step() : 0); // Bottom of the last heatmap row
-
+        const heatmapStartY = height + heatmapSpacing + margin.top; 
+        const heatmapEndY = heatmapStartY + finalHeatmapBlockHeight - (numHeatmapFeatures > 0 ? featureScale.paddingInner() * featureScale.step() : 0); 
 
         const root = d3.hierarchy(data);
         const currentLeaves = root.leaves();
         const leafCount = currentLeaves.length;
-
-        if (treeInfoSpan) {
-            if (window.currentGroupingApplied && typeof window.originalLeafCount === 'number' && window.originalLeafCount > 0) {
-                treeInfoSpan.textContent = `${leafCount} Clusters (Original ${window.originalLeafCount})`;
-            } else {
-                treeInfoSpan.textContent = `${leafCount} Clusters`;
-            }
-        }
-
+        
         const treeLayout = d3.cluster().size([1, height]); 
         treeLayout(root);
 
@@ -3141,6 +3468,7 @@
         const structuralClusterOrGroupIds = structuralLeaves.map(leaf => leaf.data?.cluster_id).filter(id => id !== undefined && id !== null).map(String);
         const minLeafSpacingStructural = 20; 
         const requiredWidthStructural = structuralClusterOrGroupIds.length * minLeafSpacingStructural;
+        const containerWidth = containerDiv.clientWidth || 600;
         const widthAvailableInContainer = Math.max(300, containerWidth - margin.left - margin.right);
         const structuralLayoutWidth = Math.max(requiredWidthStructural, widthAvailableInContainer);
         const structuralXScale = d3.scaleBand().domain(structuralClusterOrGroupIds).range([margin.left, margin.left + structuralLayoutWidth]).paddingInner(0); 
@@ -3164,38 +3492,63 @@
         let metricSortedLeaves = [...currentLeaves];
         const metricSelectElem = document.getElementById('dendrogramSortMetricSelect');
         const selectedMetric = metricSelectElem ? metricSelectElem.value : 'Default';
+        
         const aggregatedLeafData = new Map();
         currentLeaves.forEach(leaf => {
             const leafId = leaf.data?.cluster_id;
             if (!leafId) return;
-            aggregatedLeafData.set(String(leafId), {});
+            const stringLeafId = String(leafId);
+            aggregatedLeafData.set(stringLeafId, {});
+            
             if (leaf.data.isGroup) {
                 const originalLeafIds = Array.from(leaf.data.originalLeaves || []);
-                if (originalLeafIds.length === 0) { features.forEach(metricLabel => { aggregatedLeafData.get(String(leafId))[metricLabel] = null; aggregatedLeafData.get(String(leafId))[`${metricLabel}_anomaly`] = 'normal'; }); return; }
-                const originalDataForGroup = new Map(); let totalPacketCountInGroup = 0;
+                if (originalLeafIds.length === 0) { 
+                    features.forEach(metricLabel => { 
+                        aggregatedLeafData.get(stringLeafId)[metricLabel] = null; 
+                        aggregatedLeafData.get(stringLeafId)[`${metricLabel}_anomaly`] = 'normal'; 
+                    }); 
+                    return; 
+                }
+                const originalDataForGroup = new Map(); 
+                let totalPacketCountInGroup = 0;
+
                 originalLeafIds.forEach(origId => {
                     features.forEach(metricLabel => {
                         const metricStore = window.fullHeatmapData[metricLabel] || [];
                         const originalEntry = metricStore.find(entry => String(entry.cluster) === String(origId));
                         const value = originalEntry?.value !== undefined ? parseFloat(originalEntry.value) : null;
                         const anomaly = originalEntry?.clusterAnomaly || 'normal';
-                        let packetCount = 1; 
-                        if (window.fullHeatmapData['Count']) { const countEntry = window.fullHeatmapData['Count'].find(entry => String(entry.cluster) === String(origId)); packetCount = countEntry ? (parseFloat(countEntry.value) || 1) : 1; }
+                        let packetCountForWeighting = 1; 
+                        if (window.fullHeatmapData['Count']) { 
+                            const countEntryForWeight = window.fullHeatmapData['Count'].find(entry => String(entry.cluster) === String(origId)); 
+                            packetCountForWeighting = countEntryForWeight ? (parseFloat(countEntryForWeight.value) || 1) : 1; 
+                        }
                         if (!originalDataForGroup.has(metricLabel)) originalDataForGroup.set(metricLabel, []);
-                        if (value !== null && !isNaN(value)) { originalDataForGroup.get(metricLabel).push({ value: value, anomaly: anomaly, count: packetCount }); } 
-                        else { originalDataForGroup.get(metricLabel).push({ value: null, anomaly: anomaly, count: packetCount }); }
+                        if (value !== null && !isNaN(value)) { 
+                            originalDataForGroup.get(metricLabel).push({ value: value, anomaly: anomaly, count: packetCountForWeighting }); 
+                        } else { 
+                            originalDataForGroup.get(metricLabel).push({ value: null, anomaly: anomaly, count: packetCountForWeighting }); 
+                        }
                     });
-                    if (window.fullHeatmapData['Count']) { const countEntry = window.fullHeatmapData['Count'].find(entry => String(entry.cluster) === String(origId)); totalPacketCountInGroup += countEntry ? (parseFloat(countEntry.value) || 0) : 0;
-                    } else { totalPacketCountInGroup += 1; } 
+                    if (window.fullHeatmapData['Count']) { 
+                        const countEntry = window.fullHeatmapData['Count'].find(entry => String(entry.cluster) === String(origId)); 
+                        totalPacketCountInGroup += countEntry ? (parseFloat(countEntry.value) || 0) : 0;
+                    } else { 
+                        totalPacketCountInGroup += 1; 
+                    } 
                 });
+
                 features.forEach(metricLabel => {
                     const valuesAndCounts = originalDataForGroup.get(metricLabel)?.filter(d_item => d_item.value !== null) || [];
                     const allEntries = originalDataForGroup.get(metricLabel) || [];
-                    let aggregatedValue = null; let aggregatedAnomaly = 'normal';
+                    let aggregatedValue = null; 
+                    let aggregatedAnomaly = 'normal';
                     if (allEntries.some(d_item => d_item.anomaly === 'anomaly')) aggregatedAnomaly = 'anomaly';
-                    if (valuesAndCounts.length > 0) {
+
+                    if (metricLabel === 'Count') {
+                        aggregatedValue = totalPacketCountInGroup;
+                    } else if (valuesAndCounts.length > 0) {
                         switch (metricLabel) {
-                            case 'Count': aggregatedValue = totalPacketCountInGroup; break;
                             case 'Total Data Sent': aggregatedValue = d3.sum(valuesAndCounts, d_item => d_item.value); break;
                             case '% SYN packets': case '% RST packets': case '% ACK packets': case '% PSH packets': case 'Average Inter-Arrival Time':
                                 const totalValueSum = d3.sum(valuesAndCounts, d_item => d_item.value * d_item.count);
@@ -3209,21 +3562,64 @@
                             default: aggregatedValue = d3.mean(valuesAndCounts, d_item => d_item.value); break;
                         }
                     }
-                    aggregatedLeafData.get(String(leafId))[metricLabel] = aggregatedValue;
-                    aggregatedLeafData.get(String(leafId))[`${metricLabel}_anomaly`] = aggregatedAnomaly;
+                    aggregatedLeafData.get(stringLeafId)[metricLabel] = aggregatedValue;
+                    aggregatedLeafData.get(stringLeafId)[`${metricLabel}_anomaly`] = aggregatedAnomaly;
                 });
             } else { 
-                const clusterId = String(leafId);
                 features.forEach(metricLabel => {
                     const metricStore = window.fullHeatmapData[metricLabel] || [];
-                    const originalEntry = metricStore.find(entry => String(entry.cluster) === clusterId);
+                    const originalEntry = metricStore.find(entry => String(entry.cluster) === stringLeafId);
                     const value = originalEntry?.value !== undefined ? parseFloat(originalEntry.value) : null;
                     const anomaly = originalEntry?.clusterAnomaly || 'normal';
-                    aggregatedLeafData.get(clusterId)[metricLabel] = (value !== null && !isNaN(value)) ? value : null;
-                    aggregatedLeafData.get(clusterId)[`${metricLabel}_anomaly`] = anomaly;
+                    aggregatedLeafData.get(stringLeafId)[metricLabel] = (value !== null && !isNaN(value)) ? value : null;
+                    aggregatedLeafData.get(stringLeafId)[`${metricLabel}_anomaly`] = anomaly;
                 });
             }
         });
+        
+        if (metaDataLineDiv) {
+            let metaDataParts = [];
+            let clusterInfoText = `${leafCount} Clusters`;
+            if (window.currentGroupingApplied && typeof window.originalLeafCount === 'number' && window.originalLeafCount > 0) {
+                clusterInfoText = `${leafCount} Clusters (Original ${window.originalLeafCount})`;
+            }
+            metaDataParts.push(clusterInfoText);
+
+            if (typeof currentDisplayableTimeInfo !== 'undefined' && currentDisplayableTimeInfo.isSet) {
+                metaDataParts.push(currentDisplayableTimeInfo.start);
+                metaDataParts.push(currentDisplayableTimeInfo.end);
+                metaDataParts.push(currentDisplayableTimeInfo.duration);
+            } else {
+                metaDataParts.push("Start: N/A");
+                metaDataParts.push("End: N/A");
+                metaDataParts.push("Duration: N/A");
+            }
+
+            let totalPacketCountDendro = 0;
+            let packetCountAvailable = false;
+            if (aggregatedLeafData.size > 0) {
+                currentLeaves.forEach(leaf => {
+                    const leafIdStr = String(leaf.data?.cluster_id);
+                    if (leafIdStr) {
+                        const leafAggEntry = aggregatedLeafData.get(leafIdStr);
+                        if (leafAggEntry && typeof leafAggEntry['Count'] === 'number') {
+                            totalPacketCountDendro += leafAggEntry['Count'];
+                            packetCountAvailable = true; 
+                        }
+                    }
+                });
+            }
+            
+            if (packetCountAvailable) {
+                metaDataParts.push(`Packets: ${totalPacketCountDendro.toLocaleString()}`);
+            } else {
+                metaDataParts.push("Packets: N/A");
+            }
+            
+            const separator = "&nbsp;&nbsp;|&nbsp;&nbsp;";
+            metaDataLineDiv.innerHTML = metaDataParts.filter(p => p).join(separator);
+        }
+
 
         if (selectedMetric !== 'Default' && window.fullHeatmapData && window.fullHeatmapData[selectedMetric]) {
             metricSortedLeaves.sort((a, b) => {
@@ -3235,7 +3631,9 @@
                 const orderOption = document.getElementById("rowOrderSelect")?.value || "descending";
                 return orderOption === "descending" ? bValue - aValue : aValue - bValue;
             });
-        } else { metricSortedLeaves.sort((a,b) => a.x - b.x); }
+        } else { 
+            metricSortedLeaves.sort((a,b) => a.x - b.x); 
+        }
 
         const heatmapClusterOrGroupIds = metricSortedLeaves.map(leaf => leaf.data?.cluster_id).filter(id => id !== undefined && id !== null).map(String);
         const reorderTree = reorderCheckbox.checked;
@@ -3301,7 +3699,7 @@
                 if (leafAggData) {
                     const leafNode = currentLeaves.find(l_node => String(l_node.data?.cluster_id) === String(leafId));
                     const isGroup = leafNode?.data?.isGroup || false;
-                    const originalLeavesCount = isGroup ? (leafNode.data.originalLeaves?.size || 0) : 1;
+                    const originalLeavesCount = isGroup ? (leafNode.data.originalLeaves?.size || 0) : 1; // Ensure size is for Set
                     const isNewCluster = newClusterIds.has(String(leafId));
                     features.forEach(metricLabel => {
                         heatmapFeatureData.push({
@@ -3321,9 +3719,7 @@
                 greenColorScales[metricLabel] = d3.scaleSequential(customGreensInterpolator).domain(domain).clamp(true);
             });
 
-            // Re-set the range for featureScale using the calculated heatmapStartY and heatmapEndY
             featureScale.range([heatmapStartY, heatmapEndY]);
-
 
             if (heatmapXScale.bandwidth() > 0 && featureScale.bandwidth() > 0) {
                 const cellSelection = heatmapCellGroup.selectAll(".heatmap-cell")
@@ -3336,16 +3732,36 @@
 
                 cellSelection.filter(function() { const x = +d3.select(this).attr("x"); const y = +d3.select(this).attr("y"); return x >= -margin.left && y >= 0; })
                     .each(function(d_cell) {
-                        const cell = d3.select(this); let currentFill; let activeScale;
+                        const cell = d3.select(this);
+                        let currentFill;
+                        let activeScale;
                         const cellClusterIdStr = String(d_cell.cluster_id);
+                        // Check if this cluster is part of the current Sankey selection
                         const isClusterSankeyMatched = window.activeSankeyNodeFilter && window.sankeyMatchingClusterIds.has(cellClusterIdStr);
+
                         cell.style("opacity", 1.0);
-                        if (isClusterSankeyMatched) { activeScale = greenColorScales[d_cell.feature]; } 
-                        else { activeScale = blueColorScales[d_cell.feature]; }
-                        if (d_cell.anomaly === 'anomaly' && !isClusterSankeyMatched) { currentFill = anomalyOverrideColor; } 
-                        else if (activeScale && d_cell.value !== null && typeof d_cell.value === 'number' && isFinite(d_cell.value)) { currentFill = activeScale(d_cell.value); } 
-                        else { currentFill = isClusterSankeyMatched ? customGreensInterpolator(0.05) : customBluesInterpolator(0.01); }
+
+                        // Determine which color scale to use: green for Sankey-matched, blue otherwise
+                        if (isClusterSankeyMatched) {
+                            activeScale = greenColorScales[d_cell.feature];
+                        } else {
+                            activeScale = blueColorScales[d_cell.feature];
+                        }
+
+                        // Determine the final fill color
+                        // Anomaly (orange) overrides blue, but we let it be overridden by green for selection clarity
+                        if (d_cell.anomaly === 'anomaly' && !isClusterSankeyMatched) {
+                            currentFill = anomalyOverrideColor;
+                        } else if (activeScale && d_cell.value !== null && typeof d_cell.value === 'number' && isFinite(d_cell.value)) {
+                            currentFill = activeScale(d_cell.value); // Use the selected color scale
+                        } else {
+                            // Background color for empty cells (light green or light blue)
+                            currentFill = isClusterSankeyMatched ? customGreensInterpolator(0.05) : customBluesInterpolator(0.01);
+                        }
+
                         cell.attr("data-original-fill", currentFill);
+
+                        // User's direct click on the heatmap (for sidebar) still takes precedence
                         const userClickedHighlightColor = clusterHighlightColors.get(cellClusterIdStr);
                         cell.attr("fill", userClickedHighlightColor ? userClickedHighlightColor : currentFill)
                             .style("stroke", userClickedHighlightColor ? userClickedHighlightColor : defaultStrokeColor)
@@ -3388,7 +3804,16 @@
                                         } catch (fetchError) { console.error(`Error fetching for ${originalLeafId}:`, fetchError); errorOccurred = true; }
                                     }
                                     showSidebarLoading(false, false); if (!sidebarCy) { sidebarCy = cytoscape({ container: document.getElementById('sidebar-cy'), style: CYTOSCAPE_STYLE }); bindSidebarGraphEvents(); }
-                                    if (allNodesAdded.length > 0 || allEdgesAdded.length > 0) { sidebarCy.add(allNodesAdded.concat(allEdgesAdded)); addedSidebarClusters.add(clickedClusterOrGroupID); applySidebarSizeControls(); applySidebarLayout(); sidebarCy.fit(null, 30); sidebarInfoDiv.style.display = 'none'; updateLegend(sidebarCy.edges()); loadSidebarClusterTable(originalLeaves[0], 1); } 
+                                    if (allNodesAdded.length > 0 || allEdgesAdded.length > 0) { 
+                                        sidebarCy.add(allNodesAdded.concat(allEdgesAdded)); 
+                                        addedSidebarClusters.add(clickedClusterOrGroupID); 
+                                        applySidebarSizeControls(); 
+                                        applySidebarLayout(); 
+                                        sidebarCy.fit(null, 30); 
+                                        sidebarInfoDiv.style.display = 'none'; 
+                                        updateLegend(sidebarCy.edges());
+                                        loadSidebarClusterTable(originalLeaves[0], 1); 
+                                    } 
                                     else if (!errorOccurred) { sidebarInfoDiv.innerHTML = `Group ${clickedClusterOrGroupID}: No network data.`; addedSidebarClusters.add(clickedClusterOrGroupID); loadSidebarClusterTable(originalLeaves[0], 1); } 
                                     else { sidebarInfoDiv.innerHTML = `Group ${clickedClusterOrGroupID}: Some data could not load.`; if (sidebarCy.elements().length > 0) { addedSidebarClusters.add(clickedClusterOrGroupID); applySidebarSizeControls(); applySidebarLayout(); sidebarCy.fit(null, 30); updateLegend(sidebarCy.edges()); } loadSidebarClusterTable(originalLeaves[0], 1); }
                                     deselectCurrentNode();
@@ -3434,31 +3859,45 @@
         } 
 
         let dx = 0, dy = 0, initialScale = 1;
-        try { const bounds = svgContent.node()?.getBBox(); 
+        try { 
+            const bounds = svgContent.node()?.getBBox(); 
             if (bounds && bounds.width > 0 && bounds.height > 0) {
                 const scaleX = viewBoxWidth / bounds.width; const scaleY = viewBoxHeight / bounds.height;
                 initialScale = Math.min(scaleX, scaleY) * 0.95; initialScale = Math.max(0.05, Math.min(initialScale, 5)); 
                 dx = (viewBoxWidth / 2) - ((bounds.x + bounds.width / 2) * initialScale);
                 dy = (viewBoxHeight / 2) - ((bounds.y + bounds.height / 2) * initialScale);
                 if(!isFinite(dx)) dx = margin.left; if(!isFinite(dy)) dy = margin.top; if(!isFinite(initialScale) || initialScale <=0) initialScale = 1; 
-            } else { dx = margin.left; dy = margin.top; initialScale = 1; }
-        } catch(e) { console.error("Error calculating initial zoom transform:", e); dx = margin.left; dy = margin.top; initialScale = 1; }
+            } else { 
+                dx = margin.left; dy = margin.top; initialScale = 1; 
+            }
+        } catch(e) { 
+            console.error("Error calculating initial zoom transform:", e); dx = margin.left; dy = margin.top; initialScale = 1; 
+        }
         initialTreeTransform = d3.zoomIdentity.translate(dx, dy).scale(initialScale);
         const zoomBehavior = d3.zoom().scaleExtent([0.05, 10]) 
             .on("zoom.main", (event) => { 
                 svgContent.attr("transform", event.transform); 
                 const thresholdSliderElem = document.getElementById('thresholdSlider');
-                if (thresholdSliderElem && window.lastTreeRoot && svgContent.node()) { requestAnimationFrame(() => { thresholdSliderElem.dispatchEvent(new Event('input')); }); } 
-                else { d3.select("#threshold-bar").style("display", "none"); }
+                if (thresholdSliderElem && window.lastTreeRoot && svgContent.node()) { 
+                    requestAnimationFrame(() => { thresholdSliderElem.dispatchEvent(new Event('input')); }); 
+                } else { 
+                    d3.select("#threshold-bar").style("display", "none"); 
+                }
             });
         window.inlineZoom = zoomBehavior; 
         svg.call(zoomBehavior).call(zoomBehavior.transform, initialTreeTransform).on("dblclick.zoom", null); 
         if (treeControls) treeControls.style.display = "flex"; 
-        try { previousClusterCount = leafCount; previousClusterHash = JSON.stringify(data); } catch(e) { /* No operation */ }
+        try { 
+            previousClusterCount = leafCount; 
+            previousClusterHash = JSON.stringify(data); 
+        } catch(e) { }
         highlightTreeClusters(new Set(clusterHighlightColors.keys()));
         const initialSlider = document.getElementById('thresholdSlider');
-        if (initialSlider && window.lastTreeRoot && svgContent.node()) { requestAnimationFrame(() => { initialSlider.dispatchEvent(new Event('input')); }); } 
-        else { d3.select("#threshold-bar").style("display", "none"); }
+        if (initialSlider && window.lastTreeRoot && svgContent.node()) { 
+            requestAnimationFrame(() => { initialSlider.dispatchEvent(new Event('input')); }); 
+        } else { 
+            d3.select("#threshold-bar").style("display", "none"); 
+        }
     }
 
     function resetGroupingAndRedraw() {
@@ -3984,10 +4423,10 @@
             return "N/A";
         }
         if (seconds < 60) {
-            return `${seconds.toFixed(2)}s`; // More concise seconds
+            return `${seconds.toFixed(2)}s`;
         }
         let minutes = Math.floor(seconds / 60);
-        let remainingSeconds = Math.floor(seconds % 60); // Use floor for whole seconds
+        let remainingSeconds = Math.floor(seconds % 60);
         if (minutes < 60) {
             return `${minutes}m ${remainingSeconds}s`;
         }
@@ -3998,64 +4437,76 @@
         }
         let days = Math.floor(hours / 24);
         let remainingHours = hours % 24;
-        // Omit seconds for durations >= 1 day for brevity
         return `${days}d ${remainingHours}h ${remainingMinutes}m`;
     }
 
-    function updateTimeInfoDisplay() { // Return promise
-        return new Promise((resolve, reject) => { // Wrap in promise
-            const timeInfoSpan = document.getElementById('timeInfoSpan');
-            if (!timeInfoSpan) {
-                console.error("timeInfoSpan element not found");
-                // Don't reject here, just log and resolve as it's not critical path
-                console.warn("timeInfoSpan element not found, cannot update time display.");
-                return resolve();
+    async function updateTimeInfoDisplay() {
+        currentDisplayableTimeInfo = {
+            start: "Start: N/A",
+            end: "End: N/A",
+            duration: "Duration: N/A",
+            isSet: false
+        };
+
+        try {
+            const response = await fetch(`${API_BASE_URL}/time_info`);
+            if (!response.ok) {
+                let errorMsg = `HTTP error ${response.status}`;
+                let errorDetails = "";
+                try {
+                    const errData = await response.json();
+                    errorMsg = errData.error || errorMsg;
+                    errorDetails = JSON.stringify(errData);
+                } catch (e) {
+                    errorDetails = await response.text().catch(() => "Could not retrieve error body.");
+                    errorMsg = response.statusText || errorMsg;
+                }
+                console.error(`updateTimeInfoDisplay: Failed to fetch time info. Status: ${response.status}, Message: ${errorMsg}, Details: ${errorDetails}`);
+                return; // Exit if fetch fails
             }
+            
+            const data = await response.json();
 
-            timeInfoSpan.textContent = 'Loading time info...'; // Indicate loading
+            if (data &&
+                typeof data.start_time === 'string' && data.start_time &&
+                typeof data.end_time === 'string' && data.end_time &&
+                data.duration_seconds !== null && typeof data.duration_seconds !== 'undefined' && !isNaN(parseFloat(data.duration_seconds))) {
 
-            fetch(`${API_BASE_URL}/time_info`)
-                .then(response => {
-                    if (!response.ok) {
-                        if (response.status === 404) {
-                            return response.json().then(err => {
-                                console.log("Time info not available:", err.error);
-                                return null; // Resolve with null for 404
-                            });
-                        }
-                        return response.text().then(text => { throw new Error(text || `HTTP error ${response.status}`) });
-                    }
-                    return response.json();
-                })
-                .then(data => {
-                    if (data && data.start_time && data.end_time && data.duration_seconds !== null && !isNaN(data.duration_seconds)) {
-                        let startTimeStr = "Invalid Date";
-                        let endTimeStr = "Invalid Date";
-                        try {
-                            startTimeStr = new Date(data.start_time).toLocaleString();
-                            endTimeStr = new Date(data.end_time).toLocaleString();
-                            if (startTimeStr === "Invalid Date" || endTimeStr === "Invalid Date") {
-                                throw new Error("Date parsing resulted in Invalid Date");
-                            }
-                        } catch (dateError) {
-                            console.error("Error formatting dates:", dateError);
-                            startTimeStr = data.start_time || "N/A";
-                            endTimeStr = data.end_time || "N/A";
-                        }
-                        const durationFormatted = formatDuration(data.duration_seconds);
-                        timeInfoSpan.textContent = `| Start: ${startTimeStr} | End: ${endTimeStr} | Duration: ${durationFormatted}`;
+                let startTimeStr = "N/A";
+                let endTimeStr = "N/A";
+
+                try {
+                    const startDate = new Date(data.start_time);
+                    if (!isNaN(startDate.getTime())) {
+                        startTimeStr = startDate.toLocaleString();
                     } else {
-                        console.log("Clearing time info span (no/incomplete data received).");
-                        timeInfoSpan.textContent = ''; // Clear if no data or incomplete data
+                        startTimeStr = "N/A (bad date)";
                     }
-                    resolve(); // Resolve promise on success or handled 404
-                })
-                .catch(error => {
-                    console.error('Error fetching or processing time info:', error);
-                    timeInfoSpan.textContent = '| Time info unavailable'; // Display error message
-                    reject(error); // Reject promise on unhandled error
-                });
-        }); // End promise wrapper
+                } catch (e) {
+                    startTimeStr = "N/A (parse error)";
+                }
+
+                try {
+                    const endDate = new Date(data.end_time);
+                    if (!isNaN(endDate.getTime())) {
+                        endTimeStr = endDate.toLocaleString();
+                    } else {
+                        endTimeStr = "N/A (bad date)";
+                    }
+                } catch (e) {
+                    endTimeStr = "N/A (parse error)";
+                }
+                
+                const durationFormatted = formatDuration(parseFloat(data.duration_seconds));
+
+                currentDisplayableTimeInfo.start = `Start: ${startTimeStr}`;
+                currentDisplayableTimeInfo.end = `End: ${endTimeStr}`;
+                currentDisplayableTimeInfo.duration = `Duration: ${durationFormatted}`;
+                currentDisplayableTimeInfo.isSet = true;
+            }
+        } catch (error) {
+            console.error('updateTimeInfoDisplay: Exception during fetch or processing time info:', error);
+        }
     }
 
     async function reclusterAndRedraw() {
@@ -4209,223 +4660,108 @@
     }
 
     // Function to render the saved items list in the UI
-    function renderSavedItemsList() {
-        const listElement = document.getElementById('saved-items-list');
-        const noItemsMessage = document.getElementById('no-saved-items');
-        if (!listElement || !noItemsMessage) return;
-
-        listElement.innerHTML = ''; // Clear current list
-
-        if (savedItems.length === 0) {
-            noItemsMessage.style.display = 'block';
+    function renderSankey(data, containerSelector, activeDimensions) {
+        const container = d3.select(containerSelector);
+        const containerNode = container.node();
+        if (!containerNode) {
+            console.error("Sankey container node not found in renderSankey.");
             return;
         }
-        noItemsMessage.style.display = 'none';
+        container.selectAll("svg").remove();
 
-        savedItems.forEach(item => {
-            const listItem = document.createElement('li');
-            listItem.style.padding = "5px 0";
-            listItem.style.borderBottom = "1px solid #eee";
-            listItem.setAttribute('data-id', item.id);
-            listItem.setAttribute('data-type', item.type);
+        const containerRect = containerNode.getBoundingClientRect();
+        const margin = {top: 30, right: 200, bottom: 30, left: 200};
+        
+        const svgWidth = containerRect.width > 0 ? containerRect.width : 800;
+        const svgHeight = containerRect.height > 0 ? containerRect.height : 700;
 
-            const itemNameSpan = document.createElement('span');
-            itemNameSpan.textContent = item.name; // e.g., "Cluster 123"
-            itemNameSpan.style.fontWeight = "bold";
-            itemNameSpan.style.cursor = 'pointer';
-            itemNameSpan.title = `Click to add/focus on ${item.name}`;
-            
-            listItem.appendChild(itemNameSpan);
+        const width = svgWidth - margin.left - margin.right;
+        const height = svgHeight - margin.top - margin.bottom;
 
-            if (item.type === 'cluster-with-details' && item.data && item.data.displayDescriptions) {
-                const detailsContainer = document.createElement('div');
-                detailsContainer.style.marginLeft = "10px";
-                detailsContainer.style.fontSize = "11px";
-                detailsContainer.style.color = "#555";
-                item.data.displayDescriptions.forEach(desc => {
-                    const descP = document.createElement('p');
-                    descP.style.margin = "2px 0";
-                    descP.textContent = "↳ " + desc;
-                    detailsContainer.appendChild(descP);
-                });
-                listItem.appendChild(detailsContainer);
-            }
-            
-            itemNameSpan.addEventListener('click', async () => {
-                console.log(`[DEBUG] Saved Item Clicked: Name: ${item.name}, ID: ${item.id}, Type: ${item.type}`);
-                console.log("[DEBUG] Saved Item Full Object:", JSON.parse(JSON.stringify(item)));
-                
-                toggleSidebar(true); 
-                
-                sidebarInfoDiv.innerHTML = 'Loading saved item...';
-                sidebarInfoDiv.style.display = 'block';
-                console.log("[DEBUG] Sidebar toggled (or ensured open), info message set to 'Loading saved item...'.");
+        if (width <= 0 || height <= 0) {
+            container.html("<p style='text-align:center; color:orange; padding-top:50px;'>Cannot render Sankey: container too small or not visible.</p>");
+            return;
+        }
 
-                if (sidebarCy) {
-                    console.log("[DEBUG] sidebarCy exists. Current elements:", sidebarCy.elements().length);
-                    sidebarCy.elements().filter(':selected').unselect().forEach(el => {
-                        if (el.isNode()) {
-                            const originalNodeColor = el.scratch('_originalColor') || clusterHighlightColors.get(String(el.data('clusterID'))) || '#888';
-                            el.style('background-color', originalNodeColor);
-                        } else if (el.isEdge()) {
-                            const originalEdgeColor = el.scratch('_protocolColor') || DEFAULT_UNKNOWN_COLOR;
-                            const originalEdgeWidth = el.scratch('_originalWidth') || calculateEdgeWidth(el.data('processCount'));
-                            el.style({ 'line-color': originalEdgeColor, 'target-arrow-color': originalEdgeColor, 'width': originalEdgeWidth, 'z-index': 1 });
-                        }
-                    });
-                    console.log("[DEBUG] Cleared existing selections in sidebarCy.");
-                } else {
-                    console.log("[DEBUG] sidebarCy does NOT exist at this point (before timeout).");
+        const svg = container.append("svg")
+            .attr("width", svgWidth)
+            .attr("height", svgHeight)
+            .style("font", "10px sans-serif")
+        .append("g")
+            .attr("transform", `translate(${margin.left},${margin.top})`);
+
+        let focusedNode = null;
+        const highlightedLinks = new Set(); 
+        const highlightedNodes = new Set(); 
+        const applySankeyBtn = document.getElementById('applySankeyToHeatmapBtn');
+        const revertSankeyBtn = document.getElementById('revertSankeyFilterBtn');
+
+        function clearFocusHighlight() {
+            focusedNode = null;
+            highlightedLinks.clear();
+            highlightedNodes.clear();
+            svg.selectAll(".link-group path").transition().duration(200).attr("stroke-opacity", 0.4);
+            svg.selectAll(".node-group rect").transition().duration(200).attr("opacity", 1.0);
+            svg.selectAll(".node-group text").transition().duration(200).attr("opacity", 1.0);
+        }
+
+        function applyFocusHighlight() {
+            const dimOpacity = 0.1; 
+            const highlightLinkOpacity = 0.7; 
+            const highlightNodeOpacity = 1.0;
+            svg.selectAll(".link-group path").transition().duration(300)
+                .attr("stroke-opacity", d_link => highlightedLinks.has(d_link) ? highlightLinkOpacity : dimOpacity);
+            svg.selectAll(".node-group rect").transition().duration(300)
+                .attr("opacity", d_node => highlightedNodes.has(d_node) ? highlightNodeOpacity : dimOpacity);
+            svg.selectAll(".node-group text").transition().duration(300)
+                .attr("opacity", d_node => highlightedNodes.has(d_node) ? highlightNodeOpacity : dimOpacity);
+        }
+        
+        svg.on("click", function(event) {
+            if (event.target === this && focusedNode) { 
+                clearFocusHighlight();
+                window.activeSankeyNodeFilter = null;
+                if (applySankeyBtn) {
+                    applySankeyBtn.disabled = true;
                 }
-                selectedSidebarNodes.clear(); 
-                selectedSidebarEdges.clear();
-                console.log("[DEBUG] Cleared selectedSidebarNodes and selectedSidebarEdges sets.");
-
-                const sidebarTransitionDuration = 350; 
-                console.log(`[DEBUG] Setting timeout for ${sidebarTransitionDuration}ms to allow sidebar transition.`);
-
-                setTimeout(async () => {
-                    console.log("[DEBUG] Timeout reached. Proceeding with visualization.");
-                    try {
-                        if (item.type === 'cluster-with-details' && item.data && item.data.clusterId) {
-                            const clusterIdToLoad = String(item.data.clusterId);
-                            console.log(`[DEBUG] Processing 'cluster-with-details'. Cluster ID to load: ${clusterIdToLoad}`);
-                            
-                            let targetHighlightColor = clusterHighlightColors.get(clusterIdToLoad);
-                            if (!targetHighlightColor) {
-                                targetHighlightColor = generateUniqueHighlightColor();
-                                clusterHighlightColors.set(clusterIdToLoad, targetHighlightColor);
-                                console.log(`[DEBUG] Generated new highlight color for ${clusterIdToLoad}: ${targetHighlightColor}`);
-                            } else {
-                                console.log(`[DEBUG] Using existing highlight color for ${clusterIdToLoad}: ${targetHighlightColor}`);
-                            }
-                            
-                            await visualizeClusterInSidebar(clusterIdToLoad, targetHighlightColor, false);
-                            console.log(`[DEBUG] visualizeClusterInSidebar called for ${clusterIdToLoad}.`);
-                            
-                            if (!sidebarCy) {
-                                console.error("[DEBUG] CRITICAL: sidebarCy is NULL after visualizeClusterInSidebar call inside timeout!");
-                                sidebarInfoDiv.innerHTML = 'Error initializing graph display.';
-                                return; 
-                            }
-                            console.log("[DEBUG] sidebarCy after visualizeClusterInSidebar. Elements:", sidebarCy.elements().length, "Nodes for this cluster:", sidebarCy.nodes(`[clusterID = "${clusterIdToLoad}"]`).length);
-                            
-                            console.log("[DEBUG] Calling sidebarCy.resize().");
-                            sidebarCy.resize();
-
-                            highlightTreeClusters(new Set(clusterHighlightColors.keys()));
-                            console.log("[DEBUG] highlightTreeClusters called.");
-                            
-                            if (!item.data.selectedNodesDetails || item.data.selectedNodesDetails.length === 0) {
-                                loadSidebarClusterTable(clusterIdToLoad, 1);
-                                console.log(`[DEBUG] Loaded sidebar table for cluster ${clusterIdToLoad} (no specific nodes in saved item).`);
-                            }
-
-                            let nodesToFitOrFocus = sidebarCy.collection();
-                            console.log("[DEBUG] Initialized nodesToFitOrFocus as empty collection.");
-                            
-                            if (item.data.selectedNodesDetails && item.data.selectedNodesDetails.length > 0) {
-                                console.log("[DEBUG] Saved item has selectedNodesDetails. Processing them:", item.data.selectedNodesDetails);
-                                item.data.selectedNodesDetails.forEach(nodeDetail => {
-                                    const nodeInGraph = sidebarCy.getElementById(nodeDetail.ip);
-                                    if (nodeInGraph && !nodeInGraph.empty()) {
-                                        console.log(`[DEBUG] Found node ${nodeDetail.ip} in graph. Applying styles.`);
-                                        nodeInGraph.style({
-                                            'border-width': 3,
-                                            'border-color': 'gold',
-                                            'background-color': SELECTED_NODE_COLOR
-                                        });
-                                        nodesToFitOrFocus = nodesToFitOrFocus.union(nodeInGraph);
-                                        selectedSidebarNodes.add(nodeDetail.ip);
-                                    } else {
-                                        console.log(`[DEBUG] Node ${nodeDetail.ip} NOT found in graph or graph is empty.`);
-                                    }
-                                });
-
-                                if (!nodesToFitOrFocus.empty()) {
-                                    console.log(`[DEBUG] nodesToFitOrFocus has ${nodesToFitOrFocus.length} nodes. Updating sidebar table for selected nodes.`);
-                                    updateSidebarTableForSelectedNodesAndEdges();
-                                } else {
-                                    console.log("[DEBUG] nodesToFitOrFocus is empty. Not updating table based on specific nodes.");
-                                }
-                            }
-                            
-                            if (sidebarCy.elements().length > 0) {
-                                console.log("[DEBUG] sidebarCy has elements. Applying layout and then fitting.");
-                                
-                                applySidebarLayout(); 
-                                console.log("[DEBUG] applySidebarLayout called (which includes a layout run).");
-
-                                sidebarCy.one('layoutstop', function() { 
-                                    console.log("[DEBUG] 'layoutstop' event detected after applySidebarLayout.");
-                                    if (!nodesToFitOrFocus.empty()) {
-                                        console.log("[DEBUG] Fitting specifically to nodesToFitOrFocus:", nodesToFitOrFocus.map(n => n.id()));
-                                        sidebarCy.animate({
-                                            // *** INCREASED PADDING HERE ***
-                                            fit: { eles: nodesToFitOrFocus, padding: 150 } 
-                                        }, { duration: 400 });
-
-                                        if (item.data.selectedNodesDetails && item.data.selectedNodesDetails.length > 0) { 
-                                            const firstNodeToTooltip = sidebarCy.getElementById(item.data.selectedNodesDetails[0].ip);
-                                            if (firstNodeToTooltip && !firstNodeToTooltip.empty()) {
-                                                console.log(`[DEBUG] Triggering mouseover for ${firstNodeToTooltip.id()} after specific fit.`);
-                                                setTimeout(() => { firstNodeToTooltip.trigger('mouseover'); }, 50);
-                                            }
-                                        }
-                                    } else {
-                                        const elesToFitCluster = sidebarCy.elements(`[clusterID = "${clusterIdToLoad}"]`);
-                                        if (!elesToFitCluster.empty()) {
-                                            console.log(`[DEBUG] No specific nodes, fitting to all elements of cluster ${clusterIdToLoad}. Count: ${elesToFitCluster.length}`);
-                                            sidebarCy.animate({
-                                                // *** INCREASED PADDING HERE ***
-                                                fit: { eles: elesToFitCluster, padding: 100 } 
-                                            }, { duration: 300 });
-                                        } else {
-                                            console.log("[DEBUG] No specific nodes or cluster elements found to fit. The general fit from layout should apply.");
-                                        }
-                                    }
-                                });
-
-                            } else {
-                                console.log("[DEBUG] sidebarCy has no elements. Skipping layout and fit.");
-                            }
-
-                        } else {
-                            console.warn(`[DEBUG] Cannot process saved item. Type: '${item.type}', Data:`, item.data);
-                        }
-                    } catch (error) {
-                        console.error("[DEBUG] Error during saved item click processing (inside timeout):", error);
-                        alert("An error occurred while trying to load the saved item."); 
-                        sidebarInfoDiv.innerHTML = 'Error loading item.';
-                    } finally {
-                         if(sidebarInfoDiv.innerHTML === 'Loading saved item...') {
-                            sidebarInfoDiv.style.display = 'none';
-                            console.log("[DEBUG] Hid 'Loading saved item...' message (in finally block).");
-                        }
-                    }
-                }, sidebarTransitionDuration); 
-
-            }); 
-
-            const removeBtn = document.createElement('button');
-            removeBtn.textContent = '✖';
-            removeBtn.title = "Remove item";
-            removeBtn.style.float = 'right';
-            removeBtn.style.fontSize = '10px';
-            removeBtn.style.padding = '1px 4px';
-            removeBtn.style.marginLeft = '5px';
-            removeBtn.style.backgroundColor = '#f56565';
-            removeBtn.style.color = 'white';
-            removeBtn.style.border = 'none';
-            removeBtn.style.borderRadius = '3px';
-            removeBtn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                removeSavedItem(item.id);
-            });
-
-            listItem.appendChild(removeBtn);
-            listElement.appendChild(listItem);
+            }
         });
+
+        const sankeyLayout = d3.sankey().nodeId(d=>d.node).nodeAlign(d3.sankeyJustify).nodeWidth(20).nodePadding(12).extent([[1, 5], [width - 1, height - 5]]);
+        const {nodes, links} = sankeyLayout(data);
+        const colorScale = d3.scaleOrdinal(d3.schemeCategory10);
+        nodes.forEach(node => { node.color = colorScale(node.name.split(":")[0]); });
+        
+        const linkGroups = svg.append("g").attr("fill", "none").attr("stroke-opacity", 0.4).selectAll("g.link-group").data(links).join("g").attr("class", "link-group").style("mix-blend-mode", "multiply");
+        linkGroups.append("path").attr("d", d3.sankeyLinkHorizontal()).attr("stroke", d_link => d_link.source.color || d_link.target.color || "#777").attr("stroke-width", d_link => Math.max(1.5, d_link.width)).on("mouseover", function(event, d_link_hovered) { if (!focusedNode || highlightedLinks.has(d_link_hovered)) { d3.select(this).attr("stroke-opacity", focusedNode ? 0.9 : 0.7); } tooltip.style("display", "block").html(`<strong>${d_link_hovered.source.name}</strong> → <strong>${d_link_hovered.target.name}</strong><br>Value: ${d_link_hovered.value.toLocaleString()}`).style("left", (event.pageX + 10) + "px").style("top", (event.pageY - 15) + "px"); }).on("mouseout", function(event, d_link_hovered) { if (!focusedNode || highlightedLinks.has(d_link_hovered)) { d3.select(this).attr("stroke-opacity", focusedNode ? 0.7 : 0.4); } tooltip.style("display", "none"); }).append("title").text(d_title => `${d_title.source.name} → ${d_title.target.name}\nValue: ${d_title.value.toLocaleString()}`);
+        const nodeGroup = svg.append("g").selectAll("g.node-group").data(nodes).join("g").attr("class", "node-group").attr("transform", d_node => `translate(${d_node.x0}, ${d_node.y0})`);
+        
+        nodeGroup.append("rect").attr("height", d_node => Math.max(1, d_node.y1 - d_node.y0)).attr("width", d_node => d_node.x1 - d_node.x0).attr("fill", d_node => d_node.color).attr("stroke", "#333").attr("stroke-width", 0.5).on("mouseover", function(event, d_node_hovered) { tooltip.style("display", "block").html(`<strong>${d_node_hovered.name}</strong><br>Total Value: ${d_node_hovered.value.toLocaleString()}`).style("left", (event.pageX + 10) + "px").style("top", (event.pageY - 15) + "px"); }).on("mouseout", function() { tooltip.style("display", "none"); })
+            .on("click", function(event, d_node_clicked) {
+                event.stopPropagation();
+                if (focusedNode === d_node_clicked) {
+                    clearFocusHighlight();
+                    window.activeSankeyNodeFilter = null;
+                    if (applySankeyBtn) applySankeyBtn.disabled = true;
+                } else {
+                    focusedNode = d_node_clicked;
+                    highlightedNodes.clear(); highlightedLinks.clear(); highlightedNodes.add(focusedNode);
+                    let currentGenNodes_bwd = [focusedNode]; while (currentGenNodes_bwd.length > 0) { let nextGenNodes_bwd = new Set(); currentGenNodes_bwd.forEach(node => { (node.targetLinks || []).forEach(link => { highlightedLinks.add(link); if (!highlightedNodes.has(link.source)) { nextGenNodes_bwd.add(link.source); highlightedNodes.add(link.source); } }); }); currentGenNodes_bwd = Array.from(nextGenNodes_bwd); }
+                    let currentGenNodes_fwd = [focusedNode]; while (currentGenNodes_fwd.length > 0) { let nextGenNodes_fwd = new Set(); currentGenNodes_fwd.forEach(node => { (node.sourceLinks || []).forEach(link => { highlightedLinks.add(link); if (!highlightedNodes.has(link.target)) { nextGenNodes_fwd.add(link.target); highlightedNodes.add(link.target); } }); }); currentGenNodes_fwd = Array.from(nextGenNodes_fwd); }
+                    applyFocusHighlight();
+                    if (activeDimensions && typeof d_node_clicked.layer === 'number' && d_node_clicked.layer < activeDimensions.length) {
+                        const dimensionKey = activeDimensions[d_node_clicked.layer];
+                        const value = d_node_clicked.name.substring(d_node_clicked.name.indexOf(': ') + 2);
+                        window.activeSankeyNodeFilter = { dimensionKey: dimensionKey, value: value, rawName: d_node_clicked.name };
+                        if (applySankeyBtn) applySankeyBtn.disabled = false;
+                    } else {
+                        window.activeSankeyNodeFilter = null;
+                        if (applySankeyBtn) applySankeyBtn.disabled = true;
+                    }
+                }
+            }).append("title").text(d_title => `${d_title.name}\nTotal Value: ${d_title.value.toLocaleString()}`);
+        
+        nodeGroup.append("text").attr("x", d_node => d_node.x0 < width / 2 ? (d_node.x1 - d_node.x0 + 8) : -8).attr("y", d_node => (d_node.y1 - d_node.y0) / 2).attr("dy", "0.35em").attr("text-anchor", d_node => d_node.x0 < width / 2 ? "start" : "end").style("font-size", "11px").style("fill", "#000").style("pointer-events", "none").text(d_node => { const MAX_LABEL_LENGTH = 30; return d_node.name.length > MAX_LABEL_LENGTH ? d_node.name.substring(0, MAX_LABEL_LENGTH - 3) + "..." : d_node.name; });
     }
 
     // Function to add an item to the saved list
@@ -4862,7 +5198,7 @@
         const highlightedNodes = new Set(); 
         const applySankeyBtn = document.getElementById('applySankeyToHeatmapBtn');
 
-        function clearFocusHighlight() { // This function only clears visual highlights in Sankey
+        function clearFocusHighlight() { // Clears Sankey visuals only
             focusedNode = null;
             highlightedLinks.clear();
             highlightedNodes.clear();
@@ -4872,7 +5208,7 @@
             console.log("Sankey internal visual focus cleared.");
         }
 
-        function applyFocusHighlight() { // This function only applies visual highlights in Sankey
+        function applyFocusHighlight() { // Applies Sankey visuals only
             const dimOpacity = 0.1; 
             const highlightLinkOpacity = 0.7; 
             const highlightNodeOpacity = 1.0;
@@ -4885,15 +5221,17 @@
             console.log("Sankey internal visual focus applied.");
         }
         
-        svg.on("click", function(event) { // Handles click on SVG background
+        svg.on("click", function(event) { // Handles click on SVG background to clear filter
             if (event.target === this && focusedNode) { 
-                clearFocusHighlight(); // Clear Sankey visuals
-                window.activeSankeyNodeFilter = null; // Clear global filter state
+                clearFocusHighlight();
+                window.activeSankeyNodeFilter = null;
+                window.sankeyMatchingClusterIds.clear();
                 if (applySankeyBtn) {
                     applySankeyBtn.disabled = true;
-                    applySankeyBtn.style.backgroundColor = "#6c757d"; // Reset to disabled style
+                    applySankeyBtn.style.backgroundColor = "#6c757d";
                 }
-                console.log("Sankey filter cleared by SVG background click. Apply button disabled.");
+                console.log("Sankey filter cleared. Redrawing heatmap.");
+                updateMainViewAfterSankeyFilter(); // Redraw main view without filter
             }
         });
 
@@ -4947,50 +5285,47 @@
             .on("mouseout", function() { tooltip.style("display", "none"); })
             .on("click", function(event, d_node_clicked) {
                 event.stopPropagation(); 
-                console.log("Sankey Node clicked:", d_node_clicked.name, "Layer:", d_node_clicked.layer);
-
-                if (focusedNode === d_node_clicked) { 
-                    clearFocusHighlight(); // Clear Sankey visuals
-                    window.activeSankeyNodeFilter = null; // Clear global filter
+                
+                if (focusedNode === d_node_clicked) { // Clicked the same node again
+                    clearFocusHighlight();
+                    window.activeSankeyNodeFilter = null;
                     if (applySankeyBtn) {
                         applySankeyBtn.disabled = true;
                         applySankeyBtn.style.backgroundColor = "#6c757d";
                     }
-                    console.log("Sankey filter toggled OFF. Apply button disabled.");
-                } else { 
+                    console.log("Sankey filter toggled OFF. Redrawing heatmap.");
+                    updateMainViewAfterSankeyFilter(); // Redraw main view without filter
+                } else { // Clicked a new node
                     focusedNode = d_node_clicked;
                     highlightedNodes.clear(); highlightedLinks.clear(); highlightedNodes.add(focusedNode);
-                    let currentGenNodes_bwd = [focusedNode]; let safetyBwd = 0;
-                    while (currentGenNodes_bwd.length > 0 && safetyBwd < nodes.length) {
+                    let currentGenNodes_bwd = [focusedNode];
+                    while (currentGenNodes_bwd.length > 0) {
                         let nextGenNodes_bwd = new Set();
                         currentGenNodes_bwd.forEach(node => { (node.targetLinks || []).forEach(link => { highlightedLinks.add(link); if (!highlightedNodes.has(link.source)) { nextGenNodes_bwd.add(link.source); highlightedNodes.add(link.source);}});});
-                        currentGenNodes_bwd = Array.from(nextGenNodes_bwd); safetyBwd++;
+                        currentGenNodes_bwd = Array.from(nextGenNodes_bwd);
                     }
-                    if (safetyBwd >= nodes.length && currentGenNodes_bwd.length > 0) console.warn("Sankey backward trace safety break.");
-                    let currentGenNodes_fwd = [focusedNode]; let safetyFwd = 0;
-                    while (currentGenNodes_fwd.length > 0 && safetyFwd < nodes.length) {
+                    let currentGenNodes_fwd = [focusedNode];
+                    while (currentGenNodes_fwd.length > 0) {
                         let nextGenNodes_fwd = new Set();
                         currentGenNodes_fwd.forEach(node => { (node.sourceLinks || []).forEach(link => { highlightedLinks.add(link); if (!highlightedNodes.has(link.target)) { nextGenNodes_fwd.add(link.target); highlightedNodes.add(link.target);}});});
-                        currentGenNodes_fwd = Array.from(nextGenNodes_fwd); safetyFwd++;
+                        currentGenNodes_fwd = Array.from(nextGenNodes_fwd);
                     }
-                    if (safetyFwd >= nodes.length && currentGenNodes_fwd.length > 0) console.warn("Sankey forward trace safety break.");
-                    applyFocusHighlight(); // Apply Sankey visuals
+                    applyFocusHighlight();
 
                     if (activeDimensions && typeof d_node_clicked.layer === 'number' && d_node_clicked.layer < activeDimensions.length) {
                         const dimensionKey = activeDimensions[d_node_clicked.layer];
                         const value = d_node_clicked.name.substring(d_node_clicked.name.indexOf(': ') + 2);
                         window.activeSankeyNodeFilter = { dimensionKey: dimensionKey, value: value, rawName: d_node_clicked.name };
-                        console.log("Sankey filter SET:", window.activeSankeyNodeFilter);
                         if (applySankeyBtn) {
                             applySankeyBtn.disabled = false;
-                            applySankeyBtn.style.backgroundColor = ""; // Allow CSS to take over
+                            applySankeyBtn.style.backgroundColor = "";
                         }
                     } else {
-                        console.error("Could not determine dimension key for Sankey filter.", d_node_clicked, activeDimensions);
-                        window.activeSankeyNodeFilter = null; 
+                        console.error("Could not determine dimension key for Sankey filter.");
+                        window.activeSankeyNodeFilter = null;
                         if (applySankeyBtn) {
-                            applySankeyBtn.disabled = true;
-                            applySankeyBtn.style.backgroundColor = "#6c757d";
+                           applySankeyBtn.disabled = true;
+                           applySankeyBtn.style.backgroundColor = "#6c757d";
                         }
                     }
                 }
@@ -5013,48 +5348,52 @@
 
             if (window.activeSankeyNodeFilter) {
                 console.log("Active Sankey filter detected, fetching matching cluster IDs...");
+                const mainFilters = {
+                    payloadKeyword: document.getElementById('payloadSearch').value.trim().toLowerCase(),
+                    sourceFilter: document.getElementById('sourceFilter').value.trim().toLowerCase(),
+                    destinationFilter: document.getElementById('destinationFilter').value.trim().toLowerCase(),
+                    protocolFilter: document.getElementById('protocolFilter').value.trim().toLowerCase(),
+                    minSourceAmt: document.getElementById('minSourceAmtFilter').value,
+                    maxSourceAmt: document.getElementById('maxSourceAmtFilter').value,
+                    minDestinationAmt: document.getElementById('minDestinationAmtFilter').value,
+                    maxDestinationAmt: document.getElementById('maxDestinationAmtFilter').value
+                };
+
                 const response = await fetch(`${API_BASE_URL}/get_sankey_matching_clusters`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ sankeyFilter: window.activeSankeyNodeFilter }),
+                    body: JSON.stringify({
+                        sankeyFilter: window.activeSankeyNodeFilter,
+                        mainFilters: mainFilters
+                    }),
                     signal: globalAbortController.signal 
                 });
 
                 if (globalAbortController.signal.aborted) {
                     throw new DOMException("Operation aborted by user.", "AbortError");
                 }
-
                 if (!response.ok) {
                     const errData = await response.json().catch(() => ({error: `HTTP error ${response.status}`}));
-                    console.error("Error response from /get_sankey_matching_clusters:", errData);
                     throw new Error(errData.error || `Failed to fetch Sankey matching clusters.`);
                 }
                 const data = await response.json();
                 if (data.matchingClusterIds) {
-                    window.sankeyMatchingClusterIds = new Set(data.matchingClusterIds.map(String)); // Ensure IDs are strings
+                    window.sankeyMatchingClusterIds = new Set(data.matchingClusterIds.map(String));
                     console.log("Sankey matching cluster IDs fetched:", Array.from(window.sankeyMatchingClusterIds));
-                } else if (data.error) {
-                    console.error("Error received from /get_sankey_matching_clusters:", data.error);
-                } else {
-                    console.log("No matching cluster IDs or unexpected data from /get_sankey_matching_clusters.");
                 }
             } else {
                 console.log("Sankey filter is null, sankeyMatchingClusterIds cleared.");
             }
             
-            // updateHeatmap fetches the complete heatmap data based on main filters.
-            // It NO LONGER sends the Sankey filter to the backend for data reduction.
-            await updateHeatmap(); 
-            
-            if (globalAbortController.signal.aborted) {
-                throw new DOMException("Operation aborted by user.", "AbortError");
-            }
-            
-            if (window.lastTreeData) { 
-                await loadInlineDendrogram(); // This will re-render using the updated fullHeatmapData and new sankeyMatchingClusterIds
+            if (window.lastTreeData) {
+                showInlineDendrogram(window.lastTreeData, document.getElementById("inline-dendrogram-container").clientHeight, currentNewClusterIds);
             } else {
-                console.warn("Tree data (window.lastTreeData) not available for dendrogram redraw after Sankey filter.");
+                // Fallback to a full load if for some reason there's no data to draw.
+                console.warn("No tree data available. Performing a full load.");
+                await updateHeatmap();
+                await loadInlineDendrogram();
             }
+
         } catch (error) {
             if (error.name === 'AbortError') {
                 console.log("Main view update after Sankey filter aborted by user.");
@@ -5070,11 +5409,11 @@
     }
 
     function moveSankeyDimension(index, direction) {
-        if (direction === 'up' && index > 0) {
+        if (direction === 'left' && index > 0) {
             // Swap with previous element
             [window.currentSankeyDimensionsOrder[index], window.currentSankeyDimensionsOrder[index - 1]] = 
             [window.currentSankeyDimensionsOrder[index - 1], window.currentSankeyDimensionsOrder[index]];
-        } else if (direction === 'down' && index < window.currentSankeyDimensionsOrder.length - 1) {
+        } else if (direction === 'right' && index < window.currentSankeyDimensionsOrder.length - 1) {
             // Swap with next element
             [window.currentSankeyDimensionsOrder[index], window.currentSankeyDimensionsOrder[index + 1]] = 
             [window.currentSankeyDimensionsOrder[index + 1], window.currentSankeyDimensionsOrder[index]];
@@ -5098,22 +5437,24 @@
 
         window.currentSankeyDimensionsOrder.forEach((dim, index) => {
             const div = document.createElement('div');
+            // This is the container for ONE filter option (checkbox, label, buttons)
             div.style.display = 'flex';
             div.style.alignItems = 'center';
             div.style.marginBottom = '5px';
-            div.style.padding = '3px';
-            // div.style.border = '1px solid #eee'; // Optional: for visual grouping
+            div.style.padding = '3px 6px'; // A little padding
+            div.style.border = '1px solid #ddd'; // Border to group elements together visually
+            div.style.borderRadius = '5px';
+            div.style.marginRight = '8px'; // Spacing between filter groups
 
             const checkbox = document.createElement('input');
             checkbox.type = 'checkbox';
-            checkbox.id = `sankey_dim_cb_${dim.value}`; // ID must be consistent
+            checkbox.id = `sankey_dim_cb_${dim.value}`;
             checkbox.value = dim.value;
-            checkbox.checked = dim.defaultChecked; // Maintain checked state through reorder
+            checkbox.checked = dim.defaultChecked;
             checkbox.setAttribute('data-label', dim.label);
             checkbox.style.marginRight = '5px';
 
             checkbox.addEventListener('change', () => {
-                // Update defaultChecked state in currentSankeyDimensionsOrder
                 const dimInOrder = window.currentSankeyDimensionsOrder.find(d => d.value === checkbox.value);
                 if (dimInOrder) {
                     dimInOrder.defaultChecked = checkbox.checked;
@@ -5127,31 +5468,95 @@
             const label = document.createElement('label');
             label.htmlFor = checkbox.id;
             label.textContent = dim.label;
-            label.style.marginRight = '10px';
-            label.style.minWidth = '120px'; // Adjust as needed
+            label.style.marginRight = '5px'; // Reduced margin
+            label.style.minWidth = '110px'; 
+            label.style.marginBottom = '0'; // Remove bottom margin from label
 
-            const upBtn = document.createElement('button');
-            upBtn.innerHTML = '&#x25B2;'; // Up arrow unicode
-            upBtn.title = 'Move Up';
-            upBtn.style.padding = '3px 6px';
-            upBtn.style.fontSize = '12px';
-            upBtn.style.marginRight = '4px';
-            upBtn.disabled = index === 0;
-            upBtn.onclick = (e) => { e.preventDefault(); moveSankeyDimension(index, 'up'); };
+            const leftBtn = document.createElement('button');
+            leftBtn.innerHTML = '&#x25C0;'; // Left arrow
+            leftBtn.title = 'Move Left';
+            leftBtn.style.padding = '3px 6px';
+            leftBtn.style.fontSize = '12px';
+            leftBtn.style.marginRight = '2px'; // Tighter spacing
+            leftBtn.disabled = index === 0;
+            leftBtn.onclick = (e) => { e.preventDefault(); moveSankeyDimension(index, 'left'); };
 
-            const downBtn = document.createElement('button');
-            downBtn.innerHTML = '&#x25BC;'; // Down arrow unicode
-            downBtn.title = 'Move Down';
-            downBtn.style.padding = '3px 6px';
-            downBtn.style.fontSize = '12px';
-            downBtn.disabled = index === window.currentSankeyDimensionsOrder.length - 1;
-            downBtn.onclick = (e) => { e.preventDefault(); moveSankeyDimension(index, 'down'); };
+            const rightBtn = document.createElement('button');
+            rightBtn.innerHTML = '&#x25B6;'; // Right arrow
+            rightBtn.title = 'Move Right';
+            rightBtn.style.padding = '3px 6px';
+            rightBtn.style.fontSize = '12px';
+            rightBtn.disabled = index === window.currentSankeyDimensionsOrder.length - 1;
+            rightBtn.onclick = (e) => { e.preventDefault(); moveSankeyDimension(index, 'right'); };
 
             div.appendChild(checkbox);
             div.appendChild(label);
-            div.appendChild(upBtn);
-            div.appendChild(downBtn);
+            div.appendChild(leftBtn);
+            div.appendChild(rightBtn);
             container.appendChild(div);
+        });
+    }
+
+    function renderSavedItemsList() {
+        const listElement = document.getElementById('saved-items-list');
+        const noItemsMessage = document.getElementById('no-saved-items');
+        if (!listElement || !noItemsMessage) return;
+
+        listElement.innerHTML = ''; 
+
+        if (savedItems.length === 0) {
+            noItemsMessage.style.display = 'block';
+            return;
+        }
+        noItemsMessage.style.display = 'none';
+
+        savedItems.forEach(item => {
+            const listItem = document.createElement('li');
+            listItem.style.padding = "5px 0";
+            listItem.style.borderBottom = "1px solid #eee";
+            listItem.setAttribute('data-id', item.id);
+            listItem.setAttribute('data-type', item.type);
+
+            const itemNameSpan = document.createElement('span');
+            itemNameSpan.textContent = item.name;
+            itemNameSpan.style.fontWeight = "bold";
+            itemNameSpan.style.cursor = 'pointer';
+            itemNameSpan.title = `Click to add/focus on ${item.name}`;
+            
+            listItem.appendChild(itemNameSpan);
+
+            if (item.type === 'cluster-with-details' && item.data && item.data.displayDescriptions) {
+                const detailsContainer = document.createElement('div');
+                detailsContainer.style.marginLeft = "10px";
+                detailsContainer.style.fontSize = "11px";
+                detailsContainer.style.color = "#555";
+                item.data.displayDescriptions.forEach(desc => {
+                    const descP = document.createElement('p');
+                    descP.style.margin = "2px 0";
+                    descP.textContent = "↳ " + desc;
+                    detailsContainer.appendChild(descP);
+                });
+                listItem.appendChild(detailsContainer);
+            }
+            
+            const removeBtn = document.createElement('button');
+            removeBtn.textContent = '✖';
+            removeBtn.title = "Remove item";
+            removeBtn.style.float = 'right';
+            removeBtn.style.fontSize = '10px';
+            removeBtn.style.padding = '1px 4px';
+            removeBtn.style.marginLeft = '5px';
+            removeBtn.style.backgroundColor = '#f56565';
+            removeBtn.style.color = 'white';
+            removeBtn.style.border = 'none';
+            removeBtn.style.borderRadius = '3px';
+            removeBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                removeSavedItem(item.id);
+            });
+
+            listItem.appendChild(removeBtn);
+            listElement.appendChild(listItem);
         });
     }
 

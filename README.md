@@ -1,4 +1,25 @@
 # Changelog
+
+## [2025-06-05]
+### Fixed
+- Parquet version compatibility issues
+
+### Improved
+- Sankey filters
+- Sankey diagram selections now reflected on heatmap
+
+## [2025-06-04]
+### Added
+- Implementation started for optimized CSV reading
+- Packet count and process time display
+- Tool to convert PCAP to Parquet
+
+### Changed
+- Top-level tree diagram info
+
+### Created
+- Parquet-compatible version with faster processing and much smaller file sizes
+
 ## [2025-06-03]
 ### Added
 - Reorganize arrows to Sankey diagram
