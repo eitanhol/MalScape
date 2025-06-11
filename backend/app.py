@@ -1612,25 +1612,9 @@ def download_processed_data():
         return jsonify({"error": "Failed to generate CSV data for download."}), 500
 
 
-# --- HTML Serving ---
 @app.route('/')
-def serve_index():
-    # Assuming MalscapeDev.html is in a 'frontend' subdirectory relative to app.py
-    # Adjust path if your structure is different
-    frontend_dir = os.path.join(os.path.dirname(__file__), '..', 'frontend') 
-    # If app.py is in 'tools' and MalscapeDev.html is in 'frontend' at the same level as 'tools':
-    # frontend_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'frontend'))
-    # If MalscapeDev.html is in the SAME directory as app.py:
-    # frontend_dir = os.path.dirname(__file__)
-
-    # For the provided structure (app.py in 'tools', html in parent dir)
-    # frontend_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-    # The HTML file is MalscapeDev.html directly.
-    # Correct path if MalscapeDev.html is in the SAME directory as app.py:
-    # return send_from_directory(os.path.dirname(__file__), 'MalscapeDev.html')
-    # If MalscapeDev.html is one level UP from where app.py is:
-    return send_from_directory(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')), 'MalscapeDev.html')
-
+def index():
+    return send_from_directory('frontend', 'MalscapeDev.html')
 
 @app.route('/<path:path>')
 def serve_static(path):
