@@ -1613,7 +1613,7 @@ def download_processed_data():
 
 
 @app.route('/')
-def index():
+def serve_index():
     return send_from_directory('frontend', 'MalscapeDev.html')
 
 @app.route('/<path:path>')
