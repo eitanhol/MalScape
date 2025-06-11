@@ -1611,18 +1611,14 @@ def download_processed_data():
         logging.error(f"Error generating CSV for download: {e}", exc_info=True)
         return jsonify({"error": "Failed to generate CSV data for download."}), 500
 
-
 @app.route('/')
-def root():
-    return send_from_directory('frontend', 'MalscapeDev.html')
+def serve_index():
+    frontend_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'frontend'))
+    return send_from_directory(frontend_dir, 'MalscapeDev.html')
+
 
 @app.route('/<path:path>')
 def serve_static(path):
-    # This is for other static files like favicon.png, CSS, JS if they are in the same dir as HTML
-    # frontend_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'frontend'))
-    # If MalscapeDev.html is in the SAME directory as app.py:
-    # return send_from_directory(os.path.dirname(__file__), path)
-    # If MalscapeDev.html is one level UP from where app.py is:
     return send_from_directory(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')), path)
 
 
