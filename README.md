@@ -1,5 +1,18 @@
 # Changelog
 
+## [2025-06-12]
+### Added
+- Adjustable timeline of uploaded data
+
+## [2025-06-11]
+### Added
+- Max node size input box now controls max node size in visualization
+
+### Fixed
+- Tooltips not showing in sidebar fullscreen mode
+- Sidebar table search now searches all pages
+- Red bar placement corrected after applying threshold
+
 ## [2025-06-10]
 ### Fixed
 - Heatmap cell colors after applying threshold

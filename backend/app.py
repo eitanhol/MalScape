@@ -129,74 +129,61 @@ def compute_clusters(df, resolution=2.5):
     return final_partition
 
 
-def load_attack_data(filename: str = "GroundTruth.csv", start_time_filter_str: str = None, end_time_filter_str: str = None) -> tuple[dict, set, set]:
-    """Loads attack data, optionally filtering by time."""
+def load_attack_data(filename: str = "GroundTruth.csv", start_time_filter_str: str = None, end_time_filter_str: str = None) -> tuple[dict, list, set]:
+    """
+    Loads attack data, filtering by time and returning a list of attack timeframes.
+    Returns: A tuple containing (attack_details_map, attack_timeframes_list, attacking_sources_set)
+    """
     attack_details_map = {}
-    attack_pairs_set = set()
+    attack_timeframes_list = [] # CHANGED: This is now a list of dicts
     attacking_sources_set = set()
     script_dir = os.path.dirname(os.path.abspath(__file__))
     path = os.path.join(script_dir, filename)
     logging.info(f"Attempting to load attack data from: {path}")
 
     if not os.path.exists(path):
-        logging.warning(f"Attack data file not found at '{path}'. Anomaly detection will rely on empty known attacks.")
-        return {}, set(), set()
+        logging.warning(f"Attack data file not found at '{path}'.")
+        return {}, [], set()
 
     try:
-        gt_dtypes = {
-            "Event Type": "category", "C2S ID": "str", "Source IP": "str", 
-            "Source Port(s)": "str", "Destination IP": "str", "Destination Port(s)": "str",
-            "Start Time": "str", "Stop Time": "str"
-        }
+        gt_dtypes = {"Event Type": "category", "Source IP": "str", "Destination IP": "str", "Start Time": "str", "Stop Time": "str"}
         gt_usecols = ["Event Type", "Source IP", "Destination IP", "Start Time", "Stop Time"]
-        # keep_default_na=False and na_filter=False are important for empty strings vs NaN
         gt = pd.read_csv(path, dtype=gt_dtypes, usecols=gt_usecols, keep_default_na=False, na_filter=False)
 
+        gt["Start Time DT"] = pd.to_datetime(gt["Start Time"], errors='coerce', utc=True)
+        gt["Stop Time DT"] = pd.to_datetime(gt["Stop Time"], errors='coerce', utc=True)
+        gt.dropna(subset=["Start Time DT", "Stop Time DT"], inplace=True) # Drop rows with invalid dates
+
         if not gt.empty and start_time_filter_str and end_time_filter_str:
-            logging.info(f"Applying time filter to GroundTruth: Start={start_time_filter_str}, End={end_time_filter_str}")
             start_filter_dt = pd.to_datetime(start_time_filter_str, errors='coerce', utc=True)
             end_filter_dt = pd.to_datetime(end_time_filter_str, errors='coerce', utc=True)
-
-            if pd.NaT is start_filter_dt or pd.NaT is end_filter_dt:
-                logging.warning("Invalid start or end time filter for GroundTruth, not applying time filter.")
-            else:
-                gt["Start Time DT"] = pd.to_datetime(gt["Start Time"], errors='coerce', utc=True)
-                gt["Stop Time DT"] = pd.to_datetime(gt["Stop Time"], errors='coerce', utc=True)
-                # Drop rows where conversion to datetime failed for critical time columns
-                gt.dropna(subset=["Start Time DT", "Stop Time DT"], inplace=True)
-
-                if not gt.empty:
-                    initial_rows = len(gt)
-                    # Filter logic: event overlaps with the capture window
-                    gt = gt[
-                        (gt["Start Time DT"] <= end_filter_dt) &
-                        (gt["Stop Time DT"] >= start_filter_dt)
-                    ]
-                    logging.info(f"GroundTruth filtered from {initial_rows} to {len(gt)} rows based on time.")
-                else:
-                    logging.info("GroundTruth became empty after attempting to parse time columns for filtering.")
+            if pd.notna(start_filter_dt) and pd.notna(end_filter_dt):
+                initial_rows = len(gt)
+                gt = gt[(gt["Start Time DT"] <= end_filter_dt) & (gt["Stop Time DT"] >= start_filter_dt)]
+                logging.info(f"GroundTruth filtered from {initial_rows} to {len(gt)} rows based on capture time.")
         
         for _, row in gt.iterrows():
             s_ip = str(row["Source IP"]).strip()
             d_ip = str(row["Destination IP"]).strip()
             event = str(row["Event Type"]).strip()
 
-            if s_ip and d_ip and event: # Ensure key fields are not empty
+            if s_ip and d_ip and event:
                 attack_details_map[(s_ip, d_ip)] = event
-                attack_pairs_set.add((s_ip, d_ip))
-                attack_pairs_set.add((d_ip, s_ip)) # Consider bidirectional for detection
+                # CHANGED: Store each attack as a dictionary with its specific timeframe
+                attack_timeframes_list.append({
+                    'source': s_ip,
+                    'destination': d_ip,
+                    'start': row["Start Time DT"],
+                    'stop': row["Stop Time DT"]
+                })
                 attacking_sources_set.add(s_ip)
         
-        logging.info(f"Successfully loaded {len(attack_details_map)} unique attack details, "
-                     f"{len(attack_pairs_set)} attack pairs (bidirectional), and "
-                     f"{len(attacking_sources_set)} attacking sources from '{path}' (after any time filtering).")
+        logging.info(f"Successfully loaded {len(attack_timeframes_list)} attack timeframes and {len(attacking_sources_set)} attacking sources.")
         
-    except pd.errors.EmptyDataError:
-        logging.error(f"Attack data file '{path}' is empty.")
     except Exception as e:
         logging.error(f"Error reading or processing attack data file '{path}': {e}", exc_info=True)
     
-    return attack_details_map, attack_pairs_set, attacking_sources_set
+    return attack_details_map, attack_timeframes_list, attacking_sources_set
 
 
 def prepare_dataframe_from_upload(df: pd.DataFrame):
@@ -210,7 +197,6 @@ def prepare_dataframe_from_upload(df: pd.DataFrame):
 
     if df.empty:
         logging.warning("Input DataFrame is empty. Returning empty DataFrame.")
-        # For standalone testing, you might define a minimal expected_cols here or pass it
         return pd.DataFrame(columns=["Time", "No.", "Source", "Destination", "Protocol", "Length", "SourcePort", "DestinationPort", "Flags_temp", "Payload", "processCount", "IsSYN", "IsRST", "IsACK", "IsPSH", "IsFIN", "Flags", "SourceClassification", "DestinationClassification", "ConnectionID", "InterArrivalTime", "BytesPerSecond", "PayloadLength", "NodeWeight", "BurstID", "ClusterID", "ClusterEntropy"])
 
     current_time_section = time.perf_counter()
@@ -218,12 +204,16 @@ def prepare_dataframe_from_upload(df: pd.DataFrame):
     if "Time" not in df.columns:
         df["Time"] = pd.NaT
         logging.warning("'Time' column missing, added as NaT.")
-    elif not pd.api.types.is_datetime64_any_dtype(df["Time"]):
-        df["Time"] = pd.to_datetime(df["Time"], errors='coerce')
-        logging.info("Converted 'Time' column to datetime objects.")
-    
-    if pd.api.types.is_datetime64_any_dtype(df["Time"]) and df["Time"].dt.tz is not None:
-        df["Time"] = df["Time"].dt.tz_convert('UTC')
+    else:
+        if not pd.api.types.is_datetime64_any_dtype(df["Time"]):
+            df["Time"] = pd.to_datetime(df["Time"], errors='coerce')
+        
+        if df["Time"].dt.tz is None:
+            df["Time"] = df["Time"].dt.tz_localize('UTC')
+            logging.info("Localized naive 'Time' column to UTC.")
+        else:
+            df["Time"] = df["Time"].dt.tz_convert('UTC')
+            logging.info("Converted timezone-aware 'Time' column to UTC.")
 
     for col, col_type in [("Length", int), ("SourcePort", "Int64"), ("DestinationPort", "Int64"), ("Flags_temp", int), ("No.", int)]:
         if col not in df.columns:
@@ -246,7 +236,6 @@ def prepare_dataframe_from_upload(df: pd.DataFrame):
     current_time_section = time.perf_counter()
 
     # --- Feature Engineering ---
-    # processCount
     if 'processCount' not in df.columns:
         df['processCount'] = 1
     else:
@@ -254,43 +243,32 @@ def prepare_dataframe_from_upload(df: pd.DataFrame):
     logging.info(f"PROFILE: processCount setup took: {time.perf_counter() - current_time_section:.4f} seconds")
     current_time_section = time.perf_counter()
 
-    # Parse TCP Flags
-    df["IsSYN"] = ((df["Flags_temp"] & 2) > 0) # Keep as boolean for now
+    df["IsSYN"] = ((df["Flags_temp"] & 2) > 0)
     df["IsRST"] = ((df["Flags_temp"] & 4) > 0)
     df["IsACK"] = ((df["Flags_temp"] & 16) > 0)
     df["IsPSH"] = ((df["Flags_temp"] & 8) > 0)
     df["IsFIN"] = ((df["Flags_temp"] & 1) > 0)
     
-    # --- ADVANCED Vectorized Flag String Generation ---
-    # Initialize "Flags" column with empty strings
     df["Flags"] = "" 
-    
-    # Conditionally append flag strings using boolean indexing and string concatenation
-    # This appends to the existing string in df["Flags"] for rows where condition is True
     if df["IsSYN"].any(): df.loc[df["IsSYN"], "Flags"] = df.loc[df["IsSYN"], "Flags"] + "SYN,"
     if df["IsACK"].any(): df.loc[df["IsACK"], "Flags"] = df.loc[df["IsACK"], "Flags"] + "ACK,"
     if df["IsPSH"].any(): df.loc[df["IsPSH"], "Flags"] = df.loc[df["IsPSH"], "Flags"] + "PSH,"
     if df["IsRST"].any(): df.loc[df["IsRST"], "Flags"] = df.loc[df["IsRST"], "Flags"] + "RST,"
     if df["IsFIN"].any(): df.loc[df["IsFIN"], "Flags"] = df.loc[df["IsFIN"], "Flags"] + "FIN,"
     
-    # Remove trailing comma for rows that have flags
     df["Flags"] = df["Flags"].str.rstrip(',')
-    # Set "N/A" for rows where no flags were appended (i.e., "Flags" is still empty)
     df.loc[df["Flags"] == "", "Flags"] = "N/A"
     df["Flags"] = df["Flags"].astype('category')
     
-    # Convert boolean flag columns to uint8 after using them for string generation
     df["IsSYN"] = df["IsSYN"].astype(np.uint8)
     df["IsRST"] = df["IsRST"].astype(np.uint8)
     df["IsACK"] = df["IsACK"].astype(np.uint8)
     df["IsPSH"] = df["IsPSH"].astype(np.uint8)
     df["IsFIN"] = df["IsFIN"].astype(np.uint8)
-    # --- END ADVANCED Vectorized Flag String Generation ---
 
     logging.info(f"PROFILE: Flag Parsing (Advanced Vectorized) took: {time.perf_counter() - current_time_section:.4f} seconds")
     current_time_section = time.perf_counter()
 
-    # IP Classification
     df['Source'] = df['Source'].astype(str).str.strip()
     df['Destination'] = df['Destination'].astype(str).str.strip()
     
@@ -304,14 +282,12 @@ def prepare_dataframe_from_upload(df: pd.DataFrame):
     logging.info(f"PROFILE: IP Classification took: {time.perf_counter() - current_time_section:.4f} seconds")
     current_time_section = time.perf_counter()
 
-    # ConnectionID
     df["ConnectionID"] = (df["Source"] + ":" + df["SourcePort"].astype(str).replace('<NA>', 'N/A') + "-" +
                           df["Destination"] + ":" + df["DestinationPort"].astype(str).replace('<NA>', 'N/A'))
     df["ConnectionID"] = df["ConnectionID"].astype('category')
     logging.info(f"PROFILE: ConnectionID Generation took: {time.perf_counter() - current_time_section:.4f} seconds")
     current_time_section = time.perf_counter()
 
-    # InterArrivalTime and BytesPerSecond
     if pd.api.types.is_datetime64_any_dtype(df["Time"]) and not df["Time"].isnull().all():
         df = df.sort_values(by=["ConnectionID", "Time"]) 
         df["InterArrivalTime"] = df.groupby("ConnectionID", observed=True)["Time"].diff().dt.total_seconds()
@@ -326,9 +302,7 @@ def prepare_dataframe_from_upload(df: pd.DataFrame):
     logging.info(f"PROFILE: InterArrivalTime & BytesPerSecond took: {time.perf_counter() - current_time_section:.4f} seconds")
     current_time_section = time.perf_counter()
 
-    # PayloadLength
     df["PayloadLength"] = df["Length"] 
-    # NodeWeight
     if not df.empty:
         source_counts = df['Source'].value_counts()
         dest_counts = df['Destination'].value_counts()
@@ -353,7 +327,6 @@ def prepare_dataframe_from_upload(df: pd.DataFrame):
     logging.info(f"PROFILE: PayloadLength & NodeWeight took: {time.perf_counter() - current_time_section:.4f} seconds")
     current_time_section = time.perf_counter()
 
-    # BurstID
     if "InterArrivalTime" in df.columns and "ConnectionID" in df.columns:
         df["BurstID"] = df.groupby("ConnectionID", observed=True)["InterArrivalTime"].transform(lambda x: (x.fillna(0) >= 0.01).cumsum())
     else:
@@ -361,7 +334,6 @@ def prepare_dataframe_from_upload(df: pd.DataFrame):
     logging.info(f"PROFILE: BurstID took: {time.perf_counter() - current_time_section:.4f} seconds")
     current_time_section = time.perf_counter()
 
-    # ClusterID (Louvain)
     logging.info("PROFILE: Starting ClusterID computation (Louvain)...")
     if not df.empty:
         try:
@@ -379,7 +351,6 @@ def prepare_dataframe_from_upload(df: pd.DataFrame):
     logging.info(f"PROFILE: ClusterID (Louvain) computation took: {time.perf_counter() - current_time_section:.4f} seconds")
     current_time_section = time.perf_counter()
 
-    # ClusterEntropy
     cluster_entropy_map = {}
     if not df.empty and "ClusterID" in df.columns and df["ClusterID"].nunique(dropna=False) > 0:
         valid_clusters_df = df[df['ClusterID'] != 'N/A']
@@ -398,30 +369,34 @@ def prepare_dataframe_from_upload(df: pd.DataFrame):
     df["ClusterEntropy"] = df["ClusterID"].map(cluster_entropy_map).fillna(0.0)
     logging.info(f"PROFILE: ClusterEntropy took: {time.perf_counter() - current_time_section:.4f} seconds")
     
-    # --- Pre-computation for Sankey performance ---
     logging.info("PROFILE: Starting Sankey pre-computation...")
     sankey_precompute_start = time.perf_counter()
-    # Pre-compute Port Groups
     for port_col_name in ["SourcePort", "DestinationPort"]:
         new_col_name = f"{port_col_name}_Group"
-        # Use pd.cut for efficient binning
         df[new_col_name] = pd.cut(df[port_col_name],
                                   bins=[-1, 0, 1023, 49151, 65535],
                                   labels=['N/A', 'Well-Known', 'Registered (1024-49151)', 'Dyn/Priv (49152-65535)'],
                                   right=True).astype(str)
-        # Vectorized override for well-known ports to show their number
         well_known_mask = (df[port_col_name] >= 1) & (df[port_col_name] <= 1023)
         df.loc[well_known_mask, new_col_name] = df.loc[well_known_mask, port_col_name].astype(str)
         df[new_col_name] = df[new_col_name].fillna('N/A').astype('category')
 
-    # Pre-compute Length Group
     df['Len_Group'] = pd.cut(df['Length'],
                              bins=[-1, 59, 99, 199, 499, 999, 1499, float('inf')],
                              labels=["0-59 B", "60-99 B", "100-199 B", "200-499 B", "500-999 B", "1000-1499 B", "1500+ B"],
                              right=True).astype(str).fillna('N/A').astype('category')
     logging.info(f"PROFILE: Sankey pre-computation took: {time.perf_counter() - sankey_precompute_start:.4f} seconds")
-    # --- End Sankey pre-computation ---
     
+    # --- PERFORMANCE OPTIMIZATION ---
+    if 'Time' in df.columns and pd.api.types.is_datetime64_any_dtype(df["Time"]):
+        # Important: Reset index before setting 'Time' to avoid MultiIndex errors
+        if isinstance(df.index, pd.MultiIndex):
+            df.reset_index(inplace=True)
+        df.set_index('Time', inplace=True)
+        df.sort_index(inplace=True)
+        logging.info("Set and sorted 'Time' column as the DataFrame index for performance.")
+    # --- END PERFORMANCE OPTIMIZATION ---
+
     logging.info(f"PROFILE: Total prepare_dataframe_from_upload took: {time.perf_counter() - overall_start_time:.4f} seconds")
     logging.info(f"DataFrame feature engineering complete. Shape after processing: {df.shape}")
     return df
@@ -432,68 +407,72 @@ CORS(app) # Enable CORS for all routes
 logging.info("--- FLASK APP INITIALIZED (Parquet Version) ---")
 
 
-# --- API Endpoints ---
 @app.route('/process_uploaded_file', methods=['POST'])
 def process_uploaded_file_endpoint():
     global global_df, global_start_time, global_end_time, global_duration_seconds
-    global global_backend_csv_processing_time_seconds # Keep var name, but it's Parquet time
-    global attack_detail_map_cache, attack_pairs_for_anomaly_cache, attacking_sources_cache # For ground truth
-    
+    global global_backend_csv_processing_time_seconds
+    global attack_detail_map_cache, attack_timeframes_cache, attacking_sources_cache
+
     backend_processing_internal_start = time.perf_counter()
 
     if 'file' not in request.files:
-        logging.warning("Process uploaded file request missing 'file' part.")
         return jsonify({"error": "No file part in the request."}), 400
     
     file = request.files['file']
     if file.filename == '':
-        logging.warning("Process uploaded file request with no selected file.")
         return jsonify({"error": "No file selected for upload."}), 400
 
     if file and file.filename.endswith('.parquet'):
         try:
             logging.info(f"Received Parquet file: {file.filename}")
-            # Read Parquet file from in-memory buffer
             parquet_data = BytesIO(file.read())
             raw_df = pd.read_parquet(parquet_data)
             logging.info(f"Successfully read Parquet file into DataFrame. Shape: {raw_df.shape}")
 
-            # Prepare the DataFrame (feature engineering)
+            # This function returns a DataFrame with 'Time' as the index
             df = prepare_dataframe_from_upload(raw_df)
 
-            # Calculate time info from the 'Time' column
-            global_start_time, global_end_time, global_duration_seconds = None, None, None
-            if "Time" in df.columns and pd.api.types.is_datetime64_any_dtype(df["Time"]) and not df["Time"].isnull().all():
-                valid_times = df["Time"].dropna()
-                if not valid_times.empty:
-                    min_time = valid_times.min()
-                    max_time = valid_times.max()
-                    # Store as ISO format string, ensure they are naive or consistent (e.g. UTC)
-                    global_start_time = min_time.to_pydatetime().isoformat() if pd.notna(min_time) else None
-                    global_end_time = max_time.to_pydatetime().isoformat() if pd.notna(max_time) else None
-                    if pd.notna(min_time) and pd.notna(max_time):
-                        global_duration_seconds = (max_time - min_time).total_seconds()
-                    
-                    # Load attack data, filtering by the capture's time window
-                    attack_detail_map_cache, attack_pairs_for_anomaly_cache, attacking_sources_cache = load_attack_data(
-                        start_time_filter_str=global_start_time,
-                        end_time_filter_str=global_end_time
-                    )
-            else: # Fallback if no valid time data in DataFrame
-                attack_detail_map_cache, attack_pairs_for_anomaly_cache, attacking_sources_cache = load_attack_data()
+            # --- CORRECTED TIME INFO LOGIC ---
+            # Since 'Time' is now the index, get time info from it directly.
+            if isinstance(df.index, pd.DatetimeIndex) and not df.index.empty:
+                min_time = df.index.min()
+                max_time = df.index.max()
+                global_start_time = min_time.isoformat() if pd.notna(min_time) else None
+                global_end_time = max_time.isoformat() if pd.notna(max_time) else None
+                global_duration_seconds = (max_time - min_time).total_seconds() if pd.notna(min_time) and pd.notna(max_time) else 0
+            # --- END CORRECTION ---
+            
+            # Load attack data, filtering by the capture's time window
+            attack_detail_map_cache, attack_timeframes_cache, attacking_sources_cache = load_attack_data(
+                start_time_filter_str=global_start_time,
+                end_time_filter_str=global_end_time
+            )
 
+            # Create a temporary 'Time' column from the index for attack processing
+            df.reset_index(inplace=True)
 
-            # Apply AttackType and Anomaly based on loaded ground truth
+            # --- ANOMALY AND CLUSTER ANOMALY DETECTION (REVISED LOGIC) ---
             if not df.empty:
-                # Create a series of (Source, Destination) tuples for mapping
+                # Assign AttackType based on (Source, Destination) pair
                 attack_keys = list(zip(df["Source"].astype(str), df["Destination"].astype(str)))
                 df["AttackType"] = pd.Series(attack_keys, index=df.index).map(attack_detail_map_cache).fillna("N/A").astype('category')
                 
-                # Determine anomaly based on source IP being in the attacking_sources_cache
-                df["Anomaly"] = pd.Series(
-                    np.where(df["Source"].isin(list(attacking_sources_cache)), "anomaly", "normal"),
-                    index=df.index
-                ).astype('category')
+                # Default all rows to 'normal' first
+                df['Anomaly'] = 'normal'
+                
+                # Iterate through each known attack timeframe and mark matching packets
+                if attack_timeframes_cache:
+                    for attack in attack_timeframes_cache:
+                        if pd.notna(attack['start']) and pd.notna(attack['stop']):
+                            mask = (
+                                (df['Source'] == attack['source']) &
+                                (df['Destination'] == attack['destination']) &
+                                (df['Time'] >= attack['start']) &
+                                (df['Time'] <= attack['stop'])
+                            )
+                            df.loc[mask, 'Anomaly'] = 'anomaly'
+                
+                df['Anomaly'] = df['Anomaly'].astype('category')
 
                 # Determine ClusterAnomaly
                 if "ClusterID" in df.columns and df["ClusterID"].nunique(dropna=False) > 0:
@@ -502,23 +481,27 @@ def process_uploaded_file_endpoint():
                     ).astype('category')
                 else:
                     df["ClusterAnomaly"] = pd.Series(["normal"] * len(df), dtype='category', index=df.index if not df.empty else None)
-            else: # If df became empty during processing
-                df["AttackType"] = pd.Series(dtype='category')
-                df["Anomaly"] = pd.Series(dtype='category')
-                df["ClusterAnomaly"] = pd.Series(dtype='category')
+            else:
+                for col in ["AttackType", "Anomaly", "ClusterAnomaly"]:
+                    df[col] = pd.Series(dtype='category')
 
-            # Ensure all expected columns are present in the final DataFrame
+            # Ensure all other expected columns are present
             for col in expected_cols:
-                if col not in df.columns:
-                    if col in ["SourcePort", "DestinationPort"]: df[col] = pd.NA # Int64 NA
-                    elif df[col].dtype == object or pd.api.types.is_string_dtype(df[col]): df[col] = ""
-                    elif pd.api.types.is_datetime64_any_dtype(df[col]): df[col] = pd.NaT
-                    elif pd.api.types.is_categorical_dtype(df[col]): 
-                        df[col] = pd.Series(dtype='category', index=df.index if not df.empty else None)
-                    else: df[col] = 0 # Default for numeric
+                if col not in df.columns and col != 'Time':
+                    if col in ["SourcePort", "DestinationPort"]: df[col] = pd.NA
+                    elif pd.api.types.is_string_dtype(df.get(col, pd.Series(dtype=str))): df[col] = ""
+                    else: df[col] = 0
                     logging.info(f"Added missing expected column '{col}' with default values.")
             
-            global_df = df[expected_cols].copy() # Select and order columns
+            # --- CORRECTED FINAL DATAFRAME CREATION ---
+            # Re-order columns to the expected final order and re-establish the Time index
+            final_cols = [col for col in expected_cols if col in df.columns]
+            global_df = df[final_cols].copy()
+            if 'Time' in global_df.columns:
+                global_df.set_index('Time', inplace=True)
+                if not global_df.index.is_monotonic_increasing:
+                    global_df.sort_index(inplace=True)
+            
             logging.info(f"Parquet file processed into global_df. Final shape: {global_df.shape}")
 
             backend_processing_internal_end = time.perf_counter()
@@ -531,19 +514,43 @@ def process_uploaded_file_endpoint():
                 "rows_loaded": len(global_df)
             }), 200
 
-        except pd.errors.EmptyDataError:
-            logging.error(f"Uploaded Parquet file '{file.filename}' is empty or invalid.")
-            global_df, global_start_time, global_end_time, global_duration_seconds, global_backend_csv_processing_time_seconds = None, None, None, None, None
-            return jsonify({"error": "Uploaded Parquet file is empty or invalid."}), 400
         except Exception as e:
             logging.exception(f"Error processing uploaded Parquet file '{file.filename}'")
             global_df, global_start_time, global_end_time, global_duration_seconds, global_backend_csv_processing_time_seconds = None, None, None, None, None
+            attack_detail_map_cache, attack_timeframes_cache, attacking_sources_cache = {}, [], set()
             return jsonify({"error": f"An unexpected server error occurred: {str(e)}"}), 500
     else:
-        logging.warning(f"Invalid file type uploaded: {file.filename}. Expected .parquet")
         return jsonify({"error": "Invalid file type. Please upload a .parquet file."}), 400
 
-# --- Helper function to group ports and lengths (used in /filter_and_aggregate and /sankey_data) ---
+def apply_time_filter(df, request_obj):
+    """
+    Applies a time filter to a DataFrame based on request arguments, using the DatetimeIndex.
+    Returns the filtered DataFrame.
+    """
+    params = request_obj.args if request_obj.method == 'GET' else request_obj.get_json(silent=True) or {}
+    
+    start_time_str = params.get('start_time')
+    end_time_str = params.get('end_time')
+
+    # Check if the DataFrame's index is a DatetimeIndex
+    if start_time_str and end_time_str and isinstance(df.index, pd.DatetimeIndex):
+        try:
+            start_dt = pd.to_datetime(start_time_str, errors='coerce', utc=True)
+            end_dt = pd.to_datetime(end_time_str, errors='coerce', utc=True)
+            
+            if pd.notna(start_dt) and pd.notna(end_dt):
+                original_rows = len(df)
+                # Use .loc for fast slicing on the sorted DatetimeIndex
+                df = df.loc[start_dt:end_dt].copy()
+                # Reset index to make 'Time' a column again for other functions that need it
+                df.reset_index(inplace=True)
+                logging.info(f"Time filter applied via index: {start_dt} to {end_dt}. Rows changed from {original_rows} to {len(df)}.")
+            else:
+                logging.warning(f"Invalid start_time or end_time format. Not applying time filter.")
+        except Exception as e:
+            logging.error(f"Error applying time filter on index: {e}", exc_info=True)
+    return df
+
 def group_port(port):
     if pd.isna(port): return "N/A"
     try:
@@ -568,10 +575,6 @@ def group_length(length):
         else: return "1500+ B"
     except (ValueError, TypeError): return "N/A"
 
-# --- Existing Endpoints (largely unchanged, but verify column names if issues arise) ---
-# Make sure all endpoints below use column names that are present in `global_df`
-# after `prepare_dataframe_from_upload` has run.
-
 @app.route('/filter_and_aggregate', methods=['POST'])
 def filter_and_aggregate():
     global global_df
@@ -581,8 +584,8 @@ def filter_and_aggregate():
 
     logging.info(f"Entering /filter_and_aggregate. global_df shape: {global_df.shape}")
     
-    # Create a local copy for filtering
-    df = global_df.copy()
+    # Apply time filter first from the POST body
+    df = apply_time_filter(global_df.copy(), request)
 
     # Anomaly and Attack Type maps for clusters
     anomaly_map = {}
@@ -616,56 +619,12 @@ def filter_and_aggregate():
     try: entropyMax = float(data.get("entropyMax", float('inf')))
     except (ValueError, TypeError): entropyMax = float('inf')
     
-    # isRetransmissionOnly - This column is not in the current Parquet output, so this filter won't work.
-    # If needed, 'tcp.analysis.retransmission' could be extracted by tshark.
-    # isRetransmissionOnly = data.get("isRetransmissionOnly", False) 
-
     metric = data.get("metric", "count") # Default to 'count'
 
     min_source_amt = int(data["minSourceAmt"]) if data.get("minSourceAmt","").strip() else 0
     max_source_amt = int(data["maxSourceAmt"]) if data.get("maxSourceAmt","").strip() else float('inf')
     min_dest_amt = int(data["minDestinationAmt"]) if data.get("minDestinationAmt","").strip() else 0
     max_dest_amt = int(data["maxDestinationAmt"]) if data.get("maxDestinationAmt","").strip() else float('inf')
-
-    # Sankey filter (if applied from Sankey diagram click)
-    sankey_filter_data = data.get("sankeyFilter")
-    if sankey_filter_data and not df.empty:
-        sankey_dim_key = sankey_filter_data.get("dimensionKey")
-        sankey_val = sankey_filter_data.get("value")
-        logging.info(f"Attempting to apply Sankey filter from heatmap: Dimension='{sankey_dim_key}', Value='{sankey_val}'")
-        
-        processed_sankey_filter = False
-        # Important: Match dimensionKey with how they are defined in MalscapeDev.html for Sankey
-        if sankey_dim_key == "Protocol" and "Protocol" in df.columns:
-            df = df[df["Protocol"].astype(str) == str(sankey_val)]
-            processed_sankey_filter = True
-        elif sankey_dim_key == "Source Type" and "SourceClassification" in df.columns: # Matches HTML
-            df = df[df["SourceClassification"].astype(str) == str(sankey_val)]
-            processed_sankey_filter = True
-        elif sankey_dim_key == "Dest. Type" and "DestinationClassification" in df.columns: # Matches HTML
-            df = df[df["DestinationClassification"].astype(str) == str(sankey_val)]
-            processed_sankey_filter = True
-        elif sankey_dim_key == "Src Port Grp" and "SourcePort" in df.columns: # Matches HTML
-            df = df[df["SourcePort"].apply(group_port).astype(str) == str(sankey_val)]
-            processed_sankey_filter = True
-        elif sankey_dim_key == "Dst Port Grp" and "DestinationPort" in df.columns: # Matches HTML
-            df = df[df["DestinationPort"].apply(group_port).astype(str) == str(sankey_val)]
-            processed_sankey_filter = True
-        elif sankey_dim_key == "Pkt Len Grp": # Matches HTML
-            # Use 'Length' column from Parquet (frame.len)
-            if "Length" in df.columns:
-                df = df[df["Length"].apply(group_length).astype(str) == str(sankey_val)]
-                processed_sankey_filter = True
-            else: logging.warning("Sankey filter 'Pkt Len Grp' specified, but 'Length' column not found.")
-        elif sankey_dim_key == "Anomaly" and "Anomaly" in df.columns:
-            df = df[df["Anomaly"].astype(str) == str(sankey_val)]
-            processed_sankey_filter = True
-        elif sankey_dim_key == "Cluster ID" and "ClusterID" in df.columns: # Matches HTML
-            df = df[df["ClusterID"].astype(str) == str(sankey_val)]
-            processed_sankey_filter = True
-        
-        if processed_sankey_filter: logging.info(f"Applied Sankey filter from heatmap. df shape: {df.shape}")
-        else: logging.warning(f"Sankey filter from heatmap for '{sankey_dim_key}'='{sankey_val}' not processed.")
 
     # Apply other general filters
     if payloadKeyword and "Payload" in df.columns and not df.empty:
@@ -681,15 +640,12 @@ def filter_and_aggregate():
         df["ClusterEntropy"] = pd.to_numeric(df["ClusterEntropy"], errors='coerce')
         df = df[(df["ClusterEntropy"] >= entropyMin) & (df["ClusterEntropy"] <= entropyMax)]
     
-    # if isRetransmissionOnly and "IsRetransmission" in df.columns and not df.empty: # This col is not in Parquet
-    #     df = df[df["IsRetransmission"] == True]
-
     logging.info(f"df shape after all filtering: {df.shape}, for metric: {metric}")
     if df.empty:
         logging.warning(f"DataFrame is empty after filters for metric '{metric}'. Returning empty list.")
         return jsonify([])
 
-    # --- Aggregation Logic (largely unchanged, verify columns) ---
+    # --- Aggregation Logic ---
     agg = pd.Series(dtype=float)
     if not df.empty and "ClusterID" in df.columns: # Ensure ClusterID exists before grouping
         grouped_by_cluster = df.groupby("ClusterID", observed=True)
@@ -748,10 +704,10 @@ def filter_and_aggregate():
 
         agg = agg.fillna(0.0) # Ensure no NaNs in final aggregation
         agg = agg.replace([np.inf, -np.inf], 0) # Replace infinities
-    else: # Case: df is not empty but has no ClusterID, or df IS empty
+    else:
         if df.empty: logging.info("DataFrame empty before aggregation.")
         else: logging.warning("ClusterID column not found or no clusters to aggregate. Returning empty list.")
-        return jsonify([]) # Return empty list if no aggregation possible
+        return jsonify([])
 
     # Apply source/destination count filters
     unique_sources_per_cluster = df.groupby("ClusterID", observed=True)["Source"].nunique() if "ClusterID" in df.columns and "Source" in df.columns else pd.Series(dtype=int)
@@ -759,7 +715,7 @@ def filter_and_aggregate():
 
     filtered_pivot = []
     for cluster_id_val, value in agg.items():
-        str_cluster_id_val = str(cluster_id_val) # Ensure string for consistency
+        str_cluster_id_val = str(cluster_id_val)
         
         src_count = unique_sources_per_cluster.get(cluster_id_val, 0)
         dst_count = unique_destinations_per_cluster.get(cluster_id_val, 0)
@@ -780,7 +736,6 @@ def filter_and_aggregate():
     
     logging.info(f"Number of items in filtered_pivot for metric '{metric}': {len(filtered_pivot)}")
     return jsonify(filtered_pivot)
-
 
 @app.route('/get_sankey_matching_clusters', methods=['POST'])
 def get_sankey_matching_clusters():
@@ -852,6 +807,13 @@ def hierarchical_clusters():
         logging.warning("/hierarchical_clusters called but global_df is None or empty.")
         return jsonify({"id": "empty_root_no_data", "dist": 0, "no_tree": True, "error": "No data loaded"}), 200
 
+    # Apply time filter from GET request args
+    df_for_dendro = apply_time_filter(global_df.copy(), request)
+
+    if df_for_dendro.empty:
+        logging.warning("DataFrame is empty after time filter in /hierarchical_clusters.")
+        return jsonify({"id": "empty_root_no_data_in_range", "dist": 0, "no_tree": True, "error": "No data in selected time range"}), 200
+
     resolution = 2.5 
     try:
         resolution_param = request.args.get("resolution")
@@ -865,19 +827,18 @@ def hierarchical_clusters():
     except (TypeError, ValueError) as e:
         logging.warning(f"Invalid resolution parameter in hierarchical_clusters, using default 2.5: {e}")
     
-    df_for_dendro = global_df.copy()
-
     try:
         if 'Source' in df_for_dendro.columns:
             df_for_dendro['Source'] = df_for_dendro['Source'].astype(str).str.strip()
         if 'Destination' in df_for_dendro.columns:
             df_for_dendro['Destination'] = df_for_dendro['Destination'].astype(str).str.strip()
 
-        # Use relevant columns for clustering the dendrogram
         cols_for_dendro_clustering = ['Source', 'Destination']
-        if 'processCount' in df_for_dendro.columns: # Use processCount if available
+        if 'processCount' in df_for_dendro.columns:
             cols_for_dendro_clustering.append('processCount')
         
+        # This function is defined in the source code
+        from __main__ import compute_clusters, compute_entropy 
         node_cluster_map_dendro = compute_clusters(df_for_dendro[cols_for_dendro_clustering], resolution=resolution)
         df_for_dendro["DendroClusterID"] = df_for_dendro["Source"].astype(str).map(node_cluster_map_dendro).fillna('N/A')
         
@@ -887,93 +848,77 @@ def hierarchical_clusters():
             if not valid_dendro_clusters_df.empty:
                 for cluster_id_val, group in valid_dendro_clusters_df.groupby("DendroClusterID", observed=True):
                     entropies = []
-                    if "Protocol" in group.columns and not group["Protocol"].dropna().empty:
-                        entropies.append(compute_entropy(group["Protocol"].dropna()))
-                    if "SourcePort" in group.columns and not group["SourcePort"].dropna().empty:
-                        entropies.append(compute_entropy(group["SourcePort"].astype(str).dropna()))
-                    if "DestinationPort" in group.columns and not group["DestinationPort"].dropna().empty:
-                        entropies.append(compute_entropy(group["DestinationPort"].astype(str).dropna()))
+                    if "Protocol" in group.columns and not group["Protocol"].dropna().empty: entropies.append(compute_entropy(group["Protocol"].dropna()))
+                    if "SourcePort" in group.columns and not group["SourcePort"].dropna().empty: entropies.append(compute_entropy(group["SourcePort"].astype(str).dropna()))
+                    if "DestinationPort" in group.columns and not group["DestinationPort"].dropna().empty: entropies.append(compute_entropy(group["DestinationPort"].astype(str).dropna()))
                     valid_entropies = [e for e in entropies if pd.notna(e) and np.isfinite(e) and e > 0]
                     cluster_entropy_map_dendro[cluster_id_val] = np.mean(valid_entropies) if valid_entropies else 0.0
         df_for_dendro["DendroClusterEntropy"] = df_for_dendro["DendroClusterID"].map(cluster_entropy_map_dendro).fillna(0.0)
         
-        logging.info(f"Computed local clusters for hierarchical view. Resolution {resolution}. "
-                     f"{df_for_dendro['DendroClusterID'].nunique(dropna=False)} unique DendroClusterIDs.")
+        logging.info(f"Computed local clusters for hierarchical view. Resolution {resolution}. {df_for_dendro['DendroClusterID'].nunique(dropna=False)} unique DendroClusterIDs.")
 
     except Exception as e:
         logging.error(f"Error during local re-clustering or feature calculation in /hierarchical_clusters: {e}", exc_info=True)
         return jsonify({"id": "error_root", "dist": 0, "error": f"Failed to recluster or recalculate features: {str(e)}", "no_tree": True}), 500
 
-    if 'DendroClusterID' not in df_for_dendro.columns or \
-       df_for_dendro['DendroClusterID'].nunique(dropna=False) == 0 or \
-       (df_for_dendro['DendroClusterID'].nunique(dropna=False) == 1 and \
-        (df_for_dendro['DendroClusterID'].unique()[0] == 'N/A' or pd.isna(df_for_dendro['DendroClusterID'].unique()[0]))):
-        logging.warning("No valid DendroClusterIDs available for hierarchical clustering stats.")
+    if 'DendroClusterID' not in df_for_dendro.columns or df_for_dendro['DendroClusterID'].nunique(dropna=False) <= 1:
+        logging.warning("Not enough valid DendroClusterIDs for hierarchical clustering.")
+        # Return a minimal structure if only one cluster exists
+        if not df_for_dendro.empty and 'DendroClusterID' in df_for_dendro.columns:
+             single_cluster_id = df_for_dendro['DendroClusterID'].unique()[0]
+             return jsonify({"id": f"Cluster {single_cluster_id}", "cluster_id": str(single_cluster_id), "dist": 0, "is_minimal": True, "children": [] })
         return jsonify({"id": "empty_root_no_clusters", "dist": 0, "no_tree": True, "error": "No valid clusters found for dendrogram"}), 200
 
-    # Use processCount for total_packets if available
     agg_dict = {'avg_entropy': ('DendroClusterEntropy', 'mean')}
     if 'processCount' in df_for_dendro.columns:
         agg_dict['total_packets'] = ('processCount', 'sum')
     else:
         agg_dict['total_packets'] = ('DendroClusterID', 'size')
 
-
     stats = (
         df_for_dendro[df_for_dendro['DendroClusterID'] != 'N/A']
         .groupby('DendroClusterID', observed=True)
-        .agg(**agg_dict) # Use dictionary unpacking for agg
+        .agg(**agg_dict)
         .reset_index()
     )
     stats.rename(columns={'DendroClusterID': 'ClusterID'}, inplace=True)
     stats['avg_entropy'] = stats['avg_entropy'].fillna(0.0)
     stats['total_packets'] = stats['total_packets'].fillna(0).astype(int)
 
-
-    if stats.empty:
-        logging.warning("Stats DataFrame is empty after filtering N/A DendroClusterIDs. Cannot perform hierarchical clustering.")
+    if stats.empty or stats.shape[0] < 2:
+        logging.warning(f"Not enough distinct dendro-clusters ({len(stats)}) to perform hierarchical clustering.")
+        if not stats.empty:
+            cluster_id_val = str(stats.loc[0, 'ClusterID'])
+            return jsonify({"id": f"Cluster {cluster_id_val}", "cluster_id": cluster_id_val, "dist": 0, "is_minimal": True, "children": [] })
         return jsonify({"id": "empty_root_no_valid_stats", "dist": 0, "no_tree": True, "error": "No valid clusters for statistics"}), 200
     
-    # Sort stats by ClusterID (as string, to handle non-numeric IDs)
     stats = stats.sort_values(by='ClusterID', key=lambda x: x.astype(str)).reset_index(drop=True)
-
-
     linkage_data = stats[['total_packets', 'avg_entropy']].to_numpy()
-    if linkage_data.shape[0] < 2:
-        logging.warning(f"Not enough distinct dendro-clusters ({linkage_data.shape[0]}) to perform hierarchical clustering in /hierarchical_clusters.")
-        cluster_id_val = "N/A"
-        if not stats.empty: 
-            cluster_id_val = str(stats.loc[0, 'ClusterID'])
-        minimal_tree_response = {"id": f"Cluster {cluster_id_val}", "cluster_id": cluster_id_val, "dist": 0, "is_minimal": True, "children": [] }
-        return jsonify(minimal_tree_response)
     
     try:
-        # Using 'average' linkage, consider others like 'ward' or 'complete' if results are not ideal
         Z = linkage(linkage_data, method='average', metric='euclidean') 
-        root_node_obj, _ = to_tree(Z, rd=True) # rd=True returns a more detailed tree object
+        root_node_obj, _ = to_tree(Z, rd=True)
     except Exception as e:
-        logging.error(f"Error during SciPy hierarchical clustering (linkage or to_tree): {e}", exc_info=True)
+        logging.error(f"Error during SciPy hierarchical clustering: {e}", exc_info=True)
         return jsonify({"id": "error_scipy_tree", "dist": 0, "error": f"Hierarchical clustering failed: {str(e)}", "no_tree": True}), 500
 
     def node_to_dict(node):
         if node.is_leaf():
             try:
-                # node.id is the index in the original stats DataFrame
                 cluster_id_val = str(stats.loc[node.id, 'ClusterID']) 
                 return {"id": f"Cluster {cluster_id_val}", "cluster_id": cluster_id_val, "dist": float(node.dist)}
             except (IndexError, KeyError) as err:
-                logging.error(f"Error accessing stats for leaf node.id={node.id}, stats len={len(stats)}. Error: {err}")
+                logging.error(f"Error accessing stats for leaf node.id={node.id}. Error: {err}")
                 return {"id": f"ErrorLeaf_{node.id}", "cluster_id": "ERROR_ID", "dist": float(node.dist)}
         else:
             left_child_dict = node_to_dict(node.get_left()) if node.get_left() else None
             right_child_dict = node_to_dict(node.get_right()) if node.get_right() else None
             children_list = [c for c in [left_child_dict, right_child_dict] if c is not None]
-            # Ensure node.id for internal nodes is unique string
             internal_node_id = f"Internal_{node.id}_dist{node.dist:.2f}"
             return {"id": internal_node_id, "dist": float(node.dist), "children": children_list}
 
     tree_dict = node_to_dict(root_node_obj)
-    logging.info(f"Hierarchical tree_dict generated using DendroClusterIDs. Root ID: {tree_dict.get('id')}")
+    logging.info(f"Hierarchical tree_dict generated. Root ID: {tree_dict.get('id')}")
     return jsonify(tree_dict)
 
 @app.route('/louvain_ip_graph_data', methods=['GET'])
@@ -1356,6 +1301,51 @@ def cluster_network():
         logging.exception(f"Critical error in /cluster_network for cluster_id {str_cluster_id_param}:")
         return jsonify({"nodes": [], "edges": [], "error": f"Server error processing cluster {str_cluster_id_param}: {str(e)}"}), 500
 
+@app.route('/timeline_data', methods=['GET'])
+def timeline_data():
+    """
+    Provides data aggregated over time for the timeline brush visualization.
+    """
+    global global_df
+    if global_df is None or global_df.empty:
+        logging.warning("/timeline_data called but global_df is None or empty.")
+        return jsonify([])
+
+    df_time = global_df.copy()
+
+    # The global_df has 'Time' as its index. We must work with the index directly.
+    if not isinstance(df_time.index, pd.DatetimeIndex) or df_time.index.empty:
+        logging.warning("Timeline data requested, but DataFrame index is not a DatetimeIndex or is empty.")
+        return jsonify([])
+        
+    df_time.index.name = 'Time' # Ensure the index has a name
+    
+    # Use processCount for value if it exists, otherwise count rows
+    value_col = 'processCount' if 'processCount' in df_time.columns else None
+
+    # Determine a suitable resampling frequency based on total duration
+    duration_seconds = (df_time.index.max() - df_time.index.min()).total_seconds()
+    if duration_seconds <= 120:      # up to 2 minutes
+        freq = '1S'          # 1 Second bins
+    elif duration_seconds <= 7200:   # up to 2 hours
+        freq = '15S'         # 15 Second bins
+    elif duration_seconds <= 172800: # up to 2 days
+        freq = '1Min'        # 1 Minute bins
+    else:                    # more than 2 days
+        freq = '5Min'        # 5 Minute bins
+
+    # Resample directly on the DatetimeIndex.
+    if value_col:
+        time_series = df_time.resample(freq)[value_col].sum()
+    else:
+        time_series = df_time.resample(freq).size()
+    
+    # Convert to JSON format expected by D3
+    timeline_json = [
+        {"time": ts.isoformat(), "value": int(val)}
+        for ts, val in time_series.items()
+    ]
+    return jsonify(timeline_json)
 
 @app.route('/get_cluster_rows', methods=['GET'])
 def get_cluster_rows():
@@ -1403,56 +1393,70 @@ def get_cluster_rows():
     return jsonify({"rows": rows_for_json, "total": total_rows_in_cluster})
 
 
-@app.route('/get_cluster_table', methods=['GET']) # For HTML table view, if still used directly
+@app.route('/get_cluster_table', methods=['GET'])
 def get_cluster_table():
-    # This endpoint returns raw HTML. Consider if it's still needed or if
-    # get_cluster_rows (JSON) and frontend rendering is preferred.
-    # For now, keeping its logic but ensuring it uses string cluster_id.
     global global_df
     if global_df is None or global_df.empty:
-        return "<p>No data available.</p>"
-    
+        return jsonify({"rows": [], "total": 0, "error": "No data available."}), 404
+
     cluster_id_param = request.args.get("cluster_id")
-    if not cluster_id_param: return "<p>cluster_id parameter is missing.</p>"
+    if not cluster_id_param:
+        return jsonify({"rows": [], "total": 0, "error": "cluster_id parameter is missing."}), 400
 
     try:
         page = int(request.args.get("page", 1))
-        page_size = int(request.args.get("page_size", 50))
-    except ValueError: page, page_size = 1, 50
+        page_size = int(request.args.get("page_size", 30))
+        search_query = request.args.get("search", "").strip().lower()
+    except (ValueError, TypeError):
+        return jsonify({"rows": [], "total": 0, "error": "Invalid parameters."}), 400
 
-    df_cluster = global_df[global_df["ClusterID"].astype(str) == str(cluster_id_param)]
+    df_cluster = global_df[global_df["ClusterID"].astype(str) == str(cluster_id_param)].copy()
+
+    # --- UPDATED: Expanded column list for display ---
+    display_cols = ['No.', 'Time', 'Source', 'SourcePort', 'Destination', 'DestinationPort', 'Protocol', 'Length', 'Flags', 'processCount', 'InterArrivalTime', 'BytesPerSecond', 'AttackType']
+    cols_to_search = display_cols  # Search the columns that are being displayed
+
+    if search_query and not df_cluster.empty:
+        search_series = pd.Series([''] * len(df_cluster), index=df_cluster.index, dtype=str)
+        for col in cols_to_search:
+            if col in df_cluster.columns:
+                search_series += df_cluster[col].astype(str).str.lower() + ' '
+        
+        df_cluster = df_cluster[search_series.str.contains(search_query, na=False)]
+
     total = len(df_cluster)
     start = (page - 1) * page_size
     end = start + page_size
-    
-    # Prepare rows for HTML display, handling NaNs
-    rows_dict_list = []
-    for _, row_series in df_cluster.iloc[start:end].iterrows():
+
+    final_cols = [col for col in display_cols if col in df_cluster.columns]
+    paginated_df = df_cluster[final_cols].iloc[start:end]
+
+    rows_for_json = []
+    for _, row_series in paginated_df.iterrows():
         record = {}
         for col_name, val in row_series.items():
-            if pd.isna(val): record[col_name] = "" # Empty string for HTML display of NaN
-            elif isinstance(val, pd.Timestamp): record[col_name] = val.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3] # ms precision
-            else: record[col_name] = str(val)
-        rows_dict_list.append(record)
+            if pd.isna(val):
+                record[col_name] = ""
+            elif isinstance(val, pd.Timestamp):
+                record[col_name] = val.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+            else:
+                record[col_name] = val
+        rows_for_json.append(record)
 
-    if not rows_dict_list: return "<p>No rows found for this cluster and page.</p>"
-    
-    columns = list(rows_dict_list[0].keys()) # Get columns from the first row
-    html = "<table style='width:100%; border-collapse: collapse; border:1px solid #ddd;'>"
-    html += "<thead><tr>" + "".join(f"<th style='padding:8px; border:1px solid #ddd; text-align:left;'>{col}</th>" for col in columns) + "</tr></thead>"
-    html += "<tbody>"
-    for row_dict_item in rows_dict_list:
-        html += "<tr>" + "".join(f"<td style='padding:8px; border:1px solid #ddd;'>{row_dict_item.get(col, '')}</td>" for col in columns) + "</tr>"
-    html += "</tbody></table>"
-    html += f"<p id='table-summary' data-total='{total}'>Showing rows {start + 1} to {min(end, total)} of {total}.</p>"
-    return html
-
+    return jsonify({"rows": rows_for_json, "total": total})
 
 @app.route('/sankey_data', methods=['GET'])
 def sankey_data():
     global global_df
     if global_df is None or global_df.empty:
         return jsonify({"nodes": [], "links": [], "error": "No data loaded"}), 400
+
+    # Apply time filter from GET request args
+    df_sankey = apply_time_filter(global_df.copy(), request)
+
+    if df_sankey.empty:
+        logging.warning("DataFrame is empty after time filter in /sankey_data.")
+        return jsonify({"nodes": [], "links": []})
 
     dimensions_str = request.args.get('dimensions', 'Protocol,SourceClassification')
     dimensions_keys = [d.strip() for d in dimensions_str.split(',') if d.strip()]
@@ -1464,20 +1468,17 @@ def sankey_data():
         if dimensions_keys[k_dim_check] == dimensions_keys[k_dim_check + 1]:
             return jsonify({"nodes": [], "links": [], "error": f"Consecutive Sankey dimensions cannot be the same: {dimensions_keys[k_dim_check]}"}), 400
 
-    # Check if pre-computed columns exist
     for key in dimensions_keys:
-        if key not in global_df.columns:
+        if key not in df_sankey.columns:
             logging.error(f"Sankey dimension key '{key}' not found in DataFrame columns.")
             return jsonify({"nodes": [], "links": [], "error": f"Dimension '{key}' not found"}), 400
 
-    # Determine value for links (use processCount if available, else row count)
-    value_col = 'processCount' if 'processCount' in global_df.columns else None
+    value_col = 'processCount' if 'processCount' in df_sankey.columns else None
 
-    # Perform a single, efficient groupby on all requested dimensions
     if value_col:
-        grouped_df = global_df.groupby(dimensions_keys, observed=True)[value_col].sum().reset_index(name='value')
+        grouped_df = df_sankey.groupby(dimensions_keys, observed=True)[value_col].sum().reset_index(name='value')
     else:
-        grouped_df = global_df.groupby(dimensions_keys, observed=True).size().reset_index(name='value')
+        grouped_df = df_sankey.groupby(dimensions_keys, observed=True).size().reset_index(name='value')
 
     if grouped_df.empty:
         return jsonify({"nodes": [], "links": []})
@@ -1490,7 +1491,6 @@ def sankey_data():
     
     links_agg = {}
     
-    # Aggregate link values from the single grouped dataframe
     for _, row in grouped_df.iterrows():
         path_value = row['value']
         for i in range(len(dimensions_keys) - 1):
@@ -1509,7 +1509,6 @@ def sankey_data():
             link_tuple = (source_name, target_name)
             links_agg[link_tuple] = links_agg.get(link_tuple, 0) + path_value
 
-    # Build final nodes and links list
     nodes_map = {}
     nodes_list = []
     links_list = []
@@ -1688,59 +1687,67 @@ def get_edge_table():
 @app.route('/get_multi_edge_table', methods=['POST'])
 def get_multi_edge_table():
     global global_df
-    if global_df is None or global_df.empty: return "<p>No data available.</p>"
+    if global_df is None or global_df.empty:
+        return jsonify({"rows": [], "total": 0, "error": "No data available."}), 404
 
     try:
         data = request.get_json()
         edges_to_filter = data.get("edges", [])
         page = int(data.get("page", 1))
-        page_size = int(data.get("page_size", 50))
+        page_size = int(data.get("page_size", 30))
+        search_query = data.get("search", "").strip().lower()
     except Exception as e_req:
-        return f"<p>Error parsing request for multi-edge table: {str(e_req)}</p>"
+        return jsonify({"rows": [], "total": 0, "error": f"Error parsing request: {str(e_req)}"}), 400
 
-    if not edges_to_filter: return "<p>No edges selected for multi-edge table.</p>"
+    if not edges_to_filter:
+        return jsonify({"rows": [], "total": 0})
 
-    # Build a boolean mask for all selected edges
     combined_mask = pd.Series([False] * len(global_df), index=global_df.index)
     for edge_filter_item in edges_to_filter:
         try:
-            source_val = edge_filter_item["source"]
-            destination_val = edge_filter_item["destination"]
-            protocol_val = edge_filter_item["protocol"]
             condition = (
-                (global_df["Source"].astype(str) == str(source_val)) &
-                (global_df["Destination"].astype(str) == str(destination_val)) &
-                (global_df["Protocol"].astype(str) == str(protocol_val))
+                (global_df["Source"].astype(str) == str(edge_filter_item["source"])) &
+                (global_df["Destination"].astype(str) == str(edge_filter_item["destination"])) &
+                (global_df["Protocol"].astype(str) == str(edge_filter_item["protocol"]))
             )
-            combined_mask |= condition # OR conditions together
+            combined_mask |= condition
         except KeyError:
-            logging.warning(f"Skipping malformed edge dict in multi_edge_table: {edge_filter_item}")
-            continue 
+            continue
 
-    filtered_df_multi_edge = global_df[combined_mask]
-    total_multi_edge = len(filtered_df_multi_edge)
-    start_multi_edge = (page - 1) * page_size
-    end_multi_edge = start_multi_edge + page_size
+    filtered_df = global_df[combined_mask].copy()
     
-    rows_for_html_multi_edge = []
-    for _, row_series_multi in filtered_df_multi_edge.iloc[start_multi_edge:end_multi_edge].iterrows():
-        record_multi = {}
-        for col_name_multi, val_multi in row_series_multi.items():
-            if pd.isna(val_multi): record_multi[col_name_multi] = ""
-            elif isinstance(val_multi, pd.Timestamp): record_multi[col_name_multi] = val_multi.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
-            else: record_multi[col_name_multi] = str(val_multi)
-        rows_for_html_multi_edge.append(record_multi)
+    # --- UPDATED: Expanded column list for display ---
+    display_cols = ['No.', 'Time', 'Source', 'SourcePort', 'Destination', 'DestinationPort', 'Protocol', 'Length', 'Flags', 'processCount', 'InterArrivalTime', 'BytesPerSecond', 'AttackType']
+    cols_to_search = display_cols # Search the columns that are being displayed
 
-    if not rows_for_html_multi_edge: return "<p>No rows found for selected edges.</p>"
-    columns_multi_edge = list(rows_for_html_multi_edge[0].keys())
-    # (HTML generation logic as before)
-    html_multi = "<table style='width:100%; border-collapse: collapse; border:1px solid #ddd;'>"
-    html_multi += "<thead><tr>" + "".join(f"<th style='padding:8px; border:1px solid #ddd; text-align:left;'>{col}</th>" for col in columns_multi_edge) + "</tr></thead><tbody>"
-    for row_item_multi in rows_for_html_multi_edge:
-        html_multi += "<tr>" + "".join(f"<td style='padding:8px; border:1px solid #ddd;'>{row_item_multi.get(col, '')}</td>" for col in columns_multi_edge) + "</tr>"
-    html_multi += "</tbody></table>"
-    html_multi += f"<p id='table-summary' data-total='{total_multi_edge}'>Showing rows {start_multi_edge + 1} to {min(end_multi_edge, total_multi_edge)} of {total_multi_edge}.</p>"
-    return html_multi
+    if search_query and not filtered_df.empty:
+        search_series = pd.Series([''] * len(filtered_df), index=filtered_df.index, dtype=str)
+        for col in cols_to_search:
+            if col in filtered_df.columns:
+                 search_series += filtered_df[col].astype(str).str.lower() + ' '
+        
+        filtered_df = filtered_df[search_series.str.contains(search_query, na=False)]
+
+    total = len(filtered_df)
+    start = (page - 1) * page_size
+    end = start + page_size
+
+    final_cols = [col for col in display_cols if col in filtered_df.columns]
+    paginated_df = filtered_df[final_cols].iloc[start:end]
+
+    rows_for_json = []
+    for _, row_series in paginated_df.iterrows():
+        record = {}
+        for col_name, val in row_series.items():
+            if pd.isna(val):
+                record[col_name] = ""
+            elif isinstance(val, pd.Timestamp):
+                record[col_name] = val.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+            else:
+                record[col_name] = val
+        rows_for_json.append(record)
+
+    return jsonify({"rows": rows_for_json, "total": total})
 
 
 # --- Main Execution ---

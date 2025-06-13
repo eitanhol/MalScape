@@ -231,7 +231,21 @@
 
 
         #sidebar-table-no-results { text-align: center; padding: 10px; color: #6c757d; display: none; }
-        #tooltip { position: absolute; display: none; background: rgba(255, 255, 255, 0.95); border-radius: 4px; padding: 8px 12px; font-size: 13px; color: #2d3748; pointer-events: none; z-index: 2000; box-shadow: 0 2px 8px rgba(0,0,0,0.15); max-width: 300px; line-height: 1.5; border: 1px solid #dee2e6; }
+        #tooltip { 
+            position: absolute; 
+            display: none; 
+            background: rgba(255, 255, 255, 0.95); 
+            border-radius: 4px; 
+            padding: 8px 12px; 
+            font-size: 13px; 
+            color: #2d3748; 
+            pointer-events: none; 
+            z-index: 2100; 
+            box-shadow: 0 2px 8px rgba(0,0,0,0.15); 
+            max-width: 300px; 
+            line-height: 1.5; 
+            border: 1px solid #dee2e6; 
+        }        
         .color-box { display: inline-block; width: 12px; height: 12px; vertical-align: middle; margin-right: 4px; border: 1px solid #ccc; }
 
         /* Legend Styling */
@@ -598,6 +612,37 @@
         button#applySankeyToHeatmapBtn:not(:disabled):hover {
             background-color: #218838 !important;
         }
+
+        #timeline-container {
+            width: 100%;
+            height: 100px;
+            position: relative;
+        }
+        #timeline-container .axis .domain {
+            stroke: #666;
+        }
+        #timeline-container .axis .tick line {
+            stroke: #ccc;
+        }
+        #timeline-container .axis .tick text {
+            fill: #444;
+            font-size: 10px;
+        }
+        #timeline-container .context-area {
+            fill: #4299e1;
+            fill-opacity: 0.3;
+        }
+        #timeline-container .brush .selection {
+            fill: #4299e1;
+            fill-opacity: 0.5;
+            stroke: #3182ce;
+            stroke-width: 1px;
+        }
+        #timeline-container .brush .handle {
+            fill: #f1f3f5;
+            stroke: #6c757d;
+            stroke-width: 1px;
+        }
     </style>
 </head>
 <body>
@@ -624,16 +669,16 @@
         <h3 style="margin-bottom: 10px; font-size: 14px;">Sidebar Graph Sizing</h3>
 
         <label for="sidebarNodeSizeMin" style="font-size: 12px; display: block; margin-bottom: 2px;">Min Node Size:</label>
-        <input type="number" id="sidebarNodeSizeMin" placeholder="10" step="1" min="1" style="width: 90%; padding: 4px 6px; font-size: 11px; margin-bottom: 8px;">
+        <input type="number" id="sidebarNodeSizeMin" placeholder="2" step="1" min="2" style="width: 90%; padding: 4px 6px; font-size: 11px; margin-bottom: 8px;">
 
         <label for="sidebarNodeSizeMax" style="font-size: 12px; display: block; margin-bottom: 2px;">Max Node Size:</label>
-        <input type="number" id="sidebarNodeSizeMax" placeholder="30" step="1" min="1" style="width: 90%; padding: 4px 6px; font-size: 11px; margin-bottom: 8px;">
+        <input type="number" id="sidebarNodeSizeMax" step="1" min="3" style="width: 90%; padding: 4px 6px; font-size: 11px; margin-bottom: 8px;">
 
         <label for="sidebarEdgeWidthMin" style="font-size: 12px; display: block; margin-bottom: 2px;">Min Edge Width:</label>
-        <input type="number" id="sidebarEdgeWidthMin" placeholder="1" step="0.1" min="0.1" style="width: 90%; padding: 4px 6px; font-size: 11px; margin-bottom: 8px;">
+        <input type="number" id="sidebarEdgeWidthMin" placeholder="1" step="1" min="1" style="width: 90%; padding: 4px 6px; font-size: 11px; margin-bottom: 8px;">
 
         <label for="sidebarEdgeWidthMax" style="font-size: 12px; display: block; margin-bottom: 2px;">Max Edge Width:</label>
-        <input type="number" id="sidebarEdgeWidthMax" placeholder="8" step="0.1" min="0.1" style="width: 90%; padding: 4px 6px; font-size: 11px; margin-bottom: 8px;">
+        <input type="number" id="sidebarEdgeWidthMax" placeholder="8" step="1" min="1" style="width: 90%; padding: 4px 6px; font-size: 11px; margin-bottom: 8px;">
     </div>
     
   </div>
@@ -718,6 +763,19 @@
         <button id="applyFiltersBtn" style="margin-left: 10px;" title="Apply selected filters to heatmap.">Apply Filters</button>
       </div>
     </div>
+
+    <div id="timeline-card" style="display: none; background: #fff; box-shadow: 0 2px 10px rgba(0,0,0,0.1); padding: 15px 20px; border-radius: 12px; margin: 20px 0; border: 1px solid #e2e8f0;">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <h3 style="margin-top:0; margin-bottom: 5px;">Time Window Selector</h3>
+            
+            <div>
+                <button id="applyTimelineBtn" style="padding: 4px 8px; font-size: 12px; background-color: #28a745;">Apply</button>
+                <button id="resetTimelineBtn" style="padding: 4px 8px; font-size: 12px; background-color: #6c757d;">Reset</button>
+            </div>
+            </div>
+        <div id="timeline-container"></div>
+    </div>
+
     <div id="dendrogramCard" style="display: none; background: #fff; box-shadow: 0 2px 10px rgba(0,0,0,0.1); padding: 20px; border-radius: 12px; margin: 20px 0; border: 1px solid #e2e8f0;">
         <div class="dendro-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
             <h3>Hierarchical Cluster Tree</h3>
@@ -947,6 +1005,7 @@
     
     window.activeSankeyNodeFilter = null;
     window.allClusterIdsMasterList = [];
+    window.currentTimeSelection = null;
     
     const sidebar = document.getElementById('sidebar');
     const sidebarToggleBtn = document.getElementById('sidebar-toggle');
@@ -1088,109 +1147,40 @@
     }
 
     function filterSidebarTable() {
-        if (!sidebarTableContainer || !sidebarSearchInput) return;
+        // This function now triggers a reload of the table from the backend.
+        const searchQuery = sidebarSearchInput.value || "";
+        const page = 1; // Always reset to page 1 for a new search
 
-        const keywords = sidebarSearchInput.value.toLowerCase().split(' ').filter(k => k.trim() !== '');
-        const tableBody = sidebarTableContainer.querySelector('tbody');
-        const noResultsMsg = document.getElementById('sidebar-table-no-results');
-
-        if (!tableBody) {
-            if (noResultsMsg) noResultsMsg.style.display = 'none';
-            return;
-        }
-
-        const rows = tableBody.querySelectorAll('tr');
-        let visibleRowCount = 0;
-
-        const removeHighlight = (node) => {
-            const marks = node.querySelectorAll('mark');
-            marks.forEach(mark => {
-                const parent = mark.parentNode;
-                while (mark.firstChild) {
-                    parent.insertBefore(mark.firstChild, mark);
-                }
-                parent.removeChild(mark);
-                parent.normalize();
-            });
-        };
-
-        const addHighlight = (node, textToHighlight) => {
-            if (!textToHighlight) return;
-
-            const text = node.textContent.toLowerCase();
-            const startIndex = text.indexOf(textToHighlight);
-
-            if (startIndex === -1) return;
-
-            const pattern = new RegExp(textToHighlight.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&'), 'gi');
-            const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT, null, false);
-            let currentNode;
-            const nodesToProcess = [];
-
-            while(currentNode = walker.nextNode()) {
-                 nodesToProcess.push(currentNode);
-            }
-
-            nodesToProcess.forEach(textNode => {
-                const textContent = textNode.nodeValue;
-                let match;
-                let lastIndex = 0;
-                const fragment = document.createDocumentFragment();
-
-                while ((match = pattern.exec(textContent)) !== null) {
-                    if (match.index > lastIndex) {
-                        fragment.appendChild(document.createTextNode(textContent.substring(lastIndex, match.index)));
+        if (sidebarTableMode === 'cluster' && currentSidebarTableClusterId) {
+            loadSidebarClusterTable(currentSidebarTableClusterId, page, searchQuery);
+        } else if (sidebarTableMode === 'edges') {
+            let edgeList = [];
+            if (selectedSidebarNodes.size > 0 && sidebarCy) {
+                 selectedSidebarNodes.forEach(nodeId => {
+                    const node = sidebarCy.getElementById(nodeId);
+                    if(node && node.length > 0) {
+                        node.connectedEdges().forEach(edge => {
+                           edgeList.push({
+                                source: edge.data('source'),
+                                destination: edge.data('target'),
+                                protocol: edge.data('Protocol')
+                           });
+                        });
                     }
-                    const mark = document.createElement('mark');
-                    mark.textContent = match[0];
-                    fragment.appendChild(mark);
-
-                    lastIndex = pattern.lastIndex;
-                }
-                if (lastIndex < textContent.length) {
-                    fragment.appendChild(document.createTextNode(textContent.substring(lastIndex)));
-                }
-
-                if (fragment.hasChildNodes() && lastIndex > 0) {
-                     textNode.parentNode.replaceChild(fragment, textNode);
-                }
-            });
-        };
-
-        rows.forEach(row => {
-            row.querySelectorAll('td').forEach(cell => {
-                removeHighlight(cell);
-            });
-
-            const rowText = row.textContent.toLowerCase();
-            let showRow = true;
-            if (keywords.length > 0) {
-                for (const keyword of keywords) {
-                    if (!rowText.includes(keyword)) {
-                        showRow = false;
-                        break;
-                    }
-                }
-            } else {
-                showRow = true;
-            }
-
-            row.style.display = showRow ? '' : 'none';
-
-            if (showRow && keywords.length > 0) {
-                visibleRowCount++;
-                row.querySelectorAll('td').forEach(cell => {
-                    keywords.forEach(keyword => {
-                        addHighlight(cell, keyword);
-                    });
+                 });
+                 edgeList = Array.from(new Set(edgeList.map(JSON.stringify)), JSON.parse);
+            } else if (selectedSidebarEdges.size > 0) {
+                edgeList = Array.from(selectedSidebarEdges).map(key => {
+                    const parts = key.split('|');
+                    return { source: parts[0], destination: parts[1], protocol: parts[2] };
                 });
-            } else if (showRow) {
-                 visibleRowCount++;
             }
-        });
 
-        if (noResultsMsg) {
-             noResultsMsg.style.display = (visibleRowCount === 0 && keywords.length > 0) ? 'block' : 'none';
+            if (edgeList.length > 0) {
+                loadSidebarMultiEdgeTable(edgeList, page, searchQuery);
+            } else {
+                sidebarTableContainer.innerHTML = '<p style="padding: 10px; text-align: center;">Select a node or edge to search.</p>';
+            }
         }
     }
 
@@ -1987,31 +1977,34 @@
             return;
         }
 
-        const minNS_input = Math.max(parseFloat(document.getElementById('sidebarNodeSizeMin').value) || 10, 1);
-        const maxNS_input = Math.max(parseFloat(document.getElementById('sidebarNodeSizeMax').value) || 30, minNS_input + 1);
+        // Read min/max inputs according to new requirements
+        const minNS_input = parseFloat(document.getElementById('sidebarNodeSizeMin').value) || 2;
+        const maxNS_input_val = document.getElementById('sidebarNodeSizeMax').value;
+        const maxNS_input = maxNS_input_val ? parseFloat(maxNS_input_val) : Infinity;
+
+        // Edge width logic remains the same.
         const minEW_input = Math.max(parseFloat(document.getElementById('sidebarEdgeWidthMin').value) || 1, 0.1);
         const maxEW_input = Math.max(parseFloat(document.getElementById('sidebarEdgeWidthMax').value) || 8, minEW_input + 0.1);
 
         sidebarCy.batch(() => {
             const nodes = sidebarCy.nodes();
             if (nodes.length > 0) {
-                // Determine range of packet counts for normalization
-                const packetCounts = nodes.map(n => n.data('packetCount') || 0).filter(c => c > 0);
-                const actualMinPktCount = packetCounts.length > 0 ? Math.min(...packetCounts) : 1;
-                const actualMaxPktCount = packetCounts.length > 0 ? Math.max(...packetCounts) : 1;
-                const pktCountRange = (actualMaxPktCount - actualMinPktCount);
+                const allDiameters = []; // Array to store calculated diameters
 
                 nodes.forEach(n => {
                     const packetCount = n.data('packetCount') || 0;
-                    let normalizedCount = 0;
-                    if (pktCountRange > 0) {
-                        const clampedCount = Math.max(actualMinPktCount, Math.min(packetCount, actualMaxPktCount));
-                        normalizedCount = (clampedCount - actualMinPktCount) / pktCountRange;
-                    } else if (nodes.length > 0) {
-                        normalizedCount = 0.5; // If all counts are the same, give a medium size
-                    }
+                    // 1. Calculate size based on square root of packet count.
+                    let diameter = Math.sqrt(packetCount);
 
-                    const diameter = minNS_input + normalizedCount * (maxNS_input - minNS_input);
+                    // 2. Apply minimum size constraint.
+                    diameter = Math.max(minNS_input, diameter);
+
+                    // 3. Apply maximum size constraint ONLY if user provided a finite number.
+                    if (isFinite(maxNS_input)) {
+                        diameter = Math.min(diameter, maxNS_input);
+                    }
+                    
+                    allDiameters.push(diameter); // Store the final diameter for this node
 
                     const styleToApply = {
                         'width': diameter,
@@ -2020,7 +2013,6 @@
 
                     // Check if the node is an attacker and set proportional border width
                     if (n.data('is_attacker')) {
-                        // Border width as 10% of diameter, with min/max caps for sanity
                         const borderWidth = Math.max(2, Math.min(diameter * 0.1, 10));
                         styleToApply['border-width'] = borderWidth;
                     }
@@ -2030,9 +2022,19 @@
                         n.style(styleToApply);
                     }
                 });
+                
+                // --- NEW: Update the placeholder for the max node size input ---
+                if (allDiameters.length > 0) {
+                    const currentMaxNodeSize = Math.max(...allDiameters);
+                    const maxNodeSizeInput = document.getElementById('sidebarNodeSizeMax');
+                    if (maxNodeSizeInput) {
+                        // Update the placeholder with the calculated max, formatted to 2 decimal places.
+                        maxNodeSizeInput.placeholder = currentMaxNodeSize.toFixed(2);
+                    }
+                }
             }
 
-            // --- Edge Width Logic ---
+            // --- Edge Width Logic (Unchanged) ---
             const edges = sidebarCy.edges();
             if (edges.length > 0) {
                 const edgeCounts = edges.map(e => e.data('processCount') || 1);
@@ -2043,7 +2045,7 @@
                 edges.forEach(e => {
                     const count = e.data('processCount') || 1;
                     let normalizedCount = 0;
-                     if (countRange > 0) {
+                    if (countRange > 0) {
                         const clampedCount = Math.max(actualMinCount, Math.min(count, actualMaxCount));
                         normalizedCount = (clampedCount - actualMinCount) / countRange;
                     } else if (edges.length > 0) {
@@ -2128,65 +2130,39 @@
         }
     }
 
-    function loadSidebarMultiEdgeTable(edgeList, page) {
+    function loadSidebarMultiEdgeTable(edgeList, page, searchQuery = "") {
         if (!edgeList || edgeList.length === 0) {
-            console.log("Attempted to load multi-edge table with empty list. Reverting view.");
             updateSidebarTableForSelectedEdges();
             return;
         }
         sidebarTableMode = 'edges';
-        console.log(`Loading sidebar table for ${edgeList.length} edges, page ${page}`);
         showSidebarLoading(false, true);
         sidebarTableContainer.style.display = 'none';
-        sidebarTablePagination.style.display = 'none';
-        sidebarSearchContainer.style.display = 'none';
+        sidebarSearchContainer.style.display = 'block';
 
-        const payload = { edges: edgeList, page: page, page_size: TABLE_PAGE_SIZE };
+        const payload = {
+            edges: edgeList,
+            page: page,
+            page_size: TABLE_PAGE_SIZE,
+            search: searchQuery
+        };
 
         fetch(`${API_BASE_URL}/get_multi_edge_table`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
         })
-        .then(response => response.ok ? response.text() : Promise.reject(`Failed multi-edge table page (${response.status})`))
-        .then(html => {
+        .then(response => response.ok ? response.json() : Promise.reject(`Failed multi-edge table page (${response.status})`))
+        .then(data => {
             showSidebarLoading(false, false);
-             const tempDiv = document.createElement('div');
-             tempDiv.innerHTML = html;
-             const tableHtml = tempDiv.querySelector('table')?.outerHTML || '';
-             const summaryHtml = tempDiv.querySelector('#table-summary')?.outerHTML || '';
-             sidebarTableContainer.innerHTML = '<p id="sidebar-table-no-results" style="display: none; text-align: center; padding: 10px; color: #6c757d;">No rows match your search criteria.</p>' + tableHtml;
-            sidebarTableContainer.style.display = 'block';
-            sidebarSearchContainer.style.display = 'block';
-            if (sidebarSearchInput) filterSidebarTable();
-
-            const summaryElem = tempDiv.querySelector('#table-summary');
-            if (summaryElem && summaryElem.dataset.total) {
-                const total = parseInt(summaryElem.dataset.total, 10);
-                 if (total > 0) {
-                    sidebarTablePagination.style.display = 'block';
-                    const totalPages = Math.ceil(total / TABLE_PAGE_SIZE);
-                    document.getElementById('sidebarTotalPages').textContent = totalPages || 1;
-                    document.getElementById('sidebarCurrentPageInput').value = page;
-                    document.getElementById('sidebarCurrentPageInput').max = totalPages || 1;
-                 } else {
-                    sidebarTablePagination.style.display = 'none';
-                 }
-            } else {
-                document.getElementById('sidebarTotalPages').textContent = '?';
-                document.getElementById('sidebarCurrentPageInput').value = page;
-                sidebarTablePagination.style.display = 'none';
-                console.warn("No table summary total found in multi-edge sidebar table response.");
-            }
+            _renderSidebarTable(data, page);
             sidebarTableContainer.scrollTop = 0;
         })
         .catch(error => {
             console.error("Error fetching multi-edge sidebar table:", error);
             showSidebarLoading(false, false);
-            sidebarTableContainer.innerHTML = `<p id="sidebar-table-no-results" style="display: none; text-align: center; padding: 10px; color: #6c757d;">No rows match your search criteria.</p><p style="color: red; padding: 10px;">Error loading table data for selected edges.</p>`;
+            sidebarTableContainer.innerHTML = `<p style="color: red; padding: 10px;">Error loading table data for selected edges.</p>`;
             sidebarTableContainer.style.display = 'block';
-            sidebarSearchContainer.style.display = 'none';
-            sidebarTablePagination.style.display = 'none';
         });
     }
 
@@ -2314,35 +2290,29 @@
 
     function updateHeatmap() {
         return new Promise((resolve, reject) => {
-            console.log("updateHeatmap started (Sankey-aware highlighting mode)...");
-
-            if (typeof metrics === 'undefined' || !Array.isArray(metrics)) {
-                console.error("Global 'metrics' array is not defined correctly.");
-                return reject(new Error("Global 'metrics' array is not defined correctly."));
-            }
             window.fullHeatmapData = {};
             window.heatmapSortOrders = {};
-            window.heatmapCountSortOrder = []; // This should be populated based on unfiltered 'Count' data
+            window.heatmapCountSortOrder = [];
 
             const filterParamsBase = {
                 payloadKeyword: document.getElementById('payloadSearch').value.trim().toLowerCase(),
                 sourceFilter: document.getElementById('sourceFilter').value.trim().toLowerCase(),
                 destinationFilter: document.getElementById('destinationFilter').value.trim().toLowerCase(),
                 protocolFilter: document.getElementById('protocolFilter').value.trim().toLowerCase(),
-                entropyMin: document.getElementById('entropyMinFilter').value,
-                entropyMax: document.getElementById('entropyMaxFilter').value,
                 minSourceAmt: document.getElementById('minSourceAmtFilter').value,
                 maxSourceAmt: document.getElementById('maxSourceAmtFilter').value,
                 minDestinationAmt: document.getElementById('minDestinationAmtFilter').value,
                 maxDestinationAmt: document.getElementById('maxDestinationAmtFilter').value
             };
 
+            if (window.currentTimeSelection) {
+                filterParamsBase.start_time = window.currentTimeSelection.startTime.toISOString();
+                filterParamsBase.end_time = window.currentTimeSelection.endTime.toISOString();
+            }
+
             Promise.all(metrics.map(m => {
                 const filterParams = { ...filterParamsBase, metric: m.value };
                 
-                // NOTE: Sankey filter is NOT sent here. Heatmap data is always fetched based on main filters only.
-                // Highlighting based on Sankey selection happens during rendering in showInlineDendrogram.
-
                 return fetch(`${API_BASE_URL}/filter_and_aggregate`, {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
@@ -2350,77 +2320,24 @@
                         signal: globalAbortController.signal
                     })
                     .then(response => {
-                        if (!response.ok) {
-                            return response.json().catch(() => response.text()).then(errBody => {
-                                throw new Error(`Fetch failed for ${m.label}: ${errBody.error || errBody || response.statusText}`);
-                            });
-                        }
+                        if (!response.ok) throw new Error('Network response was not ok');
                         return response.json();
                     })
-                    .then(data => {
-                        // Basic data integrity check
-                        if (data && data.length > 0) {
-                            const values = data.map(d_item => d_item.value);
-                            // You might want to calculate min/max here if needed for scales later,
-                            // but scales are typically generated in showInlineDendrogram.
-                        }
-                        return { metric: m.label, pivotData: data };
-                    })
+                    .then(data => ({ metric: m.label, pivotData: data }))
                     .catch(error => {
-                        if (error.name === 'AbortError') {
-                            console.log(`Heatmap fetch for metric ${m.label} aborted.`);
-                            return { metric: m.label, pivotData: [], error: true, aborted: true };
-                        }
-                        console.error(`Error fetching or processing data for metric ${m.label}:`, error);
+                        if (error.name === 'AbortError') console.log(`Heatmap fetch aborted for ${m.label}.`);
+                        else console.error(`Error fetching heatmap for ${m.label}:`, error);
                         return { metric: m.label, pivotData: [], error: true };
                     });
             }))
             .then(results => {
-                if (globalAbortController.signal.aborted) {
-                    console.log("Heatmap update cancelled before processing results.");
-                    reject(new DOMException("Operation aborted by user.", "AbortError"));
-                    return;
-                }
-                const validResults = results.filter(r => !r.error && !r.aborted);
-                const orderOption = document.getElementById("rowOrderSelect")?.value || "descending";
-                const comparator = orderOption === "descending" ? (a, b) => (b.value ?? -Infinity) - (a.value ?? -Infinity) : (a, b) => (a.value ?? Infinity) - (b.value ?? Infinity);
-
+                const validResults = results.filter(r => !r.error);
                 validResults.forEach(r => {
-                    const metricName = r.metric;
-                    if (r.pivotData && Array.isArray(r.pivotData)) {
-                        if (r.pivotData.length > 0) {
-                            const sortedData = [...r.pivotData].sort(comparator);
-                            window.heatmapSortOrders[metricName] = sortedData.map(d_item => String(d_item.cluster));
-                            window.fullHeatmapData[metricName] = r.pivotData;
-                            if(metricName === 'Count') { 
-                                window.heatmapCountSortOrder = sortedData.map(d_item => String(d_item.cluster)); 
-                            }
-                        } else {
-                            window.heatmapSortOrders[metricName] = [];
-                            window.fullHeatmapData[metricName] = [];
-                            if(metricName === 'Count') { window.heatmapCountSortOrder = []; }
-                        }
-                    } else {
-                        window.heatmapSortOrders[metricName] = [];
-                        window.fullHeatmapData[metricName] = [];
-                        if(metricName === 'Count') { window.heatmapCountSortOrder = []; }
-                    }
+                    window.fullHeatmapData[r.metric] = r.pivotData;
                 });
-                console.log("updateHeatmap completed. fullHeatmapData keys:", Object.keys(window.fullHeatmapData));
-                if(window.fullHeatmapData['Count']){
-                    console.log("Count data sample (first 2):", JSON.stringify(window.fullHeatmapData['Count'].slice(0,2)));
-                }
                 resolve(validResults);
             })
-            .catch(error => {
-                if (error.name === 'AbortError') {
-                    console.log("Heatmap update process aborted.");
-                } else {
-                    console.error("Major error fetching one or more heatmap data components:", error);
-                }
-                window.fullHeatmapData = {}; window.heatmapSortOrders = {}; window.heatmapCountSortOrder = [];
-                reject(error);
-            });
+            .catch(error => reject(error));
         });
     }
 
@@ -2447,89 +2364,63 @@
         }
     }
 
-    function loadSidebarClusterTable(clusterID, page) {
+    function loadSidebarClusterTable(clusterID, page, searchQuery = "") {
         if (!clusterID) return;
         sidebarTableMode = 'cluster';
         currentSidebarTableClusterId = clusterID;
-        console.log(`Loading sidebar table for Cluster ${clusterID}, page ${page}`);
         showSidebarLoading(false, true);
         sidebarTableContainer.style.display = 'none';
-        sidebarTablePagination.style.display = 'none';
-        sidebarSearchContainer.style.display = 'none';
+        sidebarSearchContainer.style.display = 'block';
 
-        fetch(`${API_BASE_URL}/get_cluster_table?cluster_id=${clusterID}&page=${page}&page_size=${TABLE_PAGE_SIZE}`)
-            .then(response => response.ok ? response.text() : Promise.reject(`Failed cluster table page (${response.status})`))
-            .then(html => {
+        const searchParam = searchQuery ? `&search=${encodeURIComponent(searchQuery)}` : "";
+        const url = `${API_BASE_URL}/get_cluster_table?cluster_id=${clusterID}&page=${page}&page_size=${TABLE_PAGE_SIZE}${searchParam}`;
+
+        fetch(url)
+            .then(response => response.ok ? response.json() : Promise.reject(`Failed to fetch cluster table (${response.status})`))
+            .then(data => {
                 showSidebarLoading(false, false);
-                 const tempDiv = document.createElement('div');
-                 tempDiv.innerHTML = html;
-                 const tableHtml = tempDiv.querySelector('table')?.outerHTML || '';
-                 const summaryHtml = tempDiv.querySelector('#table-summary')?.outerHTML || '';
-                 sidebarTableContainer.innerHTML = '<p id="sidebar-table-no-results" style="display: none; text-align: center; padding: 10px; color: #6c757d;">No rows match your search criteria.</p>' + tableHtml;
-                sidebarTableContainer.style.display = 'block';
-                sidebarSearchContainer.style.display = 'block';
-                if (sidebarSearchInput) filterSidebarTable();
-
-
-                const summaryElem = tempDiv.querySelector('#table-summary');
-                if (summaryElem && summaryElem.dataset.total) {
-                    const total = parseInt(summaryElem.dataset.total, 10);
-                    if (total > 0) {
-                        sidebarTablePagination.style.display = 'block';
-                        const totalPages = Math.ceil(total / TABLE_PAGE_SIZE);
-                        document.getElementById('sidebarTotalPages').textContent = totalPages || 1;
-                        document.getElementById('sidebarCurrentPageInput').value = page;
-                        document.getElementById('sidebarCurrentPageInput').max = totalPages || 1;
-                    } else {
-                        sidebarTablePagination.style.display = 'none';
-                    }
-                } else {
-                    document.getElementById('sidebarTotalPages').textContent = '?';
-                    document.getElementById('sidebarCurrentPageInput').value = page;
-                    sidebarTablePagination.style.display = 'none';
-                    console.warn("No table summary total found in sidebar cluster table response.");
-                }
+                _renderSidebarTable(data, page);
                 sidebarTableContainer.scrollTop = 0;
             })
             .catch(error => {
                 console.error("Error fetching sidebar cluster table:", error);
                 showSidebarLoading(false, false);
-                sidebarTableContainer.innerHTML = `<p id="sidebar-table-no-results" style="display: none; text-align: center; padding: 10px; color: #6c757d;">No rows match your search criteria.</p><p style="color: red; padding: 10px;">Error loading table data.</p>`;
+                sidebarTableContainer.innerHTML = `<p style="color: red; padding: 10px;">Error loading table data.</p>`;
                 sidebarTableContainer.style.display = 'block';
-                sidebarSearchContainer.style.display = 'none';
-                sidebarTablePagination.style.display = 'none';
             });
-       }
+    }
 
     sidebarGoPageBtn.addEventListener('click', function () {
         let pageInput = document.getElementById('sidebarCurrentPageInput');
         let page = parseInt(pageInput.value, 10);
         const totalPagesStr = document.getElementById('sidebarTotalPages').textContent;
         const totalPages = totalPagesStr === '?' ? Infinity : parseInt(totalPagesStr, 10);
+        const searchQuery = document.getElementById('sidebarTableSearchInput').value || "";
 
         if (!isNaN(page) && page >= 1 && (page <= totalPages || totalPages === Infinity)) {
             if (sidebarTableMode === 'cluster' && currentSidebarTableClusterId) {
-                loadSidebarClusterTable(currentSidebarTableClusterId, page);
+                loadSidebarClusterTable(currentSidebarTableClusterId, page, searchQuery);
             } else if (sidebarTableMode === 'edges') {
                 let edgeList = [];
-                if (selectedNodeId && sidebarCy) {
-                    const node = sidebarCy.getElementById(selectedNodeId);
-                    if (node && node.length > 0) {
-                        edgeList = node.connectedEdges().map(edge => ({ source: edge.data('source'), destination: edge.data('target'), protocol: edge.data('Protocol') }));
-                    }
-                 } else if (selectedSidebarEdges.size > 0) {
-                    edgeList = Array.from(selectedSidebarEdges).map(key => {
-                        const parts = key.split('|');
-                        return { source: parts[0], destination: parts[1], protocol: parts[2] };
+                if (selectedSidebarNodes.size > 0 && sidebarCy) {
+                    selectedSidebarNodes.forEach(nodeId => {
+                        const node = sidebarCy.getElementById(nodeId);
+                        if (node && node.length > 0) {
+                           node.connectedEdges().forEach(edge => {
+                                edgeList.push({ source: edge.data('source'), destination: edge.data('target'), protocol: edge.data('Protocol') });
+                           });
+                        }
                     });
-                 }
-                 if (edgeList.length > 0) {
-                     loadSidebarMultiEdgeTable(edgeList, page);
-                 } else {
-                     console.warn("Sidebar pagination clicked in edge mode, but no edges identified as selected.");
-                 }
-            } else {
-                console.warn("Sidebar pagination clicked but current table context is unclear.");
+                    edgeList = Array.from(new Set(edgeList.map(JSON.stringify)), JSON.parse);
+                } else if (selectedSidebarEdges.size > 0) {
+                   edgeList = Array.from(selectedSidebarEdges).map(key => {
+                       const parts = key.split('|');
+                       return { source: parts[0], destination: parts[1], protocol: parts[2] };
+                   });
+                }
+                if (edgeList.length > 0) {
+                    loadSidebarMultiEdgeTable(edgeList, page, searchQuery);
+                }
             }
         } else {
             alert(`Please enter a valid page number between 1 and ${totalPagesStr}.`);
@@ -2677,7 +2568,7 @@
         if(globalCy) { globalCy.edges().style('display', 'element'); }
        }
 
-     function toggleSidebarFullscreen() {
+    function toggleSidebarFullscreen() {
         if (!document.fullscreenEnabled) {
             alert("Fullscreen mode is not supported by your browser.");
             return;
@@ -2686,18 +2577,23 @@
         if (!document.fullscreenElement && !isSidebarFullscreen) {
             // Enter fullscreen
             sidebar.requestFullscreen().then(() => {
+                // NEW: Move tooltip inside the sidebar to ensure it's in the same rendering layer
+                if (tooltip && sidebar) {
+                    sidebar.appendChild(tooltip.node());
+                }
+
                 sidebar.classList.add('fullscreen');
-                legendContainer.classList.add('fullscreen-active'); // This line adds the class
+                legendContainer.classList.add('fullscreen-active');
                 document.body.classList.add('sidebar-fullscreen');
                 isSidebarFullscreen = true;
-                sidebarFullscreenBtn.innerHTML = '&#x274C;'; 
+                sidebarFullscreenBtn.innerHTML = '&#x274C;';
                 sidebarFullscreenBtn.title = "Exit Sidebar Fullscreen";
                 console.log("Entered sidebar fullscreen.");
                 if (sidebarCy) {
                     setTimeout(() => {
-                         sidebarCy.resize();
-                         sidebarCy.fit(null, 50); 
-                    }, 100); 
+                        sidebarCy.resize();
+                        sidebarCy.fit(null, 50);
+                    }, 100);
                 }
             }).catch(err => {
                 alert(`Error attempting to enable fullscreen mode: ${err.message} (${err.name})`);
@@ -2708,39 +2604,42 @@
             document.exitFullscreen().catch(err => {
                 alert(`Error attempting to disable fullscreen mode: ${err.message} (${err.name})`);
                 console.error("Fullscreen exit failed:", err);
-                 cleanupFullscreenStyles();
+                // Ensure cleanup is called even on error
+                cleanupFullscreenStyles();
             });
-            // Style cleanup and recentering is handled by 'fullscreenchange'
         } else {
             console.warn("Fullscreen state mismatch detected.");
-             cleanupFullscreenStyles();
+            cleanupFullscreenStyles();
         }
-     }
+    }
 
-     function cleanupFullscreenStyles() {
+    function cleanupFullscreenStyles() {
+        // NEW: Move tooltip back to the body so it works in normal mode
+        if (tooltip && document.body) {
+            document.body.appendChild(tooltip.node());
+        }
+
         sidebar.classList.remove('fullscreen');
-        legendContainer.classList.remove('fullscreen-active'); // This line removes the class
+        legendContainer.classList.remove('fullscreen-active');
         document.body.classList.remove('sidebar-fullscreen');
         isSidebarFullscreen = false;
         sidebarFullscreenBtn.innerHTML = '&#x2922;';
         sidebarFullscreenBtn.title = "Toggle Sidebar Fullscreen";
         console.log("Cleaned up fullscreen styles.");
+        // This call is important to restore the non-fullscreen layout correctly
         toggleSidebar(isSidebarOpen);
-     }
+    }
 
     document.addEventListener('DOMContentLoaded', async () => {
         const page_load_render_start_time = performance.now();
         const csvProcessTimeDiv = document.getElementById('csvProcessTime');
-        
         if (csvProcessTimeDiv) {
             csvProcessTimeDiv.style.display = 'none';
             csvProcessTimeDiv.textContent = '';
         }
-
         tooltip = d3.select("#tooltip");
-
         const fileInput = document.getElementById('fileInput');
-        const downloadButton = document.getElementById('downloadProcessedDataBtn'); 
+        const downloadButton = document.getElementById('downloadProcessedDataBtn');
         const applyFiltersBtn = document.getElementById('applyFiltersBtn');
         const sidebarToggleBtn = document.getElementById('sidebar-toggle');
         const resetSidebarBtn = document.getElementById('resetSidebarBtn');
@@ -2769,7 +2668,6 @@
         const refreshIpGraphBtn = document.getElementById('refreshIpGraphBtn');
         const applySankeyToHeatmapBtn = document.getElementById('applySankeyToHeatmapBtn');
         const revertSankeyFilterBtn = document.getElementById('revertSankeyFilterBtn');
-
         if (applySankeyToHeatmapBtn) {
             applySankeyToHeatmapBtn.addEventListener('click', async () => {
                 if (window.activeSankeyNodeFilter) {
@@ -2780,43 +2678,32 @@
                 }
             });
         }
-
         if (revertSankeyFilterBtn) {
             revertSankeyFilterBtn.addEventListener('click', async () => {
-                showLoading(); // Show loading screen immediately
+                showLoading();
                 try {
-                    // Clear the filter state
                     window.activeSankeyNodeFilter = null;
                     window.sankeyMatchingClusterIds.clear();
-
-                    // Redraw the heatmap without highlights, which is the async part
                     await loadInlineDendrogram();
-
-                    // Reset button states after the heatmap is redrawn
                     revertSankeyFilterBtn.disabled = true;
                     if (applySankeyToHeatmapBtn) {
                         applySankeyToHeatmapBtn.disabled = true;
-                        // Explicitly set style to grayed out
                         applySankeyToHeatmapBtn.style.backgroundColor = "#6c757d";
                     }
-
-                    // Also clear the visual focus in the Sankey diagram itself
                     const sankeySVG = d3.select("#sankey-diagram-container svg");
                     if (!sankeySVG.empty()) {
-                        sankeySVG.dispatch('click'); // Simulates clicking the background to clear focus
+                        sankeySVG.dispatch('click');
                     }
                 } catch (error) {
                     console.error("Error during Sankey filter revert:", error);
                     alert("An error occurred while reverting the filter.");
                 } finally {
-                    hideLoading(); // Hide loading screen after everything is done
+                    hideLoading();
                 }
             });
         }
-
         window.currentSankeyDimensionsOrder = [...DEFAULT_SANKEY_DIMENSIONS];
         populateSankeyDimensionCheckboxes();
-
         if (cancelLoadingBtn) {
             cancelLoadingBtn.addEventListener('click', () => {
                 if (globalAbortController) {
@@ -2831,15 +2718,13 @@
                 if (cancelLoadingBtn) cancelLoadingBtn.disabled = true;
             });
         }
-
         renderSavedItemsList();
-
         try {
             showLoading();
+            await drawTimeline();
             updateLegend();
             await updateHeatmap();
             await updateTimeInfoDisplay();
-
             if (window.heatmapCountSortOrder && window.heatmapCountSortOrder.length > 0) {
                 window.allClusterIdsMasterList = [...new Set(window.heatmapCountSortOrder.map(String))];
             } else {
@@ -2849,12 +2734,9 @@
                     window.allClusterIdsMasterList = [];
                 }
             }
-            
             await loadInlineDendrogram();
-            
             updateControlsState();
             updateRowOrderSelectState();
-
         } catch (error) {
             if (error.name !== 'AbortError') {
                 console.error("Error during initial page load sequence:", error);
@@ -2865,7 +2747,6 @@
                     const metaDataLine = document.getElementById('dendrogramMetaDataLine');
                     const svgContainer = document.getElementById('inline-dendrogram-container');
                     const treeControlsDiv = document.getElementById('treeControls');
-
                     if (dendroHeader) dendroHeader.style.display = 'none';
                     if (metaDataLine) metaDataLine.innerHTML = 'Metadata: Error';
                     if (svgContainer) svgContainer.innerHTML = errorDisplay;
@@ -2878,7 +2759,7 @@
                 console.log("Initial page load aborted by user.");
                 const dendroCardElement = document.getElementById('dendrogramCard');
                 if (dendroCardElement) dendroCardElement.style.display = 'none';
-                    if (csvProcessTimeDiv) {
+                if (csvProcessTimeDiv) {
                     csvProcessTimeDiv.textContent = 'Initial load cancelled.';
                     csvProcessTimeDiv.style.display = 'block';
                 }
@@ -2887,65 +2768,55 @@
             if (!globalAbortController.signal.aborted) {
                 hideLoading();
             }
-
             const page_load_render_end_time = performance.now();
             const duration_s = ((page_load_render_end_time - page_load_render_start_time) / 1000).toFixed(2);
-            const localCsvProcessTimeDiv = document.getElementById('csvProcessTime'); 
-
+            const localCsvProcessTimeDiv = document.getElementById('csvProcessTime');
             if (localCsvProcessTimeDiv) {
                 if (!globalAbortController.signal.aborted && (window.lastTreeData || (window.fullHeatmapData && Object.keys(window.fullHeatmapData).length > 0))) {
                     localCsvProcessTimeDiv.textContent = `Total time to display data: ${duration_s} s`;
                     localCsvProcessTimeDiv.style.display = 'block';
-                } else if (globalAbortController.signal.aborted) {
-                }
-                    else {
+                } else if (globalAbortController.signal.aborted) {} else {
                     localCsvProcessTimeDiv.style.display = 'none';
                     localCsvProcessTimeDiv.textContent = '';
                 }
             }
         }
-
         if (fileInput) {
             fileInput.addEventListener('change', async function(event) {
                 const file = event.target.files[0];
-                const localProcessingTimeDiv = document.getElementById('csvProcessTime'); 
+                const localProcessingTimeDiv = document.getElementById('csvProcessTime');
                 let client_total_processing_start_time;
-        
                 if (localProcessingTimeDiv) {
                     localProcessingTimeDiv.style.display = 'none';
                     localProcessingTimeDiv.textContent = '';
                 }
-        
                 if (file) {
                     if (!file.name.toLowerCase().endsWith('.parquet')) {
                         alert("Invalid file type. Please select a .parquet file.");
-                        event.target.value = null; 
+                        event.target.value = null;
                         return;
                     }
-
                     client_total_processing_start_time = performance.now();
                     showLoading();
-        
                     const formData = new FormData();
-                    formData.append('file', file); 
-
+                    formData.append('file', file);
                     try {
-                        const processResponse = await fetch(`${API_BASE_URL}/process_uploaded_file`, { 
+                        const processResponse = await fetch(`${API_BASE_URL}/process_uploaded_file`, {
                             method: 'POST',
-                            body: formData, 
+                            body: formData,
                             signal: globalAbortController.signal
                         });
-        
                         if (globalAbortController.signal.aborted) throw new DOMException("Operation aborted by user.", "AbortError");
                         if (!processResponse.ok) {
                             const errText = await processResponse.text();
-                            let errJson = {}; try { errJson = JSON.parse(errText); } catch (e) {}
+                            let errJson = {};
+                            try {
+                                errJson = JSON.parse(errText);
+                            } catch (e) {}
                             throw new Error(errJson.error || `Processing failed (${processResponse.status}): ${errText.substring(0, 200)}`);
                         }
-                        
-                        const responseData = await processResponse.json(); 
+                        const responseData = await processResponse.json();
                         console.log("File processing response:", responseData);
-                        
                         protocolColorMap = {};
                         currentNewClusterIds.clear();
                         window.activeSankeyNodeFilter = null;
@@ -2954,12 +2825,11 @@
                         if (applySankeyBtn) {
                             applySankeyBtn.disabled = true;
                         }
-        
                         if (globalAbortController.signal.aborted) throw new DOMException("Operation aborted by user.", "AbortError");
+                        await drawTimeline();
                         updateLegend();
                         if (globalAbortController.signal.aborted) throw new DOMException("Operation aborted by user.", "AbortError");
                         await updateHeatmap();
-        
                         if (window.heatmapCountSortOrder && window.heatmapCountSortOrder.length > 0) {
                             window.allClusterIdsMasterList = [...new Set(window.heatmapCountSortOrder.map(String))];
                         } else {
@@ -2969,54 +2839,55 @@
                                 window.allClusterIdsMasterList = [];
                             }
                         }
-                        
                         if (globalAbortController.signal.aborted) throw new DOMException("Operation aborted by user.", "AbortError");
                         await updateTimeInfoDisplay();
                         if (globalAbortController.signal.aborted) throw new DOMException("Operation aborted by user.", "AbortError");
                         await loadInlineDendrogram();
-        
-                        clearSidebarVisualization(); 
+                        clearSidebarVisualization();
                         clusterHighlightColors.clear();
                         if (isSidebarOpen) toggleSidebar(false);
-
                         const localThresholdSlider = document.getElementById('thresholdSlider');
                         if (localThresholdSlider && window.lastTreeRoot) {
                             localThresholdSlider.value = 100;
                             const thresholdValueSpan = document.getElementById('thresholdValue');
-                            if(thresholdValueSpan) thresholdValueSpan.textContent = '100%';
-                            requestAnimationFrame(() => { localThresholdSlider.dispatchEvent(new Event('input')); });
+                            if (thresholdValueSpan) thresholdValueSpan.textContent = '100%';
+                            requestAnimationFrame(() => {
+                                localThresholdSlider.dispatchEvent(new Event('input'));
+                            });
                         }
                         updateControlsState();
                         updateRowOrderSelectState();
-        
                     } catch (error) {
                         if (error.name === 'AbortError') {
                             console.log("File processing aborted by user.");
-                            if(localProcessingTimeDiv) {
+                            if (localProcessingTimeDiv) {
                                 localProcessingTimeDiv.textContent = 'File processing cancelled.';
                                 localProcessingTimeDiv.style.display = 'block';
                             }
                         } else {
                             alert(`Error processing Parquet file: ${error.message}`);
                             const dendroCardElem = document.getElementById('dendrogramCard');
-                            if(dendroCardElem) dendroCardElem.innerHTML = '<p style="color: red; text-align: center;">Could not process uploaded file.</p>';
+                            if (dendroCardElem) dendroCardElem.innerHTML = '<p style="color: red; text-align: center;">Could not process uploaded file.</p>';
                             const metaDataLine = document.getElementById('dendrogramMetaDataLine');
-                            if(metaDataLine) metaDataLine.innerHTML = 'Metadata: Error';
-                            
-                            window.originalTreeData = null; window.lastTreeData = null; window.lastTreeRoot = null;
-                            window.fullHeatmapData = {}; currentNewClusterIds.clear(); window.activeSankeyNodeFilter = null; window.allClusterIdsMasterList = [];
+                            if (metaDataLine) metaDataLine.innerHTML = 'Metadata: Error';
+                            window.originalTreeData = null;
+                            window.lastTreeData = null;
+                            window.lastTreeRoot = null;
+                            window.fullHeatmapData = {};
+                            currentNewClusterIds.clear();
+                            window.activeSankeyNodeFilter = null;
+                            window.allClusterIdsMasterList = [];
                             updateLegend();
                             clearSidebarVisualization();
                             updateControlsState();
                             updateRowOrderSelectState();
-                            if(localProcessingTimeDiv) localProcessingTimeDiv.style.display = 'none';
+                            if (localProcessingTimeDiv) localProcessingTimeDiv.style.display = 'none';
                         }
                     } finally {
                         const client_total_processing_end_time = performance.now();
                         if (typeof client_total_processing_start_time === 'number') {
                             const duration_ms = client_total_processing_end_time - client_total_processing_start_time;
                             const duration_s = (duration_ms / 1000).toFixed(2);
-                            
                             if (!globalAbortController.signal.aborted) {
                                 if (localProcessingTimeDiv) {
                                     localProcessingTimeDiv.textContent = `Total time to display data: ${duration_s} s`;
@@ -3024,277 +2895,293 @@
                                 }
                             }
                         }
-        
-                        if (!globalAbortController.signal.aborted ||
-                            (globalAbortController.signal.aborted && document.getElementById('loading-overlay').style.display === 'flex')) {
+                        if (!globalAbortController.signal.aborted || (globalAbortController.signal.aborted && document.getElementById('loading-overlay').style.display === 'flex')) {
                             hideLoading();
                         }
                     }
-                } else { 
-                    if (localProcessingTimeDiv) { localProcessingTimeDiv.style.display = 'none';}
+                } else {
+                    if (localProcessingTimeDiv) {
+                        localProcessingTimeDiv.style.display = 'none';
+                    }
                 }
                 if (event.target) event.target.value = null;
             });
         }
-
-        if(downloadButton) {
+        if (downloadButton) {
             downloadButton.addEventListener('click', function() {
                 const dataLoadedCheck = window.originalTreeData && Object.keys(window.originalTreeData).length > 0 && !window.originalTreeData.error;
-
-                if (dataLoadedCheck) { 
-                    window.location.href = `${API_BASE_URL}/download_processed_data`; 
+                if (dataLoadedCheck) {
+                    window.location.href = `${API_BASE_URL}/download_processed_data`;
                 } else {
                     alert("No processed data available to download. Please upload a Parquet file first.");
                 }
             });
         }
-
-        if(applyFiltersBtn) {
+        if (applyFiltersBtn) {
             applyFiltersBtn.addEventListener('click', async () => {
                 showLoading();
                 try {
-                    window.activeSankeyNodeFilter = null; 
+                    window.activeSankeyNodeFilter = null;
                     window.sankeyMatchingClusterIds.clear();
-                    if(applySankeyToHeatmapBtn) {
+                    if (applySankeyToHeatmapBtn) {
                         applySankeyToHeatmapBtn.disabled = true;
                     }
-                    if(revertSankeyFilterBtn) {
+                    if (revertSankeyFilterBtn) {
                         revertSankeyFilterBtn.disabled = true;
                     }
-                    
-                    await updateHeatmap(); 
+                    await updateHeatmap();
                     if (globalAbortController.signal.aborted) throw new DOMException("Operation aborted by user.", "AbortError");
-                    
                     if (window.heatmapCountSortOrder && window.heatmapCountSortOrder.length > 0) {
                         window.allClusterIdsMasterList = [...new Set(window.heatmapCountSortOrder.map(String))];
                     } else {
                         if (window.fullHeatmapData && window.fullHeatmapData['Count']) {
                             window.allClusterIdsMasterList = window.fullHeatmapData['Count'].map(d => String(d.cluster));
-                        } else { window.allClusterIdsMasterList = []; }
+                        } else {
+                            window.allClusterIdsMasterList = [];
+                        }
                     }
-                    
                     await updateTimeInfoDisplay();
                     if (globalAbortController.signal.aborted) throw new DOMException("Operation aborted by user.", "AbortError");
-                    
-                    await loadInlineDendrogram(); 
+                    await loadInlineDendrogram();
                     if (globalAbortController.signal.aborted) throw new DOMException("Operation aborted by user.", "AbortError");
-                    
                     highlightTreeClusters(new Set(clusterHighlightColors.keys()));
                     const localThresholdSlider = document.getElementById('thresholdSlider');
                     if (localThresholdSlider && window.lastTreeRoot) {
-                        requestAnimationFrame(() => { localThresholdSlider.dispatchEvent(new Event('input')); });
+                        requestAnimationFrame(() => {
+                            localThresholdSlider.dispatchEvent(new Event('input'));
+                        });
                     }
                 } catch (error) {
-                    if (error.name === 'AbortError') { console.log("Filter application aborted by user."); } 
-                    else { alert(`Error applying filters: ${error.message || 'Unknown error'}`); }
-                } finally { if (!globalAbortController.signal.aborted) hideLoading(); }
+                    if (error.name === 'AbortError') {
+                        console.log("Filter application aborted by user.");
+                    } else {
+                        alert(`Error applying filters: ${error.message || 'Unknown error'}`);
+                    }
+                } finally {
+                    if (!globalAbortController.signal.aborted) hideLoading();
+                }
             });
         }
-
-        if(sidebarToggleBtn) { sidebarToggleBtn.addEventListener('click', () => toggleSidebar()); }
-        
+        if (sidebarToggleBtn) {
+            sidebarToggleBtn.addEventListener('click', () => toggleSidebar());
+        }
         if (resetSidebarBtn) {
             resetSidebarBtn.addEventListener('click', () => {
                 console.log("Performing FAST client-side reset.");
-
                 clearSidebarVisualization();
-
                 updateLegend();
-
                 if (window.activeSankeyNodeFilter) {
                     window.activeSankeyNodeFilter = null;
                     window.sankeyMatchingClusterIds.clear();
-
-                    // Disable the Sankey action buttons
                     const applyBtn = document.getElementById('applySankeyToHeatmapBtn');
                     const revertBtn = document.getElementById('revertSankeyFilterBtn');
                     if (applyBtn) applyBtn.disabled = true;
                     if (revertBtn) revertBtn.disabled = true;
-                    
                     console.log("Sankey filter state cleared on client-side.");
                 }
                 resetHeatmapHighlights();
-
                 selectedNodeId = null;
                 document.getElementById('sidebarLayoutSelect').value = 'cose';
             });
         }
-        
-        if (sidebarFullscreenBtn) { sidebarFullscreenBtn.addEventListener('click', toggleSidebarFullscreen); }
-        if (saveSelectionBtn) { saveSelectionBtn.addEventListener('click', handleSaveSelection); }
-
+        if (sidebarFullscreenBtn) {
+            sidebarFullscreenBtn.addEventListener('click', toggleSidebarFullscreen);
+        }
+        if (saveSelectionBtn) {
+            saveSelectionBtn.addEventListener('click', handleSaveSelection);
+        }
         document.addEventListener('fullscreenchange', () => {
             if (!document.fullscreenElement && isSidebarFullscreen) {
-                cleanupFullscreenStyles(); 
-                if (sidebarCy) { setTimeout(() => { sidebarCy.resize(); sidebarCy.fit(null, 50); }, 400); }
+                cleanupFullscreenStyles();
+                if (sidebarCy) {
+                    setTimeout(() => {
+                        sidebarCy.resize();
+                        sidebarCy.fit(null, 50);
+                    }, 400);
+                }
             } else if (document.fullscreenElement === sidebar && !isSidebarFullscreen) {
-                isSidebarFullscreen = true; sidebar.classList.add('fullscreen'); legendContainer.classList.add('fullscreen-active');
-                document.body.classList.add('sidebar-fullscreen'); sidebarFullscreenBtn.innerHTML = '&#x274C;'; sidebarFullscreenBtn.title = "Exit Sidebar Fullscreen";
-                if (sidebarCy) { setTimeout(() => { sidebarCy.resize(); sidebarCy.fit(null, 50); }, 100); }
+                isSidebarFullscreen = true;
+                sidebar.classList.add('fullscreen');
+                legendContainer.classList.add('fullscreen-active');
+                document.body.classList.add('sidebar-fullscreen');
+                sidebarFullscreenBtn.innerHTML = '&#x274C;';
+                sidebarFullscreenBtn.title = "Exit Sidebar Fullscreen";
+                if (sidebarCy) {
+                    setTimeout(() => {
+                        sidebarCy.resize();
+                        sidebarCy.fit(null, 50);
+                    }, 100);
+                }
             }
         });
-
-        if (sidebarTableContainer) { sidebarTableContainer.addEventListener('click', handleSidebarTableRowClick); }
-        if (sidebarSearchInput) { sidebarSearchInput.addEventListener('input', filterSidebarTable); }
-        
-        if(sidebarGoPageBtn) { 
-            sidebarGoPageBtn.addEventListener('click', function () {
+        if (sidebarTableContainer) {
+            sidebarTableContainer.addEventListener('click', handleSidebarTableRowClick);
+        }
+        if (sidebarSearchInput) {
+            sidebarSearchInput.addEventListener('input', filterSidebarTable);
+        }
+        if (sidebarGoPageBtn) {
+            sidebarGoPageBtn.addEventListener('click', function() {
                 let pageInput = document.getElementById('sidebarCurrentPageInput');
                 let page = parseInt(pageInput.value, 10);
                 const totalPagesStr = document.getElementById('sidebarTotalPages').textContent;
                 const totalPages = totalPagesStr === '?' ? Infinity : parseInt(totalPagesStr, 10);
-
                 if (!isNaN(page) && page >= 1 && (page <= totalPages || totalPages === Infinity)) {
                     if (sidebarTableMode === 'cluster' && currentSidebarTableClusterId) {
                         loadSidebarClusterTable(currentSidebarTableClusterId, page);
                     } else if (sidebarTableMode === 'edges') {
                         let edgeList = [];
-                        if (selectedNodeId && sidebarCy) { 
+                        if (selectedNodeId && sidebarCy) {
                             const node = sidebarCy.getElementById(selectedNodeId);
                             if (node && node.length > 0) {
-                                edgeList = node.connectedEdges().map(edge => ({ source: edge.data('source'), destination: edge.data('target'), protocol: edge.data('Protocol') }));
+                                edgeList = node.connectedEdges().map(edge => ({
+                                    source: edge.data('source'),
+                                    destination: edge.data('target'),
+                                    protocol: edge.data('Protocol')
+                                }));
                             }
                         } else if (selectedSidebarEdges.size > 0) {
                             edgeList = Array.from(selectedSidebarEdges).map(key => {
                                 const parts = key.split('|');
-                                return { source: parts[0], destination: parts[1], protocol: parts[2] };
+                                return {
+                                    source: parts[0],
+                                    destination: parts[1],
+                                    protocol: parts[2]
+                                };
                             });
                         }
                         if (edgeList.length > 0) {
                             loadSidebarMultiEdgeTable(edgeList, page);
                         } else {
-                                console.warn("Sidebar pagination in edge mode, but no edges/nodes identified for table.");
+                            console.warn("Sidebar pagination in edge mode, but no edges/nodes identified for table.");
                         }
                     } else {
-                            console.warn("Sidebar pagination clicked, but table context (cluster/edge) is unclear or no target ID.");
+                        console.warn("Sidebar pagination clicked, but table context (cluster/edge) is unclear or no target ID.");
                     }
                 } else {
                     alert(`Please enter a valid page number between 1 and ${totalPagesStr}.`);
                 }
-            }); 
+            });
         }
-        
-        if(sidebarLayoutSelect) { sidebarLayoutSelect.addEventListener('change', applySidebarLayout); }
-        if(sidebarNodeSizeMin) sidebarNodeSizeMin.addEventListener('input', applySidebarSizeControls);
-        if(sidebarNodeSizeMax) sidebarNodeSizeMax.addEventListener('input', applySidebarSizeControls);
-        if(sidebarEdgeWidthMin) sidebarEdgeWidthMin.addEventListener('input', applySidebarSizeControls);
-        if(sidebarEdgeWidthMax) sidebarEdgeWidthMax.addEventListener('input', applySidebarSizeControls);
-
-        // =================== START OF CORRECTED CODE ===================
+        if (sidebarLayoutSelect) {
+            sidebarLayoutSelect.addEventListener('change', applySidebarLayout);
+        }
+        if (sidebarNodeSizeMin) sidebarNodeSizeMin.addEventListener('input', applySidebarSizeControls);
+        if (sidebarNodeSizeMax) sidebarNodeSizeMax.addEventListener('input', applySidebarSizeControls);
+        if (sidebarEdgeWidthMin) sidebarEdgeWidthMin.addEventListener('input', applySidebarSizeControls);
+        if (sidebarEdgeWidthMax) sidebarEdgeWidthMax.addEventListener('input', applySidebarSizeControls);
         if (metricSelect) {
-            metricSelect.addEventListener('change', () => { // No longer async
+            metricSelect.addEventListener('change', () => {
                 updateRowOrderSelectState();
                 if (window.lastTreeData) {
                     showLoading();
                     try {
-                        // FIX: Call showInlineDendrogram with existing data instead of re-fetching.
                         showInlineDendrogram(window.lastTreeData, document.getElementById("inline-dendrogram-container").clientHeight, currentNewClusterIds);
                         highlightTreeClusters(new Set(clusterHighlightColors.keys()));
                         const localThresholdSlider = document.getElementById('thresholdSlider');
-                        requestAnimationFrame(() => { if (localThresholdSlider && window.lastTreeRoot) localThresholdSlider.dispatchEvent(new Event('input')); });
-                    } catch(error) {
-                        if(error.name !== 'AbortError') console.error("Error reloading dendrogram on metric change:", error);
+                        requestAnimationFrame(() => {
+                            if (localThresholdSlider && window.lastTreeRoot) localThresholdSlider.dispatchEvent(new Event('input'));
+                        });
+                    } catch (error) {
+                        if (error.name !== 'AbortError') console.error("Error reloading dendrogram on metric change:", error);
                     } finally {
-                        if(!globalAbortController.signal.aborted) hideLoading();
+                        if (!globalAbortController.signal.aborted) hideLoading();
                     }
                 }
             });
         }
-        
         const rowOrderSelect = document.getElementById("rowOrderSelect");
         if (rowOrderSelect && metricSelect) {
-            rowOrderSelect.addEventListener('change', () => { // No longer async
+            rowOrderSelect.addEventListener('change', () => {
                 if (metricSelect.value !== 'Default' && window.lastTreeData) {
                     showLoading();
                     try {
-                        // FIX: Call showInlineDendrogram with existing data instead of re-fetching.
                         showInlineDendrogram(window.lastTreeData, document.getElementById("inline-dendrogram-container").clientHeight, currentNewClusterIds);
                         highlightTreeClusters(new Set(clusterHighlightColors.keys()));
                         const localThresholdSlider = document.getElementById('thresholdSlider');
-                        requestAnimationFrame(() => { if (localThresholdSlider && window.lastTreeRoot) localThresholdSlider.dispatchEvent(new Event('input')); });
-                    } catch(error) {
-                            if(error.name !== 'AbortError') console.error("Error reloading dendrogram on row order change:", error);
+                        requestAnimationFrame(() => {
+                            if (localThresholdSlider && window.lastTreeRoot) localThresholdSlider.dispatchEvent(new Event('input'));
+                        });
+                    } catch (error) {
+                        if (error.name !== 'AbortError') console.error("Error reloading dendrogram on row order change:", error);
                     } finally {
-                        if(!globalAbortController.signal.aborted) hideLoading();
+                        if (!globalAbortController.signal.aborted) hideLoading();
                     }
                 }
             });
         }
-
         if (reorderTreeCheckbox) {
-            reorderTreeCheckbox.addEventListener('change', () => { // No longer async
+            reorderTreeCheckbox.addEventListener('change', () => {
                 if (window.lastTreeData) {
                     showLoading();
-                        try {
-                        // FIX: Call showInlineDendrogram with existing data instead of re-fetching.
+                    try {
                         showInlineDendrogram(window.lastTreeData, document.getElementById("inline-dendrogram-container").clientHeight, currentNewClusterIds);
                         highlightTreeClusters(new Set(clusterHighlightColors.keys()));
                         const localThresholdSlider = document.getElementById('thresholdSlider');
-                        requestAnimationFrame(() => { if (localThresholdSlider && window.lastTreeRoot) localThresholdSlider.dispatchEvent(new Event('input')); });
-                    } catch(error) {
-                        if(error.name !== 'AbortError') console.error("Error reloading dendrogram on reorder checkbox change:", error);
+                        requestAnimationFrame(() => {
+                            if (localThresholdSlider && window.lastTreeRoot) localThresholdSlider.dispatchEvent(new Event('input'));
+                        });
+                    } catch (error) {
+                        if (error.name !== 'AbortError') console.error("Error reloading dendrogram on reorder checkbox change:", error);
                     } finally {
-                        if(!globalAbortController.signal.aborted) hideLoading();
+                        if (!globalAbortController.signal.aborted) hideLoading();
                     }
                 }
             });
         }
-        // =================== END OF CORRECTED CODE ===================
-
         if (thresholdSlider && thresholdValueSpan) {
             thresholdSlider.addEventListener('input', function() {
                 const physicalValue = parseInt(this.value, 10);
                 const currentMaxDistForDisplay = window.lastAppliedThreshold || 100;
                 const scaledPercentage = Math.round((physicalValue / 100) * currentMaxDistForDisplay);
                 thresholdValueSpan.textContent = `${scaledPercentage}%`;
-                
                 const svgContent = d3.select("#inlineDendrogramSvg g");
                 const thresholdBar = d3.select("#threshold-bar");
-
                 if (!window.lastTreeRoot || svgContent.empty() || thresholdBar.empty()) {
-                    if(thresholdBar && !thresholdBar.empty()) thresholdBar.style("display", "none");
+                    if (thresholdBar && !thresholdBar.empty()) thresholdBar.style("display", "none");
                     return;
                 }
                 const layoutHeight = window.currentD3LayoutHeight;
                 const currentD3MarginTop = (typeof margin !== 'undefined' && margin.top) ? margin.top : 30;
-
                 if (layoutHeight && layoutHeight > 0) {
-                    const thresholdY_untransformed = layoutHeight * (scaledPercentage / 100) + currentD3MarginTop;
-                    
+                    const thresholdY_untransformed = layoutHeight * (physicalValue / 100) + currentD3MarginTop;
                     const currentTransform = d3.zoomTransform(d3.select("#inlineDendrogramSvg").node());
                     const transformedY = currentTransform.applyY(thresholdY_untransformed);
-
                     const currentD3MarginLeft = (typeof margin !== 'undefined' && margin.left) ? margin.left : 30;
                     const currentD3MarginRight = (typeof margin !== 'undefined' && margin.right) ? margin.right : 30;
-
-                    thresholdBar.attr("x1", currentTransform.applyX(0))
-                                .attr("x2", currentTransform.applyX((window.currentLayoutWidth || 0) + currentD3MarginLeft + currentD3MarginRight))
-                                .attr("y1", transformedY).attr("y2", transformedY)
-                                .style("display", "block");
+                    thresholdBar.attr("x1", currentTransform.applyX(0)).attr("x2", currentTransform.applyX((window.currentLayoutWidth || 0) + currentD3MarginLeft + currentD3MarginRight)).attr("y1", transformedY).attr("y2", transformedY).style("display", "block");
                 } else {
                     thresholdBar.style("display", "none");
                 }
             });
         }
-        if (applyThresholdBtn) { applyThresholdBtn.addEventListener('click', applyThresholdGrouping); }
-        if (resetGroupingBtn) { resetGroupingBtn.addEventListener('click', resetGroupingAndRedraw); }
-        
-        const mainGoPageBtn = document.getElementById('goPageBtn'); 
-        if (mainGoPageBtn) { mainGoPageBtn.addEventListener('click', function() {
-            let pageInput = document.getElementById('currentPageInput');
-            let page = parseInt(pageInput.value, 10);
-            const totalPagesStr = document.getElementById('totalPages').textContent;
-            const totalPages = totalPagesStr === '?' ? Infinity : parseInt(totalPagesStr, 10);
-            if (!isNaN(page) && page >= 1 && (page <= totalPages || totalPages === Infinity) && currentClusterID) {
-                loadClusterTablePage(currentClusterID, page);
-            } else {
-                alert(`Please enter a valid page number between 1 and ${totalPagesStr}.`);
-            }
-        }); }
+        if (applyThresholdBtn) {
+            applyThresholdBtn.addEventListener('click', applyThresholdGrouping);
+        }
+        if (resetGroupingBtn) {
+            resetGroupingBtn.addEventListener('click', resetGroupingAndRedraw);
+        }
+        const mainGoPageBtn = document.getElementById('goPageBtn');
+        if (mainGoPageBtn) {
+            mainGoPageBtn.addEventListener('click', function() {
+                let pageInput = document.getElementById('currentPageInput');
+                let page = parseInt(pageInput.value, 10);
+                const totalPagesStr = document.getElementById('totalPages').textContent;
+                const totalPages = totalPagesStr === '?' ? Infinity : parseInt(totalPagesStr, 10);
+                if (!isNaN(page) && page >= 1 && (page <= totalPages || totalPages === Infinity) && currentClusterID) {
+                    loadClusterTablePage(currentClusterID, page);
+                } else {
+                    alert(`Please enter a valid page number between 1 and ${totalPagesStr}.`);
+                }
+            });
+        }
         const mainTableSearchInput = document.getElementById('tableSearchInput');
-        if (mainTableSearchInput) { mainTableSearchInput.addEventListener('input', function() { console.log("Main table search not active for this view (placeholder)."); }); }
-
-        if (acknowledgeBtn && messageDivForAcknowledge) { 
+        if (mainTableSearchInput) {
+            mainTableSearchInput.addEventListener('input', function() {
+                console.log("Main table search not active for this view (placeholder).");
+            });
+        }
+        if (acknowledgeBtn && messageDivForAcknowledge) {
             acknowledgeBtn.addEventListener('click', () => {
                 messageDivForAcknowledge.textContent = '';
                 acknowledgeBtn.style.display = 'none';
@@ -3304,66 +3191,76 @@
                 }
             });
         }
-        if (showPacketSimilarityBtn) { 
+        if (showPacketSimilarityBtn) {
             showPacketSimilarityBtn.addEventListener('click', function() {
                 const card = document.getElementById('packetSimilarityCard');
                 if (!card) return;
                 if (card.style.display === 'none' || card.style.display === '') {
                     const dataLoadedCheck = window.originalTreeData && Object.keys(window.originalTreeData).length > 0 && !window.originalTreeData.error;
-
-                    if (!dataLoadedCheck) { alert("Please upload data first."); return; }
-                    card.style.display = 'block'; this.textContent = 'Hide IP Community Graph';
+                    if (!dataLoadedCheck) {
+                        alert("Please upload data first.");
+                        return;
+                    }
+                    card.style.display = 'block';
+                    this.textContent = 'Hide IP Community Graph';
                     fetchAndRenderLouvainIpGraph();
                 } else {
-                    card.style.display = 'none'; this.textContent = 'Show Community IP Graph';
-                    if (window.louvainIpCy) { window.louvainIpCy.destroy(); window.louvainIpCy = null; }
+                    card.style.display = 'none';
+                    this.textContent = 'Show Community IP Graph';
+                    if (window.louvainIpCy) {
+                        window.louvainIpCy.destroy();
+                        window.louvainIpCy = null;
+                    }
                 }
             });
         }
-        if (refreshIpGraphBtn) { refreshIpGraphBtn.addEventListener('click', fetchAndRenderLouvainIpGraph); }
-        
+        if (refreshIpGraphBtn) {
+            refreshIpGraphBtn.addEventListener('click', fetchAndRenderLouvainIpGraph);
+        }
         if (showSankeyBtn) {
             showSankeyBtn.addEventListener('click', function() {
-                if (!sankeyCard) { return; }
+                if (!sankeyCard) {
+                    return;
+                }
                 if (sankeyCard.style.display === 'none' || sankeyCard.style.display === '') {
                     const dataLoadedCheckSankey = window.originalTreeData && Object.keys(window.originalTreeData).length > 0 && !window.originalTreeData.error;
-
                     if (!dataLoadedCheckSankey) {
-                        alert("Please upload and process a file first to generate data for the Sankey diagram."); return;
+                        alert("Please upload and process a file first to generate data for the Sankey diagram.");
+                        return;
                     }
-                    sankeyCard.style.display = 'block'; this.textContent = 'Hide Sankey Diagram';
+                    sankeyCard.style.display = 'block';
+                    this.textContent = 'Hide Sankey Diagram';
                     fetchAndRenderSankeyDiagram();
                 } else {
-                    sankeyCard.style.display = 'none'; this.textContent = 'Show Sankey Diagram';
-                    window.activeSankeyNodeFilter = null; 
+                    sankeyCard.style.display = 'none';
+                    this.textContent = 'Show Sankey Diagram';
+                    window.activeSankeyNodeFilter = null;
                     window.sankeyMatchingClusterIds.clear();
-                    if(applySankeyToHeatmapBtn) {
+                    if (applySankeyToHeatmapBtn) {
                         applySankeyToHeatmapBtn.disabled = true;
                     }
                     if (revertSankeyFilterBtn) {
                         revertSankeyFilterBtn.disabled = true;
                     }
-                    if (window.lastTreeData) { 
-                        loadInlineDendrogram(); 
+                    if (window.lastTreeData) {
+                        loadInlineDendrogram();
                     }
                 }
             });
         }
-
         if (applySankeyToHeatmapBtn) {
             applySankeyToHeatmapBtn.addEventListener('click', () => {
                 if (window.activeSankeyNodeFilter) {
                     updateMainViewAfterSankeyFilter().then(() => {
-                            if (revertSankeyFilterBtn) {
-                                revertSankeyFilterBtn.disabled = false;
-                            }
-                    }); 
+                        if (revertSankeyFilterBtn) {
+                            revertSankeyFilterBtn.disabled = false;
+                        }
+                    });
                 } else {
                     alert("No Sankey node selected to apply as filter.");
                 }
             });
         }
-        
         document.getElementById('entropyMinFilter').style.display = 'none';
         document.getElementById('entropyMaxFilter').style.display = 'none';
         document.querySelector('label[for="entropyMinFilter"]').style.display = 'none';
@@ -4080,7 +3977,7 @@
 
         if (thresholdSlider) {
             thresholdSlider.value = 100;
-            if (thresholdValueSpan) thresholdValueSpan.textContent = '100%';
+            // The text content will be updated by the dispatched 'input' event.
             requestAnimationFrame(() => {
                 // Ensure lastTreeRoot is the one derived from originalTreeData
                 if (window.lastTreeRoot && window.lastTreeRoot.data === window.originalTreeData) {
@@ -4093,7 +3990,6 @@
         }
 
         clearSidebarVisualization(); // This clears highlights and sidebar graph/table
-        // toggleSidebar(false); // Optionally close sidebar - your logs don't show it closing, so maybe not desired
         updateLegend(); // Reset legend to global state (if applicable)
 
         updateControlsState(); // Update button states (Reset should become disabled)
@@ -4481,7 +4377,6 @@
         }
     }
 
-    // Make sure the resetInlineZoom function still uses d3.zoomIdentity
     function resetInlineZoom() {
         const svg = d3.select("#inlineDendrogramSvg");
         if (window.inlineZoom) {
@@ -4497,7 +4392,22 @@
     function loadInlineDendrogram() {
         console.log("Attempting to load inline dendrogram data...");
         currentNewClusterIds.clear();
-        return fetch(`${API_BASE_URL}/hierarchical_clusters`, { signal: globalAbortController.signal })
+
+        let url = new URL(`${API_BASE_URL}/hierarchical_clusters`);
+        
+        // Add time selection if it exists
+        if (window.currentTimeSelection && window.currentTimeSelection.startTime && window.currentTimeSelection.endTime) {
+            url.searchParams.append('start_time', window.currentTimeSelection.startTime.toISOString());
+            url.searchParams.append('end_time', window.currentTimeSelection.endTime.toISOString());
+        }
+        
+        // Add resolution if it has a value
+        const resolutionInput = document.getElementById('resolutionInput');
+        if (resolutionInput && resolutionInput.value) {
+            url.searchParams.append('resolution', resolutionInput.value);
+        }
+
+        return fetch(url.toString(), { signal: globalAbortController.signal })
             .then(response => {
                 if (!response.ok) {
                     return response.json().catch(() => response.text())
@@ -5603,6 +5513,215 @@
             listItem.appendChild(removeBtn);
             listElement.appendChild(listItem);
         });
+    }
+
+    function _renderSidebarTable(jsonData, page) {
+        sidebarTableContainer.innerHTML = ''; // Clear previous content
+
+        if (!jsonData || !jsonData.rows || jsonData.rows.length === 0) {
+            sidebarTableContainer.innerHTML = '<p style="text-align: center; padding: 20px; color: #6c757d;">No results found.</p>';
+            sidebarTablePagination.style.display = 'none';
+            return;
+        }
+
+        const table = document.createElement('table');
+        const thead = document.createElement('thead');
+        const tbody = document.createElement('tbody');
+        const headerRow = document.createElement('tr');
+
+        const headers = Object.keys(jsonData.rows[0]);
+        headers.forEach(headerText => {
+            const th = document.createElement('th');
+            th.textContent = headerText;
+            headerRow.appendChild(th);
+        });
+        thead.appendChild(headerRow);
+
+        const searchQuery = (document.getElementById('sidebarTableSearchInput').value || "").toLowerCase();
+        const keywords = searchQuery.split(' ').filter(k => k.trim());
+
+        jsonData.rows.forEach(rowData => {
+            const tr = document.createElement('tr');
+            headers.forEach(header => {
+                const td = document.createElement('td');
+                let cellContent = rowData[header] !== null && rowData[header] !== undefined ? String(rowData[header]) : "";
+                
+                if (keywords.length > 0) {
+                    const regex = new RegExp(keywords.map(k => k.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&')).join('|'), 'gi');
+                    td.innerHTML = cellContent.replace(regex, match => `<mark>${match}</mark>`);
+                } else {
+                    td.textContent = cellContent;
+                }
+                tr.appendChild(td);
+            });
+            tbody.appendChild(tr);
+        });
+
+        table.appendChild(thead);
+        table.appendChild(tbody);
+        sidebarTableContainer.appendChild(table);
+        sidebarTableContainer.style.display = 'block';
+
+        const total = jsonData.total;
+        if (total > TABLE_PAGE_SIZE) {
+            sidebarTablePagination.style.display = 'block';
+            const totalPages = Math.ceil(total / TABLE_PAGE_SIZE);
+            document.getElementById('sidebarTotalPages').textContent = totalPages || 1;
+            document.getElementById('sidebarCurrentPageInput').value = page;
+            document.getElementById('sidebarCurrentPageInput').max = totalPages || 1;
+        } else {
+            sidebarTablePagination.style.display = 'none';
+        }
+    }
+
+    async function drawTimeline() {
+        const timelineCard = document.getElementById('timeline-card');
+        const timelineContainer = document.getElementById('timeline-container');
+        const resetBtn = document.getElementById('resetTimelineBtn');
+        const applyBtn = document.getElementById('applyTimelineBtn');
+        
+        if (!timelineCard || !timelineContainer || !resetBtn || !applyBtn) return;
+
+        applyBtn.onclick = () => {
+            console.log("Apply button clicked. Updating all visualizations.");
+            updateAllVisualizations();
+        };
+
+        timelineContainer.innerHTML = '';
+
+        try {
+            const response = await fetch(`${API_BASE_URL}/timeline_data`);
+            if (!response.ok) throw new Error(`HTTP error ${response.status}`);
+            let data = await response.json();
+
+            if (!data || data.length < 2) {
+                console.warn("Not enough data to draw timeline.");
+                timelineCard.style.display = 'none';
+                return;
+            }
+
+            timelineCard.style.display = 'block';
+
+            const parseDate = d3.isoParse;
+            data.forEach(d => {
+                d.time = parseDate(d.time);
+                d.value = +d.value;
+            });
+
+            const margin = { top: 10, right: 30, bottom: 40, left: 50 };
+            const width = timelineContainer.clientWidth - margin.left - margin.right;
+            const height = 100 - margin.top - margin.bottom;
+
+            const svg = d3.select(timelineContainer).append("svg")
+                .attr("width", width + margin.left + margin.right)
+                .attr("height", height + margin.top + margin.bottom);
+
+            const context = svg.append("g")
+                .attr("class", "context")
+                .attr("transform", `translate(${margin.left},${margin.top})`);
+
+            const x = d3.scaleTime().range([0, width]);
+            const y = d3.scaleLinear().range([height, 0]);
+
+            x.domain(d3.extent(data, d => d.time));
+            y.domain([0, Math.max(50000, d3.max(data, d => d.value) || 0)]);
+
+            const area = d3.area().curve(d3.curveStep).x(d => x(d.time)).y0(height).y1(d => y(d.value));
+
+            context.append("path").datum(data).attr("class", "context-area").attr("d", area);
+            context.append("g").attr("class", "axis axis--x").attr("transform", `translate(0,${height})`).call(d3.axisBottom(x));
+            context.append("g").attr("class", "axis axis--y").call(d3.axisLeft(y).ticks(4).tickFormat(d3.format(".2s")));
+            
+            const timeFormat = d3.timeFormat("%Y-%m-%d %H:%M:%S");
+            const [startDate, endDate] = x.domain();
+
+            context.append("text")
+                .attr("x", 0)
+                .attr("y", height + margin.bottom - 10)
+                .attr("text-anchor", "start")
+                .style("font-size", "11px")
+                .style("fill", "#333")
+                .style("font-weight", "500")
+                .text(`Start: ${timeFormat(startDate)}`);
+
+            context.append("text")
+                .attr("x", width)
+                .attr("y", height + margin.bottom - 10)
+                .attr("text-anchor", "end")
+                .style("font-size", "11px")
+                .style("fill", "#333")
+                .style("font-weight", "500")
+                .text(`End: ${timeFormat(endDate)}`);
+
+            const brush = d3.brushX().extent([[0, 0], [width, height]]).on("end", brushended);
+            const brushGroup = context.append("g").attr("class", "brush").call(brush);
+            
+            brushGroup.call(brush.move, x.range());
+            window.currentTimeSelection = { startTime: x.domain()[0], endTime: x.domain()[1] };
+
+            function brushended(event) {
+                if (!event.sourceEvent) return;
+                const selection = event.selection;
+                
+                if (!selection) {
+                    window.currentTimeSelection = { startTime: x.domain()[0], endTime: x.domain()[1] };
+                    console.log(`Time window reset to full range.`);
+                } else {
+                    const [x0, x1] = selection.map(x.invert);
+                    window.currentTimeSelection = { startTime: x0, endTime: x1 };
+                    console.log(`Time window selection updated: ${x0.toISOString()} to ${x1.toISOString()}`);
+                }
+            }
+
+            resetBtn.onclick = () => {
+                window.currentTimeSelection = { startTime: x.domain()[0], endTime: x.domain()[1] };
+                brushGroup.call(brush.move, x.range());
+                updateAllVisualizations();
+            };
+
+        } catch (error) {
+            console.error("Error drawing timeline:", error);
+            timelineCard.style.display = 'none';
+        }
+    }
+
+    async function updateAllVisualizations() {
+        showLoading();
+        try {
+            globalAbortController = new AbortController();
+            console.log("Updating all visualizations for new time window...");
+
+            // The order is important: update data models first, then render views
+            await Promise.all([updateHeatmap(), updateTimeInfoDisplay()]);
+            if (globalAbortController.signal.aborted) throw new DOMException("Aborted");
+            
+            await loadInlineDendrogram();
+            if (globalAbortController.signal.aborted) throw new DOMException("Aborted");
+
+            const sankeyCard = document.getElementById('sankeyCard');
+            if (sankeyCard && sankeyCard.style.display !== 'none') {
+                await fetchAndRenderSankeyDiagram();
+            }
+
+            const ipGraphCard = document.getElementById('packetSimilarityCard');
+            if (ipGraphCard && ipGraphCard.style.display !== 'none') {
+                await fetchAndRenderLouvainIpGraph();
+            }
+            
+            updateLegend();
+            clearSidebarVisualization();
+            console.log("All visualizations updated.");
+
+        } catch (error) {
+            if (error.name !== 'AbortError') {
+                console.error("Error updating visualizations:", error);
+                alert("An error occurred while updating views for the selected time range.");
+            } else {
+                console.log("Visualization update cancelled.");
+            }
+        } finally {
+            hideLoading();
+        }
     }
 
     document.getElementById('entropyMinFilter').style.display = 'none';
