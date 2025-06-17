@@ -1,5 +1,17 @@
 # Changelog
 
+## [2025-06-17]
+### Added
+- Functionality to view new tree and heatmap of all clusters from inside a combined cluster
+
+## [2025-06-16]
+### Fixed
+- New heatmap clusters having no color and missing tooltip data
+- Timeline sizing issues when opening sidebar
+
+### Updated
+- Display data on top of tree card when changing timeline
+
 ## [2025-06-12]
 ### Added
 - Adjustable timeline of uploaded data

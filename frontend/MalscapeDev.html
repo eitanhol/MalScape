@@ -762,6 +762,10 @@
         
         <button id="applyFiltersBtn" style="margin-left: 10px;" title="Apply selected filters to heatmap.">Apply Filters</button>
       </div>
+      <div style="margin-bottom: 16px; padding: 0 12px;">
+        <button id="createSubtreeBtn" title="Create a new detailed tree from selected combined clusters" style="display: none; background-color: #ff9800;">Create Sub-Tree from Selection</button>
+        <button id="backToMainTreeBtn" title="Return to the main tree view" style="display: none; background-color: #03a9f4;">Back to Main Tree</button>
+    </div>
     </div>
 
     <div id="timeline-card" style="display: none; background: #fff; box-shadow: 0 2px 10px rgba(0,0,0,0.1); padding: 15px 20px; border-radius: 12px; margin: 20px 0; border: 1px solid #e2e8f0;">
@@ -1006,6 +1010,9 @@
     window.activeSankeyNodeFilter = null;
     window.allClusterIdsMasterList = [];
     window.currentTimeSelection = null;
+
+    let mainTreeViewBeforeSubtree = null;
+    let isSubtreeViewActive = false;
     
     const sidebar = document.getElementById('sidebar');
     const sidebarToggleBtn = document.getElementById('sidebar-toggle');
@@ -1101,35 +1108,42 @@
     }
 
     function toggleSidebar(forceOpen = null) {
-     const shouldBeOpen = forceOpen !== null ? forceOpen : !isSidebarOpen;
+        const shouldBeOpen = forceOpen !== null ? forceOpen : !isSidebarOpen;
+        // const timelineCard = document.getElementById('timeline-card'); // No longer needed here
+        const mainContainer = document.getElementById('main-container');
 
-     if (shouldBeOpen) {
-         if (!isSidebarOpen) {
-             legendContainer.classList.add('visible');
-             sidebar.classList.add('open');
-             isSidebarOpen = true;
-             sidebarToggleBtn.innerHTML = '&times;';
-             sidebarToggleBtn.style.left = `${legendWidth + sidebarWidth}px`;
-             mainContainer.style.marginLeft = `${legendWidth + sidebarWidth}px`;
-             setTimeout(() => {
-                 if (sidebarCy) {
-                     sidebarCy.resize();
-                     applySidebarLayout();
-                     sidebarCy.fit(null, 30);
-                 }
-             }, 350);
-         }
-     } else {
-          if (isSidebarOpen) {
-             legendContainer.classList.remove('visible');
-             sidebar.classList.remove('open');
-             isSidebarOpen = false;
-             sidebarToggleBtn.innerHTML = '&#9776;';
-             sidebarToggleBtn.style.left = `0px`;
-             mainContainer.style.marginLeft = `0px`;
-          }
-     }
- }
+        if (shouldBeOpen) {
+            if (!isSidebarOpen) {
+                legendContainer.classList.add('visible');
+                sidebar.classList.add('open');
+                isSidebarOpen = true;
+                sidebarToggleBtn.innerHTML = '&times;';
+                sidebarToggleBtn.style.left = `${legendWidth + sidebarWidth}px`;
+                mainContainer.style.marginLeft = `${legendWidth + sidebarWidth}px`;
+                
+                // The logic to hide the timeline card has been removed.
+
+                setTimeout(() => {
+                    if (sidebarCy) {
+                        sidebarCy.resize();
+                        applySidebarLayout();
+                        sidebarCy.fit(null, 30);
+                    }
+                }, 350);
+            }
+        } else {
+             if (isSidebarOpen) {
+                legendContainer.classList.remove('visible');
+                sidebar.classList.remove('open');
+                isSidebarOpen = false;
+                sidebarToggleBtn.innerHTML = '&#9776;';
+                sidebarToggleBtn.style.left = `0px`;
+                mainContainer.style.marginLeft = `0px`;
+                
+                // The logic to show the timeline card after the transition has been removed.
+             }
+        }
+    }
 
     resetSidebarBtn.addEventListener('click', () => {
         console.log("Resetting sidebar view and heatmap highlights.");
@@ -2668,6 +2682,10 @@
         const refreshIpGraphBtn = document.getElementById('refreshIpGraphBtn');
         const applySankeyToHeatmapBtn = document.getElementById('applySankeyToHeatmapBtn');
         const revertSankeyFilterBtn = document.getElementById('revertSankeyFilterBtn');
+        const createSubtreeBtn = document.getElementById('createSubtreeBtn'); // Get the new button
+        const backToMainTreeBtn = document.getElementById('backToMainTreeBtn'); // Get the new button
+        if (createSubtreeBtn) createSubtreeBtn.addEventListener('click', handleCreateSubtree); // Add event listener
+        if (backToMainTreeBtn) backToMainTreeBtn.addEventListener('click', handleBackToMainTree); // Add event listener
         if (applySankeyToHeatmapBtn) {
             applySankeyToHeatmapBtn.addEventListener('click', async () => {
                 if (window.activeSankeyNodeFilter) {
@@ -3265,6 +3283,22 @@
         document.getElementById('entropyMaxFilter').style.display = 'none';
         document.querySelector('label[for="entropyMinFilter"]').style.display = 'none';
         document.querySelector('label[for="entropyMaxFilter"]').style.display = 'none';
+
+        // Add a debounced resize listener to redraw the timeline if the window size changes.
+        // This fixes the issue where opening/closing the dev console leaves the timeline shrunk.
+        let resizeTimer;
+        window.addEventListener('resize', () => {
+            clearTimeout(resizeTimer);
+            resizeTimer = setTimeout(() => {
+                const timelineCard = document.getElementById('timeline-card');
+                // Only redraw if the timeline card is currently being displayed
+                if (timelineCard && timelineCard.style.display !== 'none') {
+                    console.log('Debounced resize event: Redrawing timeline.');
+                    // Re-running the draw function will recalculate dimensions based on the new container size
+                    drawTimeline();
+                }
+            }, 250); // Redraw 250ms after the user stops resizing
+        });
     });
 
     function showInlineDendrogram(data, svgH = 400, newClusterIds = new Set()) {
@@ -3273,10 +3307,10 @@
         const treeControls = document.getElementById('treeControls');
         const reorderCheckbox = document.getElementById('reorderTreeCheckbox');
         const svg = d3.select("#inlineDendrogramSvg");
-        
+
         const metaDataLineDiv = document.getElementById('dendrogramMetaDataLine');
 
-        svg.selectAll("*").remove(); 
+        svg.selectAll("*").remove();
         if (metaDataLineDiv) metaDataLineDiv.innerHTML = '';
 
         svg.append("line").attr("id", "threshold-bar")
@@ -3294,16 +3328,16 @@
         const customBluesInterpolator = t_val => d3.interpolateBlues(minBlueIntensity + Math.max(0, Math.min(1, t_val)) * (1 - minBlueIntensity));
         const minGreenIntensity = 0.15;
         const customGreensInterpolator = t_val => d3.interpolateGreens(minGreenIntensity + Math.max(0, Math.min(1, t_val)) * (1 - minGreenIntensity));
-        
-        const blueColorScales = {}; 
+
+        const blueColorScales = {};
         const greenColorScales = {};
 
         if (!containerDiv || !dendrogramCard || !treeControls || !reorderCheckbox || !svg.node()) {
-            if(dendrogramCard) dendrogramCard.style.display = 'block';
-            if(containerDiv) containerDiv.style.height = `${svgH}px`;
+            if (dendrogramCard) dendrogramCard.style.display = 'block';
+            if (containerDiv) containerDiv.style.height = `${svgH}px`;
             svg.append("text").attr("x", "50%").attr("y", "50%").attr("text-anchor", "middle").attr("dominant-baseline", "central")
                 .text("Error: Cannot calculate layout - missing elements.");
-            if(treeControls) treeControls.style.display = "none";
+            if (treeControls) treeControls.style.display = "none";
             if (metaDataLineDiv) metaDataLineDiv.innerHTML = 'Error displaying metadata.';
             window.lastTreeRoot = null;
             window.lastTreeData = null;
@@ -3322,24 +3356,23 @@
                 const cardMarginBottom = parseFloat(cardStyle.marginBottom) || 0;
                 const cardPaddingTop = parseFloat(cardStyle.paddingTop) || 0;
                 const cardPaddingBottom = parseFloat(cardStyle.paddingBottom) || 0;
-                const controlsHeight = treeControls.offsetHeight || 50; 
+                const controlsHeight = treeControls.offsetHeight || 50;
                 const estimatedTopSectionHeight = document.querySelector('#dendrogramCard .dendro-header')?.offsetHeight || 70;
                 const containerStyle = window.getComputedStyle(containerDiv);
                 const containerMarginBottom = parseFloat(containerStyle.marginBottom) || 10;
-                const safetyMargin = 30; 
+                const safetyMargin = 30;
                 const spaceBelowCardTop = viewportHeight - cardTopOffset - cardMarginBottom - safetyMargin;
                 const availableHeight = spaceBelowCardTop - cardPaddingTop - estimatedTopSectionHeight - containerMarginBottom - controlsHeight - cardPaddingBottom;
                 calculatedHeight = Math.max(250, Math.min(availableHeight, viewportHeight * 0.75));
             } catch (e) {
-                console.warn("Could not calculate dynamic dendrogram height, using default.", e);
-                calculatedHeight = 400; // A fixed fallback default
+                calculatedHeight = 400;
             }
         }
         window.currentDendrogramHeight = calculatedHeight;
-        svgH = calculatedHeight; 
+        svgH = calculatedHeight;
         containerDiv.style.height = `${svgH}px`;
 
-        if (!data || data.id === undefined || data.is_minimal === true || (data.children && data.children.length === 0 && data.id && data.cluster_id) || data.no_tree || data.error ) {
+        if (!data || data.id === undefined || data.is_minimal === true || (data.children && data.children.length === 0 && data.id && data.cluster_id) || data.no_tree || data.error) {
             let message = "No hierarchical data available or error loading.";
             let metaPartsForEmpty = [];
             let clusterInfoText = '0 Clusters';
@@ -3354,7 +3387,7 @@
                         packetInfoText = `Packets: ${singleClusterEntry.value.toLocaleString()}`;
                     }
                 }
-            } else if (data && data.error) { 
+            } else if (data && data.error) {
                 message = `Error loading tree data: ${data.error}`;
             } else if (data && data.id && (!data.children || data.children.length === 0) && data.cluster_id) {
                 message = `Tree cannot be built: Only one cluster (${data.cluster_id}) found.`;
@@ -3366,178 +3399,204 @@
                     }
                 }
             }
-            
+
             metaPartsForEmpty.push(clusterInfoText);
-            if (typeof currentDisplayableTimeInfo !== 'undefined' && currentDisplayableTimeInfo.isSet) {
-                metaPartsForEmpty.push(currentDisplayableTimeInfo.start);
-                metaPartsForEmpty.push(currentDisplayableTimeInfo.end);
-                metaPartsForEmpty.push(currentDisplayableTimeInfo.duration);
+            
+            // Time display logic for empty/error state
+            if (window.lastAppliedTimeSelection && window.lastAppliedTimeSelection.startTime && window.lastAppliedTimeSelection.endTime) {
+                const { startTime, endTime } = window.lastAppliedTimeSelection;
+                const durationSeconds = (endTime.getTime() - startTime.getTime()) / 1000;
+                const timeFormat = d3.timeFormat("%Y-%m-%d %H:%M:%S");
+                metaPartsForEmpty.push(`Start: ${timeFormat(startTime)}`);
+                metaPartsForEmpty.push(`End: ${timeFormat(endTime)}`);
+                metaPartsForEmpty.push(`Duration: ${formatDuration(durationSeconds)}`);
             } else {
                 metaPartsForEmpty.push("Start: N/A");
                 metaPartsForEmpty.push("End: N/A");
                 metaPartsForEmpty.push("Duration: N/A");
             }
+            
             metaPartsForEmpty.push(packetInfoText);
 
             svg.append("text").attr("x", "50%").attr("y", "50%").attr("text-anchor", "middle").attr("dominant-baseline", "central").style("font-size", "16px").style("fill", "#555").text(message);
             if (treeControls) treeControls.style.display = "none";
-            
+
             if (metaDataLineDiv) {
                 const separator = "&nbsp;&nbsp;|&nbsp;&nbsp;";
                 metaDataLineDiv.innerHTML = metaPartsForEmpty.filter(p => p).join(separator);
             }
-            window.lastTreeRoot = null; window.lastTreeData = null;
-            console.warn("showInlineDendrogram: Not enough data to draw a tree or error. Displaying message:", message);
+            window.lastTreeRoot = null;
+            window.lastTreeData = null;
             return;
         }
 
-        const internalTopMargin = 15; 
+        const internalTopMargin = 15;
         const internalBottomMargin = 20;
-        const dendrogramHeightInternal = Math.max(150, svgH - internalTopMargin - internalBottomMargin); 
-        const height = dendrogramHeightInternal; 
+        const dendrogramHeightInternal = Math.max(150, svgH - internalTopMargin - internalBottomMargin);
+        const height = dendrogramHeightInternal;
         window.currentD3LayoutHeight = height;
 
         const features = (typeof metrics !== 'undefined' && Array.isArray(metrics)) ? metrics.map(m => m.label) : [];
         const numHeatmapFeatures = features.length;
-        const heatmapRowHeight = 15; 
-        const heatmapSpacing = 5;   
+        const heatmapRowHeight = 15;
+        const heatmapSpacing = 5;
 
-        const featureScale = d3.scaleBand().domain(features).paddingInner(0.1); 
+        const featureScale = d3.scaleBand().domain(features).paddingInner(0.1);
         const heatmapContentStartY = height + heatmapSpacing + margin.top;
         const approximateHeatmapContentHeight = numHeatmapFeatures * heatmapRowHeight;
         featureScale.range([heatmapContentStartY, heatmapContentStartY + approximateHeatmapContentHeight]);
         const finalHeatmapBlockHeight = (numHeatmapFeatures > 0) ? (featureScale.step() * numHeatmapFeatures) : 0;
-        const heatmapStartY = height + heatmapSpacing + margin.top; 
-        const heatmapEndY = heatmapStartY + finalHeatmapBlockHeight - (numHeatmapFeatures > 0 ? featureScale.paddingInner() * featureScale.step() : 0); 
+        const heatmapStartY = height + heatmapSpacing + margin.top;
+        const heatmapEndY = heatmapStartY + finalHeatmapBlockHeight - (numHeatmapFeatures > 0 ? featureScale.paddingInner() * featureScale.step() : 0);
 
         const root = d3.hierarchy(data);
         const currentLeaves = root.leaves();
         const leafCount = currentLeaves.length;
-        
-        const treeLayout = d3.cluster().size([1, height]); 
+
+        const treeLayout = d3.cluster().size([1, height]);
         treeLayout(root);
 
         root.each(node => {
-            node.structuralY = node.y; 
+            node.structuralY = node.y;
             if (typeof node.structuralY !== 'number' || !isFinite(node.structuralY)) {
                 node.structuralY = (node.parent && typeof node.parent.structuralY === 'number' && isFinite(node.parent.structuralY)) ? node.parent.structuralY : 0;
             }
             node.finalY = node.structuralY;
         });
 
-        const structuralLeaves = [...currentLeaves].sort((a, b) => a.x - b.x); 
+        const structuralLeaves = [...currentLeaves].sort((a, b) => a.x - b.x);
         const structuralClusterOrGroupIds = structuralLeaves.map(leaf => leaf.data?.cluster_id).filter(id => id !== undefined && id !== null).map(String);
-        const minLeafSpacingStructural = 20; 
+        const minLeafSpacingStructural = 20;
         const requiredWidthStructural = structuralClusterOrGroupIds.length * minLeafSpacingStructural;
         const containerWidth = containerDiv.clientWidth || 600;
         const widthAvailableInContainer = Math.max(300, containerWidth - margin.left - margin.right);
         const structuralLayoutWidth = Math.max(requiredWidthStructural, widthAvailableInContainer);
-        const structuralXScale = d3.scaleBand().domain(structuralClusterOrGroupIds).range([margin.left, margin.left + structuralLayoutWidth]).paddingInner(0); 
+        const structuralXScale = d3.scaleBand().domain(structuralClusterOrGroupIds).range([margin.left, margin.left + structuralLayoutWidth]).paddingInner(0);
 
-        root.eachAfter(node => { 
+        root.eachAfter(node => {
             if (node.children && node.children.length > 0) {
                 const validChildrenX = node.children.map(c => c.structuralX).filter(x => typeof x === 'number' && isFinite(x) && x >= 0);
-                if (validChildrenX.length > 0) { node.structuralX = d3.mean(validChildrenX); } 
-                else { node.structuralX = (structuralLayoutWidth / 2 + margin.left); } 
-            } else { 
+                if (validChildrenX.length > 0) {
+                    node.structuralX = d3.mean(validChildrenX);
+                } else {
+                    node.structuralX = (structuralLayoutWidth / 2 + margin.left);
+                }
+            } else {
                 const id = node.data?.cluster_id;
                 if (id !== undefined && id !== null) {
                     const bandStart = structuralXScale(String(id));
-                    if (bandStart !== undefined && typeof bandStart === 'number') { node.structuralX = bandStart + structuralXScale.bandwidth() / 2; } 
-                    else { node.structuralX = -1000; } 
-                } else { node.structuralX = -1000; } 
+                    if (bandStart !== undefined && typeof bandStart === 'number') {
+                        node.structuralX = bandStart + structuralXScale.bandwidth() / 2;
+                    } else {
+                        node.structuralX = -1000;
+                    }
+                } else {
+                    node.structuralX = -1000;
+                }
             }
-            if (typeof node.structuralX !== 'number' || !isFinite(node.structuralX)) { node.structuralX = (structuralLayoutWidth / 2 + margin.left); }
+            if (typeof node.structuralX !== 'number' || !isFinite(node.structuralX)) {
+                node.structuralX = (structuralLayoutWidth / 2 + margin.left);
+            }
         });
 
         let metricSortedLeaves = [...currentLeaves];
         const metricSelectElem = document.getElementById('dendrogramSortMetricSelect');
         const selectedMetric = metricSelectElem ? metricSelectElem.value : 'Default';
-        
+
         const aggregatedLeafData = new Map();
+        const aggregateOriginalClusters = (originalIds, isGroupNode) => {
+            const aggregatedMetrics = {};
+            const isSingleOriginalCluster = originalIds.length === 1 && !isGroupNode;
+
+            features.forEach(metricLabel => {
+                const metricStore = window.fullHeatmapData[metricLabel] || [];
+                let clusterAnomaly = 'normal';
+                let valuesForAggregation = [];
+
+                originalIds.forEach(originalId => {
+                    const originalEntry = metricStore.find(entry => String(entry.cluster) === String(originalId));
+                    if (originalEntry) {
+                        const value = originalEntry.value;
+                        if (originalEntry.clusterAnomaly === 'anomaly') {
+                            clusterAnomaly = 'anomaly';
+                        }
+                        const countEntry = window.fullHeatmapData['Count']?.find(entry => String(entry.cluster) === String(originalId));
+                        const weight = countEntry?.value || 1;
+
+                        if (value !== null && typeof value !== 'undefined' && isFinite(value)) {
+                            valuesForAggregation.push({
+                                value,
+                                weight
+                            });
+                        }
+                    }
+                });
+
+                aggregatedMetrics[`${metricLabel}_anomaly`] = clusterAnomaly;
+                let finalValue = null;
+
+                if (valuesForAggregation.length > 0) {
+                    if (isSingleOriginalCluster) {
+                        finalValue = valuesForAggregation[0].value;
+                    } else {
+                        switch (metricLabel) {
+                            case 'Count':
+                            case 'Total Data Sent':
+                            case 'Unique IPs':
+                            case 'Unique Sources':
+                            case 'Unique Destinations':
+                                finalValue = d3.sum(valuesForAggregation, d => d.value);
+                                break;
+
+                            case '% SYN packets':
+                            case '% RST packets':
+                            case '% ACK packets':
+                            case '% PSH packets':
+                            case 'Average Inter-Arrival Time':
+                                const totalValue = d3.sum(valuesForAggregation, d => d.value * d.weight);
+                                const totalWeight = d3.sum(valuesForAggregation, d => d.weight);
+                                finalValue = totalWeight > 0 ? totalValue / totalWeight : 0;
+                                break;
+
+                            case 'Start Time':
+                                finalValue = d3.min(valuesForAggregation, d => d.value);
+                                break;
+
+                            case 'Duration':
+                                finalValue = d3.max(valuesForAggregation, d => d.value);
+                                break;
+
+                            default:
+                                finalValue = d3.mean(valuesForAggregation, d => d.value);
+                                break;
+                        }
+                    }
+                }
+                aggregatedMetrics[metricLabel] = finalValue;
+            });
+            return aggregatedMetrics;
+        };
+
         currentLeaves.forEach(leaf => {
             const leafId = leaf.data?.cluster_id;
             if (!leafId) return;
+
             const stringLeafId = String(leafId);
-            aggregatedLeafData.set(stringLeafId, {});
-            
-            if (leaf.data.isGroup) {
-                const originalLeafIds = Array.from(leaf.data.originalLeaves || []);
-                if (originalLeafIds.length === 0) { 
-                    features.forEach(metricLabel => { 
-                        aggregatedLeafData.get(stringLeafId)[metricLabel] = null; 
-                        aggregatedLeafData.get(stringLeafId)[`${metricLabel}_anomaly`] = 'normal'; 
-                    }); 
-                    return; 
-                }
-                const originalDataForGroup = new Map(); 
-                let totalPacketCountInGroup = 0;
+            const isGroup = leaf.data.isGroup || false;
+            // Check for EITHER originalLeaves (from frontend grouping) OR original_clusters (from backend)
+            const originalIds = leaf.data.originalLeaves || leaf.data.original_clusters;
 
-                originalLeafIds.forEach(origId => {
-                    features.forEach(metricLabel => {
-                        const metricStore = window.fullHeatmapData[metricLabel] || [];
-                        const originalEntry = metricStore.find(entry => String(entry.cluster) === String(origId));
-                        const value = originalEntry?.value !== undefined ? parseFloat(originalEntry.value) : null;
-                        const anomaly = originalEntry?.clusterAnomaly || 'normal';
-                        let packetCountForWeighting = 1; 
-                        if (window.fullHeatmapData['Count']) { 
-                            const countEntryForWeight = window.fullHeatmapData['Count'].find(entry => String(entry.cluster) === String(origId)); 
-                            packetCountForWeighting = countEntryForWeight ? (parseFloat(countEntryForWeight.value) || 1) : 1; 
-                        }
-                        if (!originalDataForGroup.has(metricLabel)) originalDataForGroup.set(metricLabel, []);
-                        if (value !== null && !isNaN(value)) { 
-                            originalDataForGroup.get(metricLabel).push({ value: value, anomaly: anomaly, count: packetCountForWeighting }); 
-                        } else { 
-                            originalDataForGroup.get(metricLabel).push({ value: null, anomaly: anomaly, count: packetCountForWeighting }); 
-                        }
-                    });
-                    if (window.fullHeatmapData['Count']) { 
-                        const countEntry = window.fullHeatmapData['Count'].find(entry => String(entry.cluster) === String(origId)); 
-                        totalPacketCountInGroup += countEntry ? (parseFloat(countEntry.value) || 0) : 0;
-                    } else { 
-                        totalPacketCountInGroup += 1; 
-                    } 
-                });
-
-                features.forEach(metricLabel => {
-                    const valuesAndCounts = originalDataForGroup.get(metricLabel)?.filter(d_item => d_item.value !== null) || [];
-                    const allEntries = originalDataForGroup.get(metricLabel) || [];
-                    let aggregatedValue = null; 
-                    let aggregatedAnomaly = 'normal';
-                    if (allEntries.some(d_item => d_item.anomaly === 'anomaly')) aggregatedAnomaly = 'anomaly';
-
-                    if (metricLabel === 'Count') {
-                        aggregatedValue = totalPacketCountInGroup;
-                    } else if (valuesAndCounts.length > 0) {
-                        switch (metricLabel) {
-                            case 'Total Data Sent': aggregatedValue = d3.sum(valuesAndCounts, d_item => d_item.value); break;
-                            case '% SYN packets': case '% RST packets': case '% ACK packets': case '% PSH packets': case 'Average Inter-Arrival Time':
-                                const totalValueSum = d3.sum(valuesAndCounts, d_item => d_item.value * d_item.count);
-                                const totalWeightSum = d3.sum(valuesAndCounts, d_item => d_item.count);
-                                aggregatedValue = totalWeightSum > 0 ? totalValueSum / totalWeightSum : d3.mean(valuesAndCounts, d_item => d_item.value); break;
-                            case 'Unique IPs': case 'Unique Sources': case 'Unique Destinations': aggregatedValue = d3.sum(valuesAndCounts, d_item => d_item.value); break; 
-                            case 'Payload Size Variance': case 'Packets per Second': aggregatedValue = d3.mean(valuesAndCounts, d_item => d_item.value); break;
-                            case 'Start Time': aggregatedValue = d3.min(valuesAndCounts, d_item => d_item.value); break;
-                            case 'Duration': aggregatedValue = d3.max(valuesAndCounts, d_item => d_item.value); break;
-                            case 'Length': case 'Len': aggregatedValue = d3.mean(valuesAndCounts, d_item => d_item.value); break;
-                            default: aggregatedValue = d3.mean(valuesAndCounts, d_item => d_item.value); break;
-                        }
-                    }
-                    aggregatedLeafData.get(stringLeafId)[metricLabel] = aggregatedValue;
-                    aggregatedLeafData.get(stringLeafId)[`${metricLabel}_anomaly`] = aggregatedAnomaly;
-                });
-            } else { 
-                features.forEach(metricLabel => {
-                    const metricStore = window.fullHeatmapData[metricLabel] || [];
-                    const originalEntry = metricStore.find(entry => String(entry.cluster) === stringLeafId);
-                    const value = originalEntry?.value !== undefined ? parseFloat(originalEntry.value) : null;
-                    const anomaly = originalEntry?.clusterAnomaly || 'normal';
-                    aggregatedLeafData.get(stringLeafId)[metricLabel] = (value !== null && !isNaN(value)) ? value : null;
-                    aggregatedLeafData.get(stringLeafId)[`${metricLabel}_anomaly`] = anomaly;
-                });
+            if (isGroup && originalIds && originalIds.length > 0) {
+                // This is a group node with underlying original clusters. Aggregate them.
+                const aggregatedMetrics = aggregateOriginalClusters(originalIds, true);
+                aggregatedLeafData.set(stringLeafId, aggregatedMetrics);
+            } else {
+                // This is a single, non-group leaf node. "Aggregate" just its own data.
+                const directData = aggregateOriginalClusters([stringLeafId], false);
+                aggregatedLeafData.set(stringLeafId, directData);
             }
         });
-        
+
         if (metaDataLineDiv) {
             let metaDataParts = [];
             let clusterInfoText = `${leafCount} Clusters`;
@@ -3545,11 +3604,15 @@
                 clusterInfoText = `${leafCount} Clusters (Original ${window.originalLeafCount})`;
             }
             metaDataParts.push(clusterInfoText);
-
-            if (typeof currentDisplayableTimeInfo !== 'undefined' && currentDisplayableTimeInfo.isSet) {
-                metaDataParts.push(currentDisplayableTimeInfo.start);
-                metaDataParts.push(currentDisplayableTimeInfo.end);
-                metaDataParts.push(currentDisplayableTimeInfo.duration);
+            
+            // Time display logic for the main view
+            if (window.lastAppliedTimeSelection && window.lastAppliedTimeSelection.startTime && window.lastAppliedTimeSelection.endTime) {
+                const { startTime, endTime } = window.lastAppliedTimeSelection;
+                const durationSeconds = (endTime.getTime() - startTime.getTime()) / 1000;
+                const timeFormat = d3.timeFormat("%Y-%m-%d %H:%M:%S");
+                metaDataParts.push(`Start: ${timeFormat(startTime)}`);
+                metaDataParts.push(`End: ${timeFormat(endTime)}`);
+                metaDataParts.push(`Duration: ${formatDuration(durationSeconds)}`);
             } else {
                 metaDataParts.push("Start: N/A");
                 metaDataParts.push("End: N/A");
@@ -3565,18 +3628,18 @@
                         const leafAggEntry = aggregatedLeafData.get(leafIdStr);
                         if (leafAggEntry && typeof leafAggEntry['Count'] === 'number') {
                             totalPacketCountDendro += leafAggEntry['Count'];
-                            packetCountAvailable = true; 
+                            packetCountAvailable = true;
                         }
                     }
                 });
             }
-            
+
             if (packetCountAvailable) {
                 metaDataParts.push(`Packets: ${totalPacketCountDendro.toLocaleString()}`);
             } else {
                 metaDataParts.push("Packets: N/A");
             }
-            
+
             const separator = "&nbsp;&nbsp;|&nbsp;&nbsp;";
             metaDataLineDiv.innerHTML = metaDataParts.filter(p => p).join(separator);
         }
@@ -3584,16 +3647,20 @@
 
         if (selectedMetric !== 'Default' && window.fullHeatmapData && window.fullHeatmapData[selectedMetric]) {
             metricSortedLeaves.sort((a, b) => {
-                const aId = String(a.data?.cluster_id); const bId = String(b.data?.cluster_id);
-                const aData = aggregatedLeafData.get(aId); const bData = aggregatedLeafData.get(bId);
+                const aId = String(a.data?.cluster_id);
+                const bId = String(b.data?.cluster_id);
+                const aData = aggregatedLeafData.get(aId);
+                const bData = aggregatedLeafData.get(bId);
                 const aValue = aData ? (aData[selectedMetric] ?? null) : null;
                 const bValue = bData ? (bData[selectedMetric] ?? null) : null;
-                if (aValue === null && bValue === null) return 0; if (aValue === null) return 1; if (bValue === null) return -1; 
+                if (aValue === null && bValue === null) return 0;
+                if (aValue === null) return 1;
+                if (bValue === null) return -1;
                 const orderOption = document.getElementById("rowOrderSelect")?.value || "descending";
                 return orderOption === "descending" ? bValue - aValue : aValue - bValue;
             });
-        } else { 
-            metricSortedLeaves.sort((a,b) => a.x - b.x); 
+        } else {
+            metricSortedLeaves.sort((a, b) => a.x - b.x);
         }
 
         const heatmapClusterOrGroupIds = metricSortedLeaves.map(leaf => leaf.data?.cluster_id).filter(id => id !== undefined && id !== null).map(String);
@@ -3601,34 +3668,47 @@
         let finalLayoutWidth;
 
         if (reorderTree) {
-            const minLeafSpacingMetric = 20; const requiredWidthMetric = heatmapClusterOrGroupIds.length * minLeafSpacingMetric;
+            const minLeafSpacingMetric = 20;
+            const requiredWidthMetric = heatmapClusterOrGroupIds.length * minLeafSpacingMetric;
             finalLayoutWidth = Math.max(requiredWidthMetric, widthAvailableInContainer);
             const metricXScale = d3.scaleBand().domain(heatmapClusterOrGroupIds).range([margin.left, margin.left + finalLayoutWidth]).paddingInner(0);
-            root.eachAfter(node => { 
+            root.eachAfter(node => {
                 if (node.children && node.children.length > 0) {
                     const validChildrenX = node.children.map(c => c.finalX).filter(x => typeof x === 'number' && isFinite(x) && x >= 0);
-                    if (validChildrenX.length > 0) { node.finalX = d3.mean(validChildrenX); } else { node.finalX = (finalLayoutWidth / 2 + margin.left); }
-                } else { 
+                    if (validChildrenX.length > 0) {
+                        node.finalX = d3.mean(validChildrenX);
+                    } else {
+                        node.finalX = (finalLayoutWidth / 2 + margin.left);
+                    }
+                } else {
                     const id = node.data?.cluster_id;
-                    if (id !== undefined && id !== null) { const bandStart = metricXScale(String(id)); if (bandStart !== undefined && typeof bandStart === 'number') node.finalX = bandStart + metricXScale.bandwidth() / 2; else node.finalX = -1000; } 
-                    else node.finalX = -1000;
+                    if (id !== undefined && id !== null) {
+                        const bandStart = metricXScale(String(id));
+                        if (bandStart !== undefined && typeof bandStart === 'number') node.finalX = bandStart + metricXScale.bandwidth() / 2;
+                        else node.finalX = -1000;
+                    } else node.finalX = -1000;
                 }
                 if (typeof node.finalX !== 'number' || !isFinite(node.finalX)) node.finalX = (finalLayoutWidth / 2 + margin.left);
             });
-        } else { 
+        } else {
             finalLayoutWidth = structuralLayoutWidth;
-            root.each(node => { node.finalX = node.structuralX; if (typeof node.finalX !== 'number' || !isFinite(node.finalX)) node.finalX = (finalLayoutWidth / 2 + margin.left); });
+            root.each(node => {
+                node.finalX = node.structuralX;
+                if (typeof node.finalX !== 'number' || !isFinite(node.finalX)) node.finalX = (finalLayoutWidth / 2 + margin.left);
+            });
         }
-        window.currentLayoutWidth = finalLayoutWidth; window.lastTreeRoot = root; window.lastTreeData = data; 
-        const heatmapContentWidth = finalLayoutWidth; 
-        const heatmapXScale = d3.scaleBand().domain(heatmapClusterOrGroupIds).range([margin.left, margin.left + heatmapContentWidth]).paddingInner(0); 
+        window.currentLayoutWidth = finalLayoutWidth;
+        window.lastTreeRoot = root;
+        window.lastTreeData = data;
+        const heatmapContentWidth = finalLayoutWidth;
+        const heatmapXScale = d3.scaleBand().domain(heatmapClusterOrGroupIds).range([margin.left, margin.left + heatmapContentWidth]).paddingInner(0);
 
         const totalNeededHeightForViewBox = height + (finalHeatmapBlockHeight > 0 ? finalHeatmapBlockHeight + heatmapSpacing : 0) + margin.top + margin.bottom;
         const viewBoxHeight = totalNeededHeightForViewBox;
-        const viewBoxWidth = finalLayoutWidth + margin.left + margin.right; 
+        const viewBoxWidth = finalLayoutWidth + margin.left + margin.right;
         svg.attr("viewBox", `0 0 ${viewBoxWidth} ${viewBoxHeight}`).attr("preserveAspectRatio", "xMidYMid meet");
 
-        const svgContent = svg.append("g"); 
+        const svgContent = svg.append("g");
         const linkGroup = svgContent.append("g").attr("class", "links-group");
         const nodeDrawingGroup = svgContent.append("g").attr("class", "nodes-group");
         const heatmapCellGroup = svgContent.append("g").attr("class", "heatmap-cells-group");
@@ -3637,12 +3717,15 @@
 
         linkGroup.selectAll(".link").data(root.links()).join("path").attr("class", "link")
             .attr("d", d_link => {
-                const sourceX = d_link.source.finalX; const sourceY = d_link.source.finalY + margin.top;
-                const targetX = d_link.target.finalX; const targetY = d_link.target.finalY + margin.top;
+                const sourceX = d_link.source.finalX;
+                const sourceY = d_link.source.finalY + margin.top;
+                const targetX = d_link.target.finalX;
+                const targetY = d_link.target.finalY + margin.top;
                 if ([sourceX, sourceY, targetX, targetY].every(coord => typeof coord === 'number' && isFinite(coord))) {
                     const midY = sourceY + (targetY - sourceY) / 2;
                     return `M${sourceX},${sourceY} L${sourceX},${midY} L${targetX},${midY} L${targetX},${targetY}`;
-                } return "";
+                }
+                return "";
             }).attr("fill", "none").attr("stroke", "#ccc").attr("stroke-width", 1.5);
 
         const drawnNodes = nodeDrawingGroup.selectAll(".node")
@@ -3656,29 +3739,34 @@
         if (features.length > 0 && heatmapClusterOrGroupIds.length > 0 && aggregatedLeafData.size > 0) {
             const heatmapFeatureData = [];
             heatmapClusterOrGroupIds.forEach(leafId => {
-                const leafAggData = aggregatedLeafData.get(String(leafId)); 
+                const leafAggData = aggregatedLeafData.get(String(leafId));
                 if (leafAggData) {
                     const leafNode = currentLeaves.find(l_node => String(l_node.data?.cluster_id) === String(leafId));
                     const isGroup = leafNode?.data?.isGroup || false;
-                    // =================== START OF CORRECTED CODE ===================
-                    // FIX: Use .length for Arrays, not .size. The data structure was converted to an Array earlier.
                     const originalLeavesCount = isGroup ? (leafNode.data.originalLeaves?.length || 0) : 1;
-                    // =================== END OF CORRECTED CODE ===================
                     const isNewCluster = newClusterIds.has(String(leafId));
                     features.forEach(metricLabel => {
                         heatmapFeatureData.push({
-                            cluster_id: leafId, feature: metricLabel, value: leafAggData[metricLabel] ?? null, 
+                            cluster_id: leafId,
+                            feature: metricLabel,
+                            value: leafAggData[metricLabel] ?? null,
                             anomaly: leafAggData[`${metricLabel}_anomaly`] || 'normal',
-                            isGroup: isGroup, originalLeavesCount: originalLeavesCount, isNew: isNewCluster
+                            isGroup: isGroup,
+                            originalLeavesCount: originalLeavesCount,
+                            isNew: isNewCluster
                         });
                     });
                 }
             });
-            
+
             features.forEach(metricLabel => {
                 const numericValues = heatmapFeatureData.filter(d_filter => d_filter.feature === metricLabel && d_filter.value !== null && typeof d_filter.value === 'number' && isFinite(d_filter.value)).map(d_map => d_map.value);
                 let domain = [0, 1];
-                if (numericValues.length > 0) { const rowMin = d3.min(numericValues); const rowMax = d3.max(numericValues); domain = [Math.min(0, rowMin), Math.max(rowMax, rowMin + 1e-9)]; }
+                if (numericValues.length > 0) {
+                    const rowMin = d3.min(numericValues);
+                    const rowMax = d3.max(numericValues);
+                    domain = [Math.min(0, rowMin), Math.max(rowMax, rowMin + 1e-9)];
+                }
                 blueColorScales[metricLabel] = d3.scaleSequential(customBluesInterpolator).domain(domain).clamp(true);
                 greenColorScales[metricLabel] = d3.scaleSequential(customGreensInterpolator).domain(domain).clamp(true);
             });
@@ -3689,43 +3777,47 @@
                 const cellSelection = heatmapCellGroup.selectAll(".heatmap-cell")
                     .data(heatmapFeatureData, d_data => `${d_data.cluster_id}-${d_data.feature}`)
                     .join("rect").attr("class", "heatmap-cell")
-                    .attr("x", d_attr => { const xVal = heatmapXScale(d_attr.cluster_id); return (typeof xVal === 'number' && isFinite(xVal)) ? xVal : -1000; })
+                    .attr("x", d_attr => {
+                        const xVal = heatmapXScale(d_attr.cluster_id);
+                        return (typeof xVal === 'number' && isFinite(xVal)) ? xVal : -1000;
+                    })
                     .attr("width", heatmapXScale.bandwidth())
-                    .attr("y", d_attr => { const yVal = featureScale(d_attr.feature); return (typeof yVal === 'number' && isFinite(yVal)) ? yVal : -1000; })
+                    .attr("y", d_attr => {
+                        const yVal = featureScale(d_attr.feature);
+                        return (typeof yVal === 'number' && isFinite(yVal)) ? yVal : -1000;
+                    })
                     .attr("height", featureScale.bandwidth());
 
-                cellSelection.filter(function() { const x = +d3.select(this).attr("x"); const y = +d3.select(this).attr("y"); return x >= -margin.left && y >= 0; })
+                cellSelection.filter(function() {
+                        const x = +d3.select(this).attr("x");
+                        const y = +d3.select(this).attr("y");
+                        return x >= -margin.left && y >= 0;
+                    })
                     .each(function(d_cell) {
                         const cell = d3.select(this);
                         let currentFill;
                         let activeScale;
                         const cellClusterIdStr = String(d_cell.cluster_id);
-                        // Check if this cluster is part of the current Sankey selection
                         const isClusterSankeyMatched = window.activeSankeyNodeFilter && window.sankeyMatchingClusterIds.has(cellClusterIdStr);
 
                         cell.style("opacity", 1.0);
 
-                        // Determine which color scale to use: green for Sankey-matched, blue otherwise
                         if (isClusterSankeyMatched) {
                             activeScale = greenColorScales[d_cell.feature];
                         } else {
                             activeScale = blueColorScales[d_cell.feature];
                         }
 
-                        // Determine the final fill color
-                        // Anomaly (orange) overrides blue, but we let it be overridden by green for selection clarity
                         if (d_cell.anomaly === 'anomaly' && !isClusterSankeyMatched) {
                             currentFill = anomalyOverrideColor;
                         } else if (activeScale && d_cell.value !== null && typeof d_cell.value === 'number' && isFinite(d_cell.value)) {
-                            currentFill = activeScale(d_cell.value); // Use the selected color scale
+                            currentFill = activeScale(d_cell.value);
                         } else {
-                            // Background color for empty cells (light green or light blue)
                             currentFill = isClusterSankeyMatched ? customGreensInterpolator(0.05) : customBluesInterpolator(0.01);
                         }
 
                         cell.attr("data-original-fill", currentFill);
 
-                        // User's direct click on the heatmap (for sidebar) still takes precedence
                         const userClickedHighlightColor = clusterHighlightColors.get(cellClusterIdStr);
                         cell.attr("fill", userClickedHighlightColor ? userClickedHighlightColor : currentFill)
                             .style("stroke", userClickedHighlightColor ? userClickedHighlightColor : defaultStrokeColor)
@@ -3737,13 +3829,16 @@
                         const clickedClusterOrGroupID = String(d_click.cluster_id);
                         const isGroupClick = d_click.isGroup;
                         const cellsForClusterOrGroup = heatmapCellGroup.selectAll('.heatmap-cell').filter(cell_d => String(cell_d.cluster_id) === clickedClusterOrGroupID);
-                        if (!cellsForClusterOrGroup.empty()) { cellsForClusterOrGroup.raise(); }
+                        if (!cellsForClusterOrGroup.empty()) {
+                            cellsForClusterOrGroup.raise();
+                        }
 
                         if (clusterHighlightColors.has(clickedClusterOrGroupID)) {
-                            // --- REMOVAL LOGIC ---
                             clusterHighlightColors.delete(clickedClusterOrGroupID);
                             addedSidebarClusters.delete(clickedClusterOrGroupID);
-                            cellsForClusterOrGroup.each(function(cell_d) { d3.select(this).transition().duration(100).style('stroke', defaultStrokeColor).style('stroke-width', defaultStrokeWidth); });
+                            cellsForClusterOrGroup.each(function(cell_d) {
+                                d3.select(this).transition().duration(100).style('stroke', defaultStrokeColor).style('stroke-width', defaultStrokeWidth);
+                            });
 
                             if (sidebarCy) {
                                 let selectorsToRemove = [];
@@ -3751,8 +3846,7 @@
                                     const groupNode = currentLeaves.find(l_node => String(l_node.data?.cluster_id) === clickedClusterOrGroupID);
                                     const originalLeaves = Array.from(groupNode?.data?.originalLeaves || []);
                                     selectorsToRemove = originalLeaves.map(leafId => `[clusterID = "${leafId}"]`);
-                                    
-                                    // Also remove original leaves from color map and sidebar tracking set
+
                                     originalLeaves.forEach(leafId => {
                                         clusterHighlightColors.delete(String(leafId));
                                         addedSidebarClusters.delete(String(leafId));
@@ -3779,19 +3873,16 @@
                                 updateSidebarTableForSelectedNodesAndEdges();
                             }
                         } else {
-                            // --- ADDITION LOGIC ---
                             if (isGroupClick) {
                                 toggleSidebar(true);
                                 const groupNode = currentLeaves.find(l_node => String(l_node.data?.cluster_id) === clickedClusterOrGroupID);
                                 const originalLeaves = Array.from(groupNode?.data?.originalLeaves || []);
-                                
+
                                 if (originalLeaves.length > 0) {
-                                    // Assign a color to the GROUP for its heatmap cell highlight
                                     const groupHighlightColor = generateUniqueHighlightColor();
                                     clusterHighlightColors.set(clickedClusterOrGroupID, groupHighlightColor);
                                     cellsForClusterOrGroup.transition().duration(100).style('stroke', groupHighlightColor).style('stroke-width', highlightStrokeWidth);
-                                    
-                                    // Ensure every ORIGINAL leaf within the group has a unique highlight color
+
                                     originalLeaves.forEach(originalLeafId => {
                                         const stringLeafId = String(originalLeafId);
                                         if (!clusterHighlightColors.has(stringLeafId)) {
@@ -3802,7 +3893,9 @@
                                     showSidebarLoading(true, false);
                                     sidebarInfoDiv.innerHTML = `Loading network for Group ${clickedClusterOrGroupID} (${originalLeaves.length} clusters)...`;
                                     sidebarInfoDiv.style.display = 'block';
-                                    let allNodesAdded = [], allEdgesAdded = [], errorOccurred = false;
+                                    let allNodesAdded = [],
+                                        allEdgesAdded = [],
+                                        errorOccurred = false;
 
                                     for (const originalLeafId of originalLeaves) {
                                         try {
@@ -3814,42 +3907,100 @@
                                                 const metricDataForOriginalLeaf = window.fullHeatmapData['Count'].find(entry => String(entry.cluster) === String(originalLeafId));
                                                 if (metricDataForOriginalLeaf && metricDataForOriginalLeaf.clusterAnomaly === 'anomaly') isThisOriginalLeafAnomalous = true;
                                             }
-                                            
-                                            // Use the specific color for this original leaf
+
                                             const leafColor = clusterHighlightColors.get(String(originalLeafId)) || '#CCCCCC';
 
                                             if (clusterData && clusterData.nodes && clusterData.nodes.length > 0) {
                                                 const nodesToAdd = clusterData.nodes.map(node_item => ({
                                                     group: 'nodes',
-                                                    data: { ...node_item.data, clusterID: originalLeafId, Classification: node_item.data.Classification || 'Unknown' },
-                                                    style: { 'background-color': leafColor, ...(isThisOriginalLeafAnomalous && { 'border-color': 'red', 'border-width': 2, 'border-style': 'solid' }) },
-                                                    scratch: { _originalColor: leafColor }
+                                                    data: { ...node_item.data,
+                                                        clusterID: originalLeafId,
+                                                        Classification: node_item.data.Classification || 'Unknown'
+                                                    },
+                                                    style: {
+                                                        'background-color': leafColor,
+                                                        ...(isThisOriginalLeafAnomalous && {
+                                                            'border-color': 'red',
+                                                            'border-width': 2,
+                                                            'border-style': 'solid'
+                                                        })
+                                                    },
+                                                    scratch: {
+                                                        _originalColor: leafColor
+                                                    }
                                                 }));
                                                 allNodesAdded.push(...nodesToAdd);
                                             }
                                             if (clusterData && clusterData.edges) {
                                                 const edgesToAdd = clusterData.edges.map(edge => {
                                                     const protocol = edge.data.Protocol || 'Unknown';
-                                                    if (!protocolColorMap[protocol]) { let randomColor; do { randomColor = '#' + Math.floor(Math.random()*0xFFFFFF).toString(16).padStart(6, '0'); } while (randomColor.toLowerCase() === SELECTED_EDGE_COLOR.toLowerCase()); protocolColorMap[protocol] = randomColor; }
+                                                    if (!protocolColorMap[protocol]) {
+                                                        let randomColor;
+                                                        do {
+                                                            randomColor = '#' + Math.floor(Math.random() * 0xFFFFFF).toString(16).padStart(6, '0');
+                                                        } while (randomColor.toLowerCase() === SELECTED_EDGE_COLOR.toLowerCase());
+                                                        protocolColorMap[protocol] = randomColor;
+                                                    }
                                                     const edgeColor = protocolColorMap[protocol] || DEFAULT_UNKNOWN_COLOR;
-                                                    return { group: 'edges', data: { ...edge.data, clusterID: originalLeafId }, style: { 'line-color': edgeColor, 'target-arrow-color': edgeColor }, scratch: { _protocolColor: edgeColor } };
+                                                    return {
+                                                        group: 'edges',
+                                                        data: { ...edge.data,
+                                                            clusterID: originalLeafId
+                                                        },
+                                                        style: {
+                                                            'line-color': edgeColor,
+                                                            'target-arrow-color': edgeColor
+                                                        },
+                                                        scratch: {
+                                                            _protocolColor: edgeColor
+                                                        }
+                                                    };
                                                 });
                                                 allEdgesAdded.push(...edgesToAdd);
                                             }
-                                        } catch (fetchError) { console.error(`Error fetching for ${originalLeafId}:`, fetchError); errorOccurred = true; }
+                                        } catch (fetchError) {
+                                            errorOccurred = true;
+                                        }
                                     }
                                     showSidebarLoading(false, false);
-                                    if (!sidebarCy) { sidebarCy = cytoscape({ container: document.getElementById('sidebar-cy'), style: CYTOSCAPE_STYLE }); bindSidebarGraphEvents(); }
-                                    if (allNodesAdded.length > 0 || allEdgesAdded.length > 0) { 
-                                        sidebarCy.add(allNodesAdded.concat(allEdgesAdded)); 
+                                    if (!sidebarCy) {
+                                        sidebarCy = cytoscape({
+                                            container: document.getElementById('sidebar-cy'),
+                                            style: CYTOSCAPE_STYLE
+                                        });
+                                        bindSidebarGraphEvents();
+                                    }
+                                    if (allNodesAdded.length > 0 || allEdgesAdded.length > 0) {
+                                        sidebarCy.add(allNodesAdded.concat(allEdgesAdded));
                                         addedSidebarClusters.add(clickedClusterOrGroupID);
                                         originalLeaves.forEach(leafId => addedSidebarClusters.add(String(leafId)));
-                                        applySidebarSizeControls(); applySidebarLayout(); sidebarCy.fit(null, 30); sidebarInfoDiv.style.display = 'none'; updateLegend(sidebarCy.edges()); loadSidebarClusterTable(originalLeaves[0], 1); 
-                                    } 
-                                    else if (!errorOccurred) { sidebarInfoDiv.innerHTML = `Group ${clickedClusterOrGroupID}: No network data.`; addedSidebarClusters.add(clickedClusterOrGroupID); loadSidebarClusterTable(originalLeaves[0], 1); } 
-                                    else { sidebarInfoDiv.innerHTML = `Group ${clickedClusterOrGroupID}: Some data could not load.`; if (sidebarCy.elements().length > 0) { addedSidebarClusters.add(clickedClusterOrGroupID); originalLeaves.forEach(leafId => addedSidebarClusters.add(String(leafId))); applySidebarSizeControls(); applySidebarLayout(); sidebarCy.fit(null, 30); updateLegend(sidebarCy.edges()); } loadSidebarClusterTable(originalLeaves[0], 1); }
+                                        applySidebarSizeControls();
+                                        applySidebarLayout();
+                                        sidebarCy.fit(null, 30);
+                                        sidebarInfoDiv.style.display = 'none';
+                                        updateLegend(sidebarCy.edges());
+                                        loadSidebarClusterTable(originalLeaves[0], 1);
+                                    } else if (!errorOccurred) {
+                                        sidebarInfoDiv.innerHTML = `Group ${clickedClusterOrGroupID}: No network data.`;
+                                        addedSidebarClusters.add(clickedClusterOrGroupID);
+                                        loadSidebarClusterTable(originalLeaves[0], 1);
+                                    } else {
+                                        sidebarInfoDiv.innerHTML = `Group ${clickedClusterOrGroupID}: Some data could not load.`;
+                                        if (sidebarCy.elements().length > 0) {
+                                            addedSidebarClusters.add(clickedClusterOrGroupID);
+                                            originalLeaves.forEach(leafId => addedSidebarClusters.add(String(leafId)));
+                                            applySidebarSizeControls();
+                                            applySidebarLayout();
+                                            sidebarCy.fit(null, 30);
+                                            updateLegend(sidebarCy.edges());
+                                        }
+                                        loadSidebarClusterTable(originalLeaves[0], 1);
+                                    }
                                     deselectCurrentNode();
-                                } else { sidebarInfoDiv.innerHTML = `Group ${clickedClusterOrGroupID}: No underlying clusters.`; showSidebarLoading(false, false); }
+                                } else {
+                                    sidebarInfoDiv.innerHTML = `Group ${clickedClusterOrGroupID}: No underlying clusters.`;
+                                    showSidebarLoading(false, false);
+                                }
                             } else {
                                 const targetHighlightColor = generateUniqueHighlightColor();
                                 clusterHighlightColors.set(clickedClusterOrGroupID, targetHighlightColor);
@@ -3859,82 +4010,138 @@
                             }
                         }
                         highlightTreeClusters(new Set(clusterHighlightColors.keys()));
+                        updateSubtreeButtonState(); // Call the new state management function
                     })
                     .on("mouseover", function(event, d_mouseover) {
-                        const cell = d3.select(this); cell.attr('data-hover-temp-stroke', cell.style('stroke')); cell.attr('data-hover-temp-stroke-width', cell.style('stroke-width')); cell.style("stroke", "black").style("stroke-width", 1.5); 
-                        const tooltip = d3.select("#tooltip"); const metricLabel = d_mouseover.feature; const clusterOrGroupId = d_mouseover.cluster_id; const value = d_mouseover.value;
-                        const anomalyStatusCell = d_mouseover.anomaly === 'anomaly' ? 'Anomaly Detected' : 'Normal'; const isGroup = d_mouseover.isGroup; const originalCount = d_mouseover.originalLeavesCount;
-                        let displayValue = 'N/A'; if (value !== null && typeof value === 'number' && isFinite(value)) { if (metricLabel.includes('%')) displayValue = `${value.toFixed(2)}%`; else if (Number.isInteger(value)) displayValue = value.toLocaleString(); else { const valueStr = String(value); displayValue = (valueStr.includes('e') || valueStr.includes('E')) ? value.toExponential(2) : value.toFixed(3); }}
+                        const cell = d3.select(this);
+                        cell.attr('data-hover-temp-stroke', cell.style('stroke'));
+                        cell.attr('data-hover-temp-stroke-width', cell.style('stroke-width'));
+                        cell.style("stroke", "black").style("stroke-width", 1.5);
+                        const tooltip = d3.select("#tooltip");
+                        const metricLabel = d_mouseover.feature;
+                        const clusterOrGroupId = d_mouseover.cluster_id;
+                        const value = d_mouseover.value;
+                        const anomalyStatusCell = d_mouseover.anomaly === 'anomaly' ? 'Anomaly Detected' : 'Normal';
+                        const isGroup = d_mouseover.isGroup;
+                        const originalCount = d_mouseover.originalLeavesCount;
+                        let displayValue = 'N/A';
+                        if (value !== null && typeof value === 'number' && isFinite(value)) {
+                            if (metricLabel.includes('%')) displayValue = `${value.toFixed(2)}%`;
+                            else if (Number.isInteger(value)) displayValue = value.toLocaleString();
+                            else {
+                                const valueStr = String(value);
+                                displayValue = (valueStr.includes('e') || valueStr.includes('E')) ? value.toExponential(2) : value.toFixed(3);
+                            }
+                        }
                         let titleText = isGroup ? `Group: ${clusterOrGroupId} (${originalCount} clusters)` : `Cluster: ${clusterOrGroupId}`;
                         let tooltipHtml = `${titleText}<br>Metric: ${metricLabel}<br>Value: ${displayValue}<br>Status: ${anomalyStatusCell}`;
-                        let clusterAttackTypes = []; if (window.fullHeatmapData && window.fullHeatmapData['Count']) { const clusterEntry = window.fullHeatmapData['Count'].find(entry => String(entry.cluster) === String(clusterOrGroupId)); if (clusterEntry && clusterEntry.ClusterAttackTypes && clusterEntry.ClusterAttackTypes.length > 0) clusterAttackTypes = clusterEntry.ClusterAttackTypes; }
+                        let clusterAttackTypes = [];
+                        if (window.fullHeatmapData && window.fullHeatmapData['Count']) {
+                            const clusterEntry = window.fullHeatmapData['Count'].find(entry => String(entry.cluster) === String(clusterOrGroupId));
+                            if (clusterEntry && clusterEntry.ClusterAttackTypes && clusterEntry.ClusterAttackTypes.length > 0) clusterAttackTypes = clusterEntry.ClusterAttackTypes;
+                        }
                         if (clusterAttackTypes.length > 0) tooltipHtml += `<br><strong style="color:purple;">Cluster Attacks: ${clusterAttackTypes.join(', ')}</strong>`;
                         tooltip.style("display", "block").html(tooltipHtml).style("left", (event.pageX + 10) + "px").style("top", (event.pageY - 15) + "px");
                     })
                     .on("mouseout", function(event, d_mouseout) {
-                        d3.select("#tooltip").style("display", "none"); const cell = d3.select(this);
-                        const originalStroke = cell.attr('data-hover-temp-stroke'); const originalStrokeWidth = cell.attr('data-hover-temp-stroke-width');
-                        if (originalStroke && originalStrokeWidth) { cell.style("stroke", originalStroke).style("stroke-width", originalStrokeWidth); cell.attr('data-hover-temp-stroke', null); cell.attr('data-hover-temp-stroke-width', null); } 
-                        else { const cellClusterIdStr = String(d_mouseout.cluster_id); const userClickedHighlightColor = clusterHighlightColors.get(cellClusterIdStr); cell.style("stroke", userClickedHighlightColor ? userClickedHighlightColor : defaultStrokeColor).style("stroke-width", userClickedHighlightColor ? highlightStrokeWidth : defaultStrokeWidth); }
+                        d3.select("#tooltip").style("display", "none");
+                        const cell = d3.select(this);
+                        const originalStroke = cell.attr('data-hover-temp-stroke');
+                        const originalStrokeWidth = cell.attr('data-hover-temp-stroke-width');
+                        if (originalStroke && originalStrokeWidth) {
+                            cell.style("stroke", originalStroke).style("stroke-width", originalStrokeWidth);
+                            cell.attr('data-hover-temp-stroke', null);
+                            cell.attr('data-hover-temp-stroke-width', null);
+                        } else {
+                            const cellClusterIdStr = String(d_mouseout.cluster_id);
+                            const userClickedHighlightColor = clusterHighlightColors.get(cellClusterIdStr);
+                            cell.style("stroke", userClickedHighlightColor ? userClickedHighlightColor : defaultStrokeColor).style("stroke-width", userClickedHighlightColor ? highlightStrokeWidth : defaultStrokeWidth);
+                        }
                     });
 
                 cellSelection.filter(d_filter_new => d_filter_new.isNew).each(function(dCell_new) {
-                        const cellRect = d3.select(this); const x = parseFloat(cellRect.attr("x")); const y = parseFloat(cellRect.attr("y"));
-                        const width = parseFloat(cellRect.attr("width")); const height = parseFloat(cellRect.attr("height"));
-                        if (!isNaN(x) && !isNaN(y) && !isNaN(width) && !isNaN(height)) { heatmapLineGroup.append("line").attr("class", "new-cluster-indicator").attr("x1", x).attr("y1", y + height + 1).attr("x2", x + width).attr("y2", y + height + 1).attr("stroke", "red").attr("stroke-width", 1.5).attr("data-cluster-ref", dCell_new.cluster_id); }
-                    });
+                    const cellRect = d3.select(this);
+                    const x = parseFloat(cellRect.attr("x"));
+                    const y = parseFloat(cellRect.attr("y"));
+                    const width = parseFloat(cellRect.attr("width"));
+                    const height = parseFloat(cellRect.attr("height"));
+                    if (!isNaN(x) && !isNaN(y) && !isNaN(width) && !isNaN(height)) {
+                        heatmapLineGroup.append("line").attr("class", "new-cluster-indicator").attr("x1", x).attr("y1", y + height + 1).attr("x2", x + width).attr("y2", y + height + 1).attr("stroke", "red").attr("stroke-width", 1.5).attr("data-cluster-ref", dCell_new.cluster_id);
+                    }
+                });
 
                 heatmapLabelGroup.selectAll(".heatmap-feature-label").data(features).join("text").attr("class", "heatmap-feature-label").attr("x", margin.left - 5)
-                    .attr("y", d_label => { const yVal = featureScale(d_label); return (typeof yVal === 'number' && isFinite(yVal)) ? yVal + featureScale.bandwidth() / 2 : -1000; })
+                    .attr("y", d_label => {
+                        const yVal = featureScale(d_label);
+                        return (typeof yVal === 'number' && isFinite(yVal)) ? yVal + featureScale.bandwidth() / 2 : -1000;
+                    })
                     .attr("text-anchor", "end").attr("dominant-baseline", "middle").attr("font-size", "9px").text(d_label => d_label);
                 const metricSelectElement = document.getElementById('dendrogramSortMetricSelect');
                 const selectedMetricValue = metricSelectElement ? metricSelectElement.value : 'Default';
-                const selectedMetricLabelText = metricSelectElement ? metricSelectElement.options[metricSelectElement.selectedIndex].text : null; 
+                const selectedMetricLabelText = metricSelectElement ? metricSelectElement.options[metricSelectElement.selectedIndex].text : null;
                 const featureLabels = heatmapLabelGroup.selectAll(".heatmap-feature-label");
-                featureLabels.style("fill", "#333").style("font-weight", "normal"); 
-                if (selectedMetricValue !== 'Default' && selectedMetricLabelText) { featureLabels.filter(function(d_filter_label) { return d_filter_label === selectedMetricLabelText; }).style("fill", "#4299e1").style("font-weight", "bold"); }
-            } 
-        } 
+                featureLabels.style("fill", "#333").style("font-weight", "normal");
+                if (selectedMetricValue !== 'Default' && selectedMetricLabelText) {
+                    featureLabels.filter(function(d_filter_label) {
+                        return d_filter_label === selectedMetricLabelText;
+                    }).style("fill", "#4299e1").style("font-weight", "bold");
+                }
+            }
+        }
 
-        let dx = 0, dy = 0, initialScale = 1;
-        try { 
-            const bounds = svgContent.node()?.getBBox(); 
+        let dx = 0,
+            dy = 0,
+            initialScale = 1;
+        try {
+            const bounds = svgContent.node()?.getBBox();
             if (bounds && bounds.width > 0 && bounds.height > 0) {
-                const scaleX = viewBoxWidth / bounds.width; const scaleY = viewBoxHeight / bounds.height;
-                initialScale = Math.min(scaleX, scaleY) * 0.95; initialScale = Math.max(0.05, Math.min(initialScale, 5)); 
+                const scaleX = viewBoxWidth / bounds.width;
+                const scaleY = viewBoxHeight / bounds.height;
+                initialScale = Math.min(scaleX, scaleY) * 0.95;
+                initialScale = Math.max(0.05, Math.min(initialScale, 5));
                 dx = (viewBoxWidth / 2) - ((bounds.x + bounds.width / 2) * initialScale);
                 dy = (viewBoxHeight / 2) - ((bounds.y + bounds.height / 2) * initialScale);
-                if(!isFinite(dx)) dx = margin.left; if(!isFinite(dy)) dy = margin.top; if(!isFinite(initialScale) || initialScale <=0) initialScale = 1; 
-            } else { 
-                dx = margin.left; dy = margin.top; initialScale = 1; 
+                if (!isFinite(dx)) dx = margin.left;
+                if (!isFinite(dy)) dy = margin.top;
+                if (!isFinite(initialScale) || initialScale <= 0) initialScale = 1;
+            } else {
+                dx = margin.left;
+                dy = margin.top;
+                initialScale = 1;
             }
-        } catch(e) { 
-            console.error("Error calculating initial zoom transform:", e); dx = margin.left; dy = margin.top; initialScale = 1; 
+        } catch (e) {
+            dx = margin.left;
+            dy = margin.top;
+            initialScale = 1;
         }
         initialTreeTransform = d3.zoomIdentity.translate(dx, dy).scale(initialScale);
-        const zoomBehavior = d3.zoom().scaleExtent([0.05, 10]) 
-            .on("zoom.main", (event) => { 
-                svgContent.attr("transform", event.transform); 
+        const zoomBehavior = d3.zoom().scaleExtent([0.05, 10])
+            .on("zoom.main", (event) => {
+                svgContent.attr("transform", event.transform);
                 const thresholdSliderElem = document.getElementById('thresholdSlider');
-                if (thresholdSliderElem && window.lastTreeRoot && svgContent.node()) { 
-                    requestAnimationFrame(() => { thresholdSliderElem.dispatchEvent(new Event('input')); }); 
-                } else { 
-                    d3.select("#threshold-bar").style("display", "none"); 
+                if (thresholdSliderElem && window.lastTreeRoot && svgContent.node()) {
+                    requestAnimationFrame(() => {
+                        thresholdSliderElem.dispatchEvent(new Event('input'));
+                    });
+                } else {
+                    d3.select("#threshold-bar").style("display", "none");
                 }
             });
-        window.inlineZoom = zoomBehavior; 
-        svg.call(zoomBehavior).call(zoomBehavior.transform, initialTreeTransform).on("dblclick.zoom", null); 
-        if (treeControls) treeControls.style.display = "flex"; 
-        try { 
-            previousClusterCount = leafCount; 
-            previousClusterHash = JSON.stringify(data); 
-        } catch(e) { }
+        window.inlineZoom = zoomBehavior;
+        svg.call(zoomBehavior).call(zoomBehavior.transform, initialTreeTransform).on("dblclick.zoom", null);
+        if (treeControls) treeControls.style.display = "flex";
+        try {
+            previousClusterCount = leafCount;
+            previousClusterHash = JSON.stringify(data);
+        } catch (e) {}
         highlightTreeClusters(new Set(clusterHighlightColors.keys()));
         const initialSlider = document.getElementById('thresholdSlider');
-        if (initialSlider && window.lastTreeRoot && svgContent.node()) { 
-            requestAnimationFrame(() => { initialSlider.dispatchEvent(new Event('input')); }); 
-        } else { 
-            d3.select("#threshold-bar").style("display", "none"); 
+        if (initialSlider && window.lastTreeRoot && svgContent.node()) {
+            requestAnimationFrame(() => {
+                initialSlider.dispatchEvent(new Event('input'));
+            });
+        } else {
+            d3.select("#threshold-bar").style("display", "none");
         }
     }
 
@@ -3993,6 +4200,7 @@
         updateLegend(); // Reset legend to global state (if applicable)
 
         updateControlsState(); // Update button states (Reset should become disabled)
+        updateSubtreeButtonState(); // ADD THIS CALL
 
         console.log("Grouping reset to the original state.");
     }
@@ -4240,6 +4448,7 @@
         }
 
         updateControlsState();
+        updateSubtreeButtonState(); // ADD THIS CALL AT THE END
     }
 
     function highlightTreeClusters(selectedClusterIds = new Set()) {
@@ -5574,6 +5783,35 @@
         }
     }
 
+    function updateTimelineButtonStates() {
+        const applyBtn = document.getElementById('applyTimelineBtn');
+        const resetBtn = document.getElementById('resetTimelineBtn');
+
+        // Ensure buttons and required state variables exist
+        if (!applyBtn || !resetBtn || !window.timelineXScale || !window.currentTimeSelection || !window.lastAppliedTimeSelection) {
+            if(applyBtn) applyBtn.disabled = true;
+            if(resetBtn) resetBtn.disabled = true;
+            return;
+        }
+
+        const fullDomain = window.timelineXScale.domain();
+        const currentSelection = window.currentTimeSelection;
+        const appliedSelection = window.lastAppliedTimeSelection;
+
+        // Check if the current brush selection differs from the last applied selection
+        const currentIsDifferentFromApplied = Math.abs(currentSelection.startTime.valueOf() - appliedSelection.startTime.valueOf()) > 1 ||
+                                              Math.abs(currentSelection.endTime.valueOf() - appliedSelection.endTime.valueOf()) > 1;
+        
+        // Check if the last applied selection is different from the total available time range
+        const appliedIsDifferentFromFull = Math.abs(appliedSelection.startTime.valueOf() - fullDomain[0].valueOf()) > 1 ||
+                                             Math.abs(appliedSelection.endTime.valueOf() - fullDomain[1].valueOf()) > 1;
+
+        // The "Apply" button is active if the brush has moved away from the last applied state.
+        applyBtn.disabled = !currentIsDifferentFromApplied;
+        // The "Reset" button is active if the currently applied filter is not the full timeline.
+        resetBtn.disabled = !appliedIsDifferentFromFull;
+    }
+
     async function drawTimeline() {
         const timelineCard = document.getElementById('timeline-card');
         const timelineContainer = document.getElementById('timeline-container');
@@ -5588,6 +5826,7 @@
         };
 
         timelineContainer.innerHTML = '';
+        window.timelineXScale = null; // Clear any previous timeline scale
 
         try {
             const response = await fetch(`${API_BASE_URL}/timeline_data`);
@@ -5613,8 +5852,10 @@
             const height = 100 - margin.top - margin.bottom;
 
             const svg = d3.select(timelineContainer).append("svg")
-                .attr("width", width + margin.left + margin.right)
-                .attr("height", height + margin.top + margin.bottom);
+                .attr("viewBox", `0 0 ${width + margin.left + margin.right} ${height + margin.top + margin.bottom}`)
+                .attr("preserveAspectRatio", "xMinYMid meet")
+                .style("width", "100%")
+                .style("height", "100%");
 
             const context = svg.append("g")
                 .attr("class", "context")
@@ -5625,6 +5866,8 @@
 
             x.domain(d3.extent(data, d => d.time));
             y.domain([0, Math.max(50000, d3.max(data, d => d.value) || 0)]);
+
+            window.timelineXScale = x; // Make the x-scale globally available
 
             const area = d3.area().curve(d3.curveStep).x(d => x(d.time)).y0(height).y1(d => y(d.value));
 
@@ -5656,28 +5899,33 @@
             const brush = d3.brushX().extent([[0, 0], [width, height]]).on("end", brushended);
             const brushGroup = context.append("g").attr("class", "brush").call(brush);
             
-            brushGroup.call(brush.move, x.range());
-            window.currentTimeSelection = { startTime: x.domain()[0], endTime: x.domain()[1] };
-
             function brushended(event) {
-                if (!event.sourceEvent) return;
+                if (!event.sourceEvent) return; // Ignore programmatic brush moves
                 const selection = event.selection;
                 
                 if (!selection) {
                     window.currentTimeSelection = { startTime: x.domain()[0], endTime: x.domain()[1] };
-                    console.log(`Time window reset to full range.`);
                 } else {
                     const [x0, x1] = selection.map(x.invert);
                     window.currentTimeSelection = { startTime: x0, endTime: x1 };
-                    console.log(`Time window selection updated: ${x0.toISOString()} to ${x1.toISOString()}`);
                 }
+                console.log(`Time window selection updated: ${window.currentTimeSelection.startTime.toISOString()} to ${window.currentTimeSelection.endTime.toISOString()}`);
+                updateTimelineButtonStates(); // Update button states after user finishes brushing
             }
 
             resetBtn.onclick = () => {
-                window.currentTimeSelection = { startTime: x.domain()[0], endTime: x.domain()[1] };
+                // Move brush handles to the full range, which updates the current selection
                 brushGroup.call(brush.move, x.range());
-                updateAllVisualizations();
+                window.currentTimeSelection = { startTime: x.domain()[0], endTime: x.domain()[1] };
+                // Update buttons. "Apply" will become enabled because the brush differs from the last applied state.
+                updateTimelineButtonStates();
             };
+
+            // Initialize the state when the timeline is first drawn
+            brushGroup.call(brush.move, x.range());
+            window.currentTimeSelection = { startTime: x.domain()[0], endTime: x.domain()[1] };
+            window.lastAppliedTimeSelection = { ...window.currentTimeSelection };
+            updateTimelineButtonStates();
 
         } catch (error) {
             console.error("Error drawing timeline:", error);
@@ -5690,6 +5938,9 @@
         try {
             globalAbortController = new AbortController();
             console.log("Updating all visualizations for new time window...");
+
+            // The current brush selection now becomes the officially applied filter
+            window.lastAppliedTimeSelection = { ...window.currentTimeSelection };
 
             // The order is important: update data models first, then render views
             await Promise.all([updateHeatmap(), updateTimeInfoDisplay()]);
@@ -5720,7 +5971,117 @@
                 console.log("Visualization update cancelled.");
             }
         } finally {
+            // Update the button states after the operation completes or is cancelled
+            updateTimelineButtonStates();
             hideLoading();
+        }
+    }
+
+    function updateSubtreeButtonState() {
+        const createBtn = document.getElementById('createSubtreeBtn');
+        if (!createBtn || !window.currentGroupingApplied || !window.lastTreeRoot || isSubtreeViewActive) {
+            if(createBtn) createBtn.style.display = 'none';
+            return;
+        }
+
+        let isGroupSelected = false;
+        if (clusterHighlightColors.size > 0) {
+            const currentLeaves = window.lastTreeRoot.leaves();
+            for (const selectedId of clusterHighlightColors.keys()) {
+                const leafNode = currentLeaves.find(l => String(l.data.cluster_id) === String(selectedId));
+                if (leafNode && leafNode.data.isGroup) {
+                    isGroupSelected = true;
+                    break;
+                }
+            }
+        }
+
+        createBtn.style.display = isGroupSelected ? 'inline-block' : 'none';
+    }
+
+    async function handleCreateSubtree() {
+        if (!window.currentGroupingApplied || !window.lastTreeRoot || clusterHighlightColors.size === 0) {
+            alert("This function requires a grouped tree with at least one group selected.");
+            return;
+        }
+
+        const originalClusterIds = new Set();
+        const currentLeaves = window.lastTreeRoot.leaves();
+
+        for (const selectedId of clusterHighlightColors.keys()) {
+            const leafNode = currentLeaves.find(l => String(l.data.cluster_id) === String(selectedId));
+            if (leafNode && leafNode.data.isGroup && leafNode.data.originalLeaves) {
+                 leafNode.data.originalLeaves.forEach(id => originalClusterIds.add(String(id)));
+            }
+        }
+
+        if (originalClusterIds.size === 0) {
+            alert("No underlying original clusters found for the selected groups.");
+            return;
+        }
+
+        showLoading();
+        try {
+            const response = await fetch(`${API_BASE_URL}/create_subtree`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ original_cluster_ids: Array.from(originalClusterIds) }),
+                signal: globalAbortController.signal
+            });
+
+            if (!response.ok) {
+                const errData = await response.json().catch(() => ({error: `HTTP Error: ${response.status}`}));
+                throw new Error(errData.error);
+            }
+            
+            const subtreeData = await response.json();
+            
+            // Save the current main tree view before switching
+            mainTreeViewBeforeSubtree = window.lastTreeData;
+            isSubtreeViewActive = true;
+
+            // Clear selections before drawing the new tree
+            clearSidebarVisualization();
+
+            // Draw the new subtree
+            showInlineDendrogram(subtreeData, document.getElementById("inline-dendrogram-container").clientHeight);
+
+            // Update UI state for subtree view
+            document.getElementById('treeControls').style.display = 'none';
+            document.getElementById('createSubtreeBtn').style.display = 'none';
+            document.getElementById('backToMainTreeBtn').style.display = 'inline-block';
+
+        } catch (error) {
+            if (error.name !== 'AbortError') {
+                console.error("Error creating subtree:", error);
+                alert(`Failed to create sub-tree: ${error.message}`);
+            }
+        } finally {
+            hideLoading();
+        }
+    }
+
+    function handleBackToMainTree() {
+        if (mainTreeViewBeforeSubtree) {
+            isSubtreeViewActive = false;
+            
+            // Clear selections from the subtree view
+            clearSidebarVisualization();
+
+            // Restore the main tree view
+            showInlineDendrogram(mainTreeViewBeforeSubtree, document.getElementById("inline-dendrogram-container").clientHeight);
+            mainTreeViewBeforeSubtree = null; // Clear the saved state
+
+            // Update UI state back to main view
+            document.getElementById('treeControls').style.display = 'flex';
+            document.getElementById('backToMainTreeBtn').style.display = 'none';
+            updateSubtreeButtonState(); // Check if the create button should be re-enabled
+        } else {
+            // Fallback: If something went wrong, just load the original tree from scratch
+            isSubtreeViewActive = false;
+            loadInlineDendrogram();
+            document.getElementById('treeControls').style.display = 'flex';
+            document.getElementById('backToMainTreeBtn').style.display = 'none';
         }
     }
 

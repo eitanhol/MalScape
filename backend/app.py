@@ -185,6 +185,76 @@ def load_attack_data(filename: str = "GroundTruth.csv", start_time_filter_str: s
     
     return attack_details_map, attack_timeframes_list, attacking_sources_set
 
+def generate_tree_from_df(df_input, resolution=2.5, is_subtree=False):
+    """
+    Generates a hierarchical tree dictionary from a given DataFrame.
+    This function encapsulates the logic for clustering, statistics calculation,
+    and tree structure generation.
+    """
+    if df_input.empty:
+        return {"id": "empty_root_no_data", "dist": 0, "no_tree": True, "error": "No data provided for tree generation"}
+
+    # Use the original ClusterID for sub-trees, or compute a new one for main trees
+    cluster_col_name = 'ClusterID' if is_subtree else 'DendroClusterID'
+    
+    if not is_subtree:
+        # For main trees, perform Louvain clustering to get fresh cluster IDs for the dendrogram
+        try:
+            cols_for_clustering = ['Source', 'Destination', 'processCount']
+            node_cluster_map = compute_clusters(df_input[cols_for_clustering], resolution=resolution)
+            df_input[cluster_col_name] = df_input["Source"].astype(str).map(node_cluster_map).fillna('N/A')
+        except Exception as e:
+            logging.error(f"Error during clustering in generate_tree_from_df: {e}", exc_info=True)
+            return {"id": "error_root", "dist": 0, "error": f"Failed to cluster: {str(e)}", "no_tree": True}
+    
+    # Calculate Cluster Entropy
+    cluster_entropy_map = {}
+    valid_clusters_df = df_input[df_input[cluster_col_name] != 'N/A']
+    if not valid_clusters_df.empty:
+        for cluster_id_val, group in valid_clusters_df.groupby(cluster_col_name, observed=True):
+            entropies = [compute_entropy(group[col].dropna()) for col in ["Protocol", "SourcePort", "DestinationPort"] if col in group and not group[col].dropna().empty]
+            valid_entropies = [e for e in entropies if pd.notna(e) and np.isfinite(e) and e > 0]
+            cluster_entropy_map[cluster_id_val] = np.mean(valid_entropies) if valid_entropies else 0.0
+    df_input["ClusterEntropy"] = df_input[cluster_col_name].map(cluster_entropy_map).fillna(0.0)
+
+    # Check for sufficient clusters to build a tree
+    if df_input[cluster_col_name].nunique(dropna=False) <= 1:
+        single_cluster_id = "N/A"
+        if df_input[cluster_col_name].nunique() == 1:
+            single_cluster_id = df_input[cluster_col_name].unique()[0]
+        return {"id": f"Cluster {single_cluster_id}", "cluster_id": str(single_cluster_id), "dist": 0, "is_minimal": True, "children": []}
+
+    # Aggregate stats for linkage
+    stats = (df_input[df_input[cluster_col_name] != 'N/A']
+             .groupby(cluster_col_name, observed=True)
+             .agg(avg_entropy=('ClusterEntropy', 'mean'),
+                  total_packets=('processCount', 'sum'))
+             .reset_index()
+             .rename(columns={cluster_col_name: 'ClusterID'}))
+
+    if stats.empty or stats.shape[0] < 2:
+        return {"id": "empty_root_no_valid_stats", "dist": 0, "no_tree": True, "error": "No valid clusters for statistics"}
+
+    stats = stats.sort_values(by='ClusterID', key=lambda x: x.astype(str)).reset_index(drop=True)
+    linkage_data = stats[['total_packets', 'avg_entropy']].to_numpy()
+
+    try:
+        Z = linkage(linkage_data, method='average', metric='euclidean')
+        root_node_obj, _ = to_tree(Z, rd=True)
+    except Exception as e:
+        return {"id": "error_scipy_tree", "dist": 0, "error": f"Hierarchical clustering failed: {str(e)}", "no_tree": True}
+
+    def node_to_dict_local(node):
+        if node.is_leaf():
+            cluster_id_val = str(stats.loc[node.id, 'ClusterID'])
+            return {"id": f"Cluster {cluster_id_val}", "cluster_id": cluster_id_val, "dist": float(node.dist)}
+        else:
+            left_child = node_to_dict_local(node.get_left()) if node.get_left() else None
+            right_child = node_to_dict_local(node.get_right()) if node.get_right() else None
+            children = [c for c in [left_child, right_child] if c is not None]
+            return {"id": f"Internal_{node.id}_dist{node.dist:.2f}", "dist": float(node.dist), "children": children}
+            
+    return node_to_dict_local(root_node_obj)
 
 def prepare_dataframe_from_upload(df: pd.DataFrame):
     """
@@ -807,119 +877,73 @@ def hierarchical_clusters():
         logging.warning("/hierarchical_clusters called but global_df is None or empty.")
         return jsonify({"id": "empty_root_no_data", "dist": 0, "no_tree": True, "error": "No data loaded"}), 200
 
-    # Apply time filter from GET request args
     df_for_dendro = apply_time_filter(global_df.copy(), request)
 
     if df_for_dendro.empty:
         logging.warning("DataFrame is empty after time filter in /hierarchical_clusters.")
         return jsonify({"id": "empty_root_no_data_in_range", "dist": 0, "no_tree": True, "error": "No data in selected time range"}), 200
 
-    resolution = 2.5 
+    resolution = 2.5
     try:
         resolution_param = request.args.get("resolution")
         if resolution_param is not None:
-            new_resolution = float(resolution_param)
-            if new_resolution <= 0:
-                logging.warning(f"Invalid resolution {new_resolution}, using default 2.5.")
-            else:
-                resolution = new_resolution
-                logging.info(f"Using custom resolution for hierarchical_clusters: {resolution}")
-    except (TypeError, ValueError) as e:
-        logging.warning(f"Invalid resolution parameter in hierarchical_clusters, using default 2.5: {e}")
+            resolution = float(resolution_param)
+    except (TypeError, ValueError):
+        pass # Use default
+
+    tree_dict = generate_tree_from_df(df_for_dendro, resolution=resolution, is_subtree=False)
     
-    try:
-        if 'Source' in df_for_dendro.columns:
-            df_for_dendro['Source'] = df_for_dendro['Source'].astype(str).str.strip()
-        if 'Destination' in df_for_dendro.columns:
-            df_for_dendro['Destination'] = df_for_dendro['Destination'].astype(str).str.strip()
+    # This logic remains here because it maps the newly generated DendroClusterID back to the original ClusterID
+    # which is only necessary for the main tree view, not sub-trees.
+    if 'DendroClusterID' in df_for_dendro.columns and 'ClusterID' in df_for_dendro.columns:
+        dendro_to_global_map = df_for_dendro.groupby('DendroClusterID')['ClusterID'].unique().apply(list).to_dict()
+        def embed_original_clusters(node):
+            if 'cluster_id' in node: # Leaf node
+                node['original_clusters'] = dendro_to_global_map.get(node['cluster_id'], [])
+            if 'children' in node:
+                aggregated_originals = []
+                for child in node['children']:
+                    embed_original_clusters(child)
+                    if child.get('original_clusters'):
+                        aggregated_originals.extend(child['original_clusters'])
+                node['original_clusters'] = list(set(aggregated_originals))
+        embed_original_clusters(tree_dict)
 
-        cols_for_dendro_clustering = ['Source', 'Destination']
-        if 'processCount' in df_for_dendro.columns:
-            cols_for_dendro_clustering.append('processCount')
-        
-        # This function is defined in the source code
-        from __main__ import compute_clusters, compute_entropy 
-        node_cluster_map_dendro = compute_clusters(df_for_dendro[cols_for_dendro_clustering], resolution=resolution)
-        df_for_dendro["DendroClusterID"] = df_for_dendro["Source"].astype(str).map(node_cluster_map_dendro).fillna('N/A')
-        
-        cluster_entropy_map_dendro = {}
-        if "DendroClusterID" in df_for_dendro.columns and not df_for_dendro.empty:
-            valid_dendro_clusters_df = df_for_dendro[df_for_dendro['DendroClusterID'] != 'N/A']
-            if not valid_dendro_clusters_df.empty:
-                for cluster_id_val, group in valid_dendro_clusters_df.groupby("DendroClusterID", observed=True):
-                    entropies = []
-                    if "Protocol" in group.columns and not group["Protocol"].dropna().empty: entropies.append(compute_entropy(group["Protocol"].dropna()))
-                    if "SourcePort" in group.columns and not group["SourcePort"].dropna().empty: entropies.append(compute_entropy(group["SourcePort"].astype(str).dropna()))
-                    if "DestinationPort" in group.columns and not group["DestinationPort"].dropna().empty: entropies.append(compute_entropy(group["DestinationPort"].astype(str).dropna()))
-                    valid_entropies = [e for e in entropies if pd.notna(e) and np.isfinite(e) and e > 0]
-                    cluster_entropy_map_dendro[cluster_id_val] = np.mean(valid_entropies) if valid_entropies else 0.0
-        df_for_dendro["DendroClusterEntropy"] = df_for_dendro["DendroClusterID"].map(cluster_entropy_map_dendro).fillna(0.0)
-        
-        logging.info(f"Computed local clusters for hierarchical view. Resolution {resolution}. {df_for_dendro['DendroClusterID'].nunique(dropna=False)} unique DendroClusterIDs.")
-
-    except Exception as e:
-        logging.error(f"Error during local re-clustering or feature calculation in /hierarchical_clusters: {e}", exc_info=True)
-        return jsonify({"id": "error_root", "dist": 0, "error": f"Failed to recluster or recalculate features: {str(e)}", "no_tree": True}), 500
-
-    if 'DendroClusterID' not in df_for_dendro.columns or df_for_dendro['DendroClusterID'].nunique(dropna=False) <= 1:
-        logging.warning("Not enough valid DendroClusterIDs for hierarchical clustering.")
-        # Return a minimal structure if only one cluster exists
-        if not df_for_dendro.empty and 'DendroClusterID' in df_for_dendro.columns:
-             single_cluster_id = df_for_dendro['DendroClusterID'].unique()[0]
-             return jsonify({"id": f"Cluster {single_cluster_id}", "cluster_id": str(single_cluster_id), "dist": 0, "is_minimal": True, "children": [] })
-        return jsonify({"id": "empty_root_no_clusters", "dist": 0, "no_tree": True, "error": "No valid clusters found for dendrogram"}), 200
-
-    agg_dict = {'avg_entropy': ('DendroClusterEntropy', 'mean')}
-    if 'processCount' in df_for_dendro.columns:
-        agg_dict['total_packets'] = ('processCount', 'sum')
-    else:
-        agg_dict['total_packets'] = ('DendroClusterID', 'size')
-
-    stats = (
-        df_for_dendro[df_for_dendro['DendroClusterID'] != 'N/A']
-        .groupby('DendroClusterID', observed=True)
-        .agg(**agg_dict)
-        .reset_index()
-    )
-    stats.rename(columns={'DendroClusterID': 'ClusterID'}, inplace=True)
-    stats['avg_entropy'] = stats['avg_entropy'].fillna(0.0)
-    stats['total_packets'] = stats['total_packets'].fillna(0).astype(int)
-
-    if stats.empty or stats.shape[0] < 2:
-        logging.warning(f"Not enough distinct dendro-clusters ({len(stats)}) to perform hierarchical clustering.")
-        if not stats.empty:
-            cluster_id_val = str(stats.loc[0, 'ClusterID'])
-            return jsonify({"id": f"Cluster {cluster_id_val}", "cluster_id": cluster_id_val, "dist": 0, "is_minimal": True, "children": [] })
-        return jsonify({"id": "empty_root_no_valid_stats", "dist": 0, "no_tree": True, "error": "No valid clusters for statistics"}), 200
-    
-    stats = stats.sort_values(by='ClusterID', key=lambda x: x.astype(str)).reset_index(drop=True)
-    linkage_data = stats[['total_packets', 'avg_entropy']].to_numpy()
-    
-    try:
-        Z = linkage(linkage_data, method='average', metric='euclidean') 
-        root_node_obj, _ = to_tree(Z, rd=True)
-    except Exception as e:
-        logging.error(f"Error during SciPy hierarchical clustering: {e}", exc_info=True)
-        return jsonify({"id": "error_scipy_tree", "dist": 0, "error": f"Hierarchical clustering failed: {str(e)}", "no_tree": True}), 500
-
-    def node_to_dict(node):
-        if node.is_leaf():
-            try:
-                cluster_id_val = str(stats.loc[node.id, 'ClusterID']) 
-                return {"id": f"Cluster {cluster_id_val}", "cluster_id": cluster_id_val, "dist": float(node.dist)}
-            except (IndexError, KeyError) as err:
-                logging.error(f"Error accessing stats for leaf node.id={node.id}. Error: {err}")
-                return {"id": f"ErrorLeaf_{node.id}", "cluster_id": "ERROR_ID", "dist": float(node.dist)}
-        else:
-            left_child_dict = node_to_dict(node.get_left()) if node.get_left() else None
-            right_child_dict = node_to_dict(node.get_right()) if node.get_right() else None
-            children_list = [c for c in [left_child_dict, right_child_dict] if c is not None]
-            internal_node_id = f"Internal_{node.id}_dist{node.dist:.2f}"
-            return {"id": internal_node_id, "dist": float(node.dist), "children": children_list}
-
-    tree_dict = node_to_dict(root_node_obj)
-    logging.info(f"Hierarchical tree_dict generated. Root ID: {tree_dict.get('id')}")
     return jsonify(tree_dict)
+
+@app.route('/create_subtree', methods=['POST'])
+def create_subtree():
+    """
+    Creates a new hierarchical tree and heatmap from a specific subset of original clusters.
+    """
+    global global_df
+    if global_df is None or global_df.empty:
+        return jsonify({"error": "No data loaded on the server."}), 400
+
+    data = request.get_json()
+    original_cluster_ids = data.get("original_cluster_ids")
+
+    if not original_cluster_ids or not isinstance(original_cluster_ids, list):
+        return jsonify({"error": "A list of 'original_cluster_ids' is required."}), 400
+
+    logging.info(f"Received request to create subtree from {len(original_cluster_ids)} original clusters.")
+
+    # Ensure IDs are strings for matching with DataFrame's string-based category
+    str_ids = [str(cid) for cid in original_cluster_ids]
+    
+    # Filter the main DataFrame to get only the rows belonging to the selected original clusters
+    # Use the original 'ClusterID' column for filtering.
+    df_subset = global_df[global_df['ClusterID'].astype(str).isin(str_ids)].copy()
+
+    if df_subset.empty:
+        logging.warning("No data found for the provided original cluster IDs.")
+        return jsonify({"id": "empty_root_no_data", "dist": 0, "no_tree": True, "error": "No data found for the provided cluster IDs."})
+
+    # Generate a new tree from this subset. We pass `is_subtree=True` to signal
+    # that we should use the existing 'ClusterID' column for leaf nodes.
+    subtree_dict = generate_tree_from_df(df_subset, is_subtree=True)
+    
+    return jsonify(subtree_dict)
 
 @app.route('/louvain_ip_graph_data', methods=['GET'])
 def louvain_ip_graph_data():
