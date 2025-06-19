@@ -1,0 +1,643 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; padding: 0; font-family: 'Inter', sans-serif; color: #333; background-color: #f8f9fa; overflow-x: hidden; }
+body { display: flex; }
+
+#legend-container {
+    width: 220px;
+    background-color: #fff;
+    border-right: 1px solid #dee2e6;
+    padding: 16px 12px;
+    height: 100vh;
+    overflow-y: auto;
+    box-shadow: 2px 0 5px rgba(0,0,0,0.1);
+    position: fixed;
+    left: -220px; /* Initially hidden */
+    top: 0;
+    z-index: 1050;
+    transition: left 0.3s ease;
+}
+#legend-container.visible {
+    left: 0;
+}
+
+#sidebar {
+    width: 0; /* Initially hidden */
+    height: 100vh;
+    background-color: #f1f3f5;
+    border-right: 1px solid #dee2e6;
+    padding: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    transition: width 0.3s ease, padding 0.3s ease, left 0.3s ease, background-color 0.3s ease;
+    position: fixed;
+    top: 0;
+    left: 0; /* Will be adjusted by legend visibility */
+    box-shadow: 2px 0 5px rgba(0,0,0,0.1);
+    z-index: 1100;
+    display: flex;
+    flex-direction: column;
+}
+#sidebar.open {
+    width: 500px;
+    padding: 20px;
+    left: 220px; /* When legend is visible */
+}
+#sidebar-content {
+    opacity: 0;
+    transition: opacity 0.3s ease 0.1s;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    position: relative;
+}
+#sidebar.open #sidebar-content {
+    opacity: 1;
+    overflow: visible;
+}
+#sidebar-cy {
+    width: 100%;
+    height: 40%; /* Initial height, can be overridden in fullscreen */
+    min-height: 250px;
+    border: 1px solid #ced4da;
+    border-radius: 6px;
+    background-color: #fff;
+    margin-top: 10px;
+    flex-shrink: 0;
+}
+
+#sidebar-toggle {
+    position: fixed;
+    top: 50%;
+    left: 0px; /* Start at edge */
+    transform: translateY(-50%);
+    z-index: 1200;
+    background-color: #4299e1;
+    color: white;
+    border: none;
+    padding: 15px 8px;
+    border-radius: 0 6px 6px 0;
+    cursor: pointer;
+    font-size: 18px;
+    line-height: 1;
+    box-shadow: 1px 1px 4px rgba(0,0,0,0.2);
+    transition: background-color 0.2s ease, left 0.3s ease;
+    writing-mode: vertical-rl;
+    text-orientation: mixed;
+}
+#sidebar-toggle:hover {
+    background-color: #3182ce;
+}
+
+#main-container {
+    flex: 1;
+    padding: 24px;
+    height: 100vh;
+    overflow-y: auto;
+    transition: margin-left 0.3s ease;
+    margin-left: 0px; /* Adjusted by JS based on sidebar state */
+    padding-left: 40px; /* Space for the toggle button */
+}
+
+/* General Element Styling */
+h2 { color: #2c3e50; margin-top: 0; margin-bottom: 24px; font-size: 28px; font-weight: 600; border-bottom: 2px solid #4299e1; padding-bottom: 8px; display: inline-block; }
+h3 { color: #2c3e50; font-size: 16px; margin-top: 0; margin-bottom: 12px; font-weight: 600; }
+#sidebar h3 { font-size: 18px; margin-bottom: 10px; flex-shrink: 0; }
+
+.control-group { margin-bottom: 20px; padding: 16px; background-color: #fff; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+.sidebar-control {
+    padding: 8px 0;
+    margin-bottom: 5px;
+    background: none;
+    box-shadow: none;
+    border-radius: 0;
+    flex-shrink: 0;
+}
+.sidebar-control label {
+    font-size: 13px;
+    margin-right: 5px;
+}
+
+mark {
+    background-color: yellow;
+    color: black;
+    padding: 0.1em;
+    border-radius: 3px;
+}
+
+label { display: inline-block; margin-right: 8px; font-weight: 500; color: #4a5568; }
+input[type="text"], input[type="file"], input[type="range"], select, input[type="number"] {
+    padding: 8px 12px;
+    border: 1px solid #cbd5e0;
+    border-radius: 4px;
+    font-family: 'Inter', sans-serif;
+    font-size: 14px;
+    margin-right: 12px;
+    margin-bottom: 8px;
+    transition: border-color 0.2s;
+    vertical-align: middle; /* Added for better alignment */
+}
+input[type="checkbox"] {
+    vertical-align: middle;
+    margin-right: 4px;
+}
+input[type="text"]:focus, input[type="range"]:focus, select:focus, input[type="number"]:focus {
+    border-color: #4299e1;
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(66,153,225,0.15);
+}
+button {
+    background-color: #4299e1;
+    color: white;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 4px;
+    font-family: 'Inter', sans-serif;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background-color 0.2s;
+    margin-right: 8px;
+    vertical-align: middle; /* Added for better alignment */
+}
+button:hover { background-color: #3182ce; }
+
+#loadMoreBtn { display: none; margin-top: 16px; background-color: #38a169; }
+#loadMoreBtn:hover { background-color: #2f855a; }
+#cy { width: 100%; height: 600px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin-top: 24px; margin-bottom: 24px; background-color: #fff; display: none; }
+
+/* Table Styling */
+#table-container, #sidebar-table-container {
+    margin-top: 15px; /* Consistent margin */
+    margin-bottom: 15px;
+    border-radius: 8px; /* Consistent radius */
+    background-color: #fff;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    display: none; /* Initially hidden */
+    overflow: auto; /* Changed from overflow-y for potential wide tables */
+    border: 1px solid #dee2e6; /* Added border for definition */
+}
+#table-container { max-height: 300px; } /* For main table */
+#sidebar-table-container { flex-grow: 1; position: relative; } /* For sidebar table */
+
+#table-container table, #sidebar-table-container table { width: 100%; border-collapse: collapse; table-layout: auto; }
+
+#table-container th, #table-container td { padding: 12px 15px; border-bottom: 1px solid #e9ecef; text-align: left; white-space: nowrap; }
+
+#sidebar-table-container th {
+    background-color: #f1f3f5;
+    padding: 8px 10px;
+    text-align: left;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    border-bottom: 2px solid #dee2e6;
+    font-weight: 600;
+    white-space: nowrap;
+    font-size: 11px;
+}
+#sidebar-table-container td {
+    padding: 8px 10px;
+    white-space: normal;
+    word-break: break-word;
+    border: none;
+    border-bottom: 1px solid #e9ecef;
+    vertical-align: top;
+    line-height: 1.4;
+    font-size: 11px;
+}
+#sidebar-table-container tr:last-child td { border-bottom: none; }
+#sidebar-table-container tbody tr:nth-child(even) { background-color: #f8f9fa; }
+#sidebar-table-container tbody tr:hover { background-color: #e9ecef; cursor: pointer; }
+#sidebar-table-container th, #sidebar-table-container td { min-width: 120px; word-break: break-word; } /* Adjusted min-width */
+
+
+#table-pagination, #sidebar-table-pagination { display: none; margin-top: 8px; text-align: center; flex-shrink: 0;}
+#table-pagination input, #sidebar-table-pagination input { width: 60px; text-align: center; }
+#sidebar-table-pagination button { padding: 4px 8px; font-size: 12px; }
+#sidebar-table-pagination input { width: 45px; font-size: 12px; padding: 4px 6px; }
+
+
+#sidebar-table-no-results { text-align: center; padding: 10px; color: #6c757d; display: none; }
+#tooltip { 
+    position: absolute; 
+    display: none; 
+    background: rgba(255, 255, 255, 0.95); 
+    border-radius: 4px; 
+    padding: 8px 12px; 
+    font-size: 13px; 
+    color: #2d3748; 
+    pointer-events: none; 
+    z-index: 2100; 
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15); 
+    max-width: 300px; 
+    line-height: 1.5; 
+    border: 1px solid #dee2e6; 
+}        
+.color-box { display: inline-block; width: 12px; height: 12px; vertical-align: middle; margin-right: 4px; border: 1px solid #ccc; }
+
+/* Legend Styling */
+#legend { font-size: 12px; line-height: 1.4; table-layout: fixed; width: 100%;}
+#legend th, #legend td { padding: 4px 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;}
+#legend td:first-child, #legend th:first-child { width: 45%; }
+#legend td:nth-child(2), #legend th:nth-child(2) { width: 25%; }
+#legend td:last-child, #legend th:last-child { width: 30%; text-align: right;}
+
+#backToHeatmap { margin: 20px 0; padding: 8px 16px; font-size: 14px; display: none; }
+
+/* Edge Filter Panel */
+#edgeFilterPanel { position: absolute; top: 80px; right: 20px; width: 320px; padding: 12px; background-color: #fff; border: 1px solid #e2e8f0; border-radius: 6px; box-shadow: 0 2px 6px rgba(0,0,0,0.1); display: none; z-index: 999; }
+#edgeFilterPanel h4 { margin-top: 0; margin-bottom: 8px; font-size: 16px; font-weight: 600; color: #2c3e50; }
+#edgeFilterPanel label { display: block; margin-top: 8px; font-weight: 500; color: #4a5568; }
+#edgeFilterPanel input { margin-bottom: 8px; width: 100%; }
+
+/* Loading Overlay */
+#loading-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(255,255,255,0.8); z-index: 3000; display: none; align-items: center; justify-content: center; flex-direction: column; }
+.spinner { border: 8px solid #f3f3f3; border-top: 8px solid #4299e1; border-radius: 50%; width: 60px; height: 60px; animation: spin 1s linear infinite; margin-bottom: 16px; }
+.loading-text { font-size: 18px; color: #333; }
+@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+/* Sidebar Specific Buttons */
+#resetSidebarBtn { background-color: #6c757d; margin-top: 5px; margin-bottom: 10px; width: 100%; flex-shrink: 0; }
+#resetSidebarBtn:hover { background-color: #5a6268; }
+#sidebar-table-search-container { padding: 10px 0 5px 0; flex-shrink: 0; display: none; }
+#sidebar-table-search-container label { font-weight: 600; font-size: 13px; margin-right: 5px; }
+#sidebarTableSearchInput { width: calc(100% - 100px); padding: 5px 8px; font-size: 12px; margin-right: 0; }
+
+
+/* Sidebar Fullscreen Styles */
+#sidebarFullscreenBtn {
+    position: absolute;
+    top: 5px;
+    right: 10px;
+    width: auto;
+    padding: 4px 8px;
+    font-size: 18px;
+    line-height: 1;
+    z-index: 1150;
+    background-color: #6c757d;
+    color: white;
+    border: 1px solid #5a6268;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background-color 0.2s ease, border-color 0.2s ease;
+    margin: 0;
+}
+#sidebarFullscreenBtn:hover { background-color: #5a6268; border-color: #4e555b; }
+
+#legend-container.fullscreen-active {
+    display: block !important; position: fixed !important; left: 0 !important; top: 0 !important;
+    height: 100vh !important; width: 220px !important;
+    z-index: 1999 !important;
+    box-shadow: 2px 0 5px rgba(0,0,0,0.1); border-right: 1px solid #dee2e6;
+    background-color: #fff; overflow-y: auto;
+}
+
+#sidebar.fullscreen {
+    padding: 10px !important;
+    position: fixed !important; top: 0 !important; 
+    left: 220px !important;
+    width: calc(100vw - 220px) !important;
+    height: 100vh !important;
+    border-right: none !important;
+    z-index: 2000 !important;
+    overflow: hidden !important;
+}
+#sidebar.fullscreen #sidebar-content {
+    flex-direction: column;
+    gap: 10px;
+}
+#sidebar.fullscreen #sidebar-cy {
+    flex: 1 1 60%; 
+    min-height: 150px !important; height: 100% !important; 
+    margin-top: 0 !important; border-radius: 6px; border: 1px solid #dee2e6;
+}
+#sidebar.fullscreen #sidebar-table-container {
+    flex: 1 1 40%; 
+    min-height: 100px; height: 100% !important; 
+    margin-top: 0 !important; display: flex !important; flex-direction: column;
+    border-radius: 6px; border: 1px solid #dee2e6;
+}
+#sidebar.fullscreen #sidebar-table-container table {
+    flex-grow: 1; 
+    display: block; 
+    overflow-y: auto;
+}
+#sidebar.fullscreen #sidebar-table-search-container { display: block !important; visibility: visible !important; padding-bottom: 10px; }
+#sidebar.fullscreen #sidebar-table-pagination { display: block !important; padding-top: 5px; }
+#sidebar.fullscreen h3,
+#sidebar.fullscreen #resetSidebarBtn,
+#sidebar.fullscreen #sidebar-info,
+#sidebar.fullscreen .sidebar-control /* Hides layout select in fullscreen */
+ { display: none !important; visibility: hidden !important; }
+
+#sidebar.fullscreen #saveSelectionBtn {
+    padding: 5px 10px;
+    font-size: 12px;
+    width: auto;
+}
+
+body.sidebar-fullscreen #main-container,
+body.sidebar-fullscreen #sidebar-toggle { display: none !important; visibility: hidden !important; }
+
+/* --- Dendrogram Card and Controls CSS --- */
+#dendrogramCard {
+    display: none; /* Initially hidden */
+    background: #fff;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    padding: 20px;
+    border-radius: 12px;
+    margin: 20px 0;
+    border: 1px solid #e2e8f0;
+}
+
+#dendrogramCard .dendro-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 10px;
+}
+
+#dendrogramCard .dendro-header h3 { /* Target h3 within .dendro-header */
+    margin-bottom: 0;
+}
+
+#dendrogramCard .dendro-header button { /* Styles for Reset Zoom button in this header */
+    padding: 6px 12px;
+    margin-left: auto;
+    background-color: #6c757d;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    font-family: 'Inter', sans-serif;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background-color 0.2s;
+    /* Ensure this doesn't conflict with general button styles by being more specific if needed */
+}
+#dendrogramCard .dendro-header button:hover {
+    background-color: #5a6268;
+}
+
+#inline-dendrogram-container {
+    margin-bottom: 10px;
+    width: 100%;
+    height: 400px; /* Default height, JS can override */
+    overflow: hidden;
+    border: 1px solid #dee2e6;
+    border-radius: 6px;
+    position: relative;
+}
+
+#inlineDendrogramSvg {
+    width: 100%;
+    height: 100%;
+    display: block;
+    cursor: grab;
+}
+#inlineDendrogramSvg:active {
+    cursor: grabbing;
+}
+
+#treeControls.tree-controls-sections {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 0px;
+    padding-top: 10px;
+    margin-top: 15px;
+    border-top: 1px solid #e2e8f0;
+}
+
+.control-section {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 15px;
+    border-right: 1px solid #e2e8f0;
+    flex-basis: auto; /* Let content size influence basis */
+    /* flex-grow is set per child below */
+}
+.control-section:last-child {
+    border-right: none;
+}
+
+/* Adjust flex-grow for better distribution */
+#treeControls.tree-controls-sections .control-section:nth-child(1) { /* Order Heatmap By */
+    flex-grow: 3; /* Takes more relative space */
+    min-width: 280px; /* Example min-width */
+}
+#treeControls.tree-controls-sections .control-section:nth-child(2) { /* Louvain Resolution */
+    flex-grow: 2; /* Takes less relative space */
+    min-width: 240px; /* Example min-width */
+}
+#treeControls.tree-controls-sections .control-section:nth-child(3) { /* Threshold options */
+    flex-grow: 4; /* Takes most relative space */
+    min-width: 320px; /* Example min-width */
+}
+
+
+.control-section label {
+    margin-bottom: 0;
+    white-space: nowrap;
+    font-weight: 500;
+    color: #4a5568;
+}
+
+.control-section input[type="number"],
+.control-section select {
+    padding: 6px 8px; /* Consistent padding */
+    border: 1px solid #cbd5e0;
+    border-radius: 4px;
+    font-family: 'Inter', sans-serif;
+    font-size: 14px;
+    margin-bottom: 0; /* Override default if any */
+    vertical-align: middle;
+}
+
+.control-section input[type="number"] {
+    width: 70px; /* Specific width for resolution input */
+}
+.control-section input[type="range"]{ /* Specific styling for range slider in sections */
+    margin-right: 5px; /* Reduce margin if needed */
+    padding: 0; /* Range inputs often don't need padding */
+}
+ #thresholdValue { /* For the percentage span */
+    min-width: 35px;
+    display: inline-block;
+    text-align: right;
+    font-size: 14px;
+    vertical-align: middle;
+}
+
+
+.control-section input[type="checkbox"] {
+    vertical-align: middle;
+    margin-right: 4px;
+}
+.control-section input[type="checkbox"] + label {
+    font-weight: normal;
+    font-size: 13px;
+    color: #4a5568; /* Ensure label color consistency */
+}
+
+.control-section button {
+    background-color: #4299e1;
+    color: white;
+    border: none;
+    padding: 6px 12px; /* Consistent padding */
+    border-radius: 4px;
+    font-family: 'Inter', sans-serif;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background-color 0.2s;
+    margin-bottom: 0; /* Override default if any */
+    vertical-align: middle;
+}
+.control-section button:hover {
+    background-color: #3182ce;
+}
+.control-section #resetGroupingBtn {
+    background-color: #f56565;
+}
+.control-section #resetGroupingBtn:hover {
+    background-color: #e53e3e;
+}
+
+#reclusterMessage {
+    color: #e53e3e;
+    font-size: 13px;
+    margin-top: 10px; /* Adjusted margin */
+    width: 100%;
+    font-weight: 500;
+    min-height: 1em; /* Prevent layout shift */
+}
+
+/* Disabled states for controls within treeControls */
+#treeControls .control-section button:disabled,
+#treeControls .control-section input:disabled,
+#treeControls .control-section select:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+#treeControls .control-section button:disabled {
+    background-color: #a0aec0 !important; /* Use important if needed to override general button style */
+}
+#treeControls .control-section button:disabled:hover {
+    background-color: #a0aec0 !important;
+}
+#treeControls .control-section input:disabled {
+    background-color: #e9ecef; /* Lighter background for disabled input */
+}
+
+
+/* Dendrogram SVG specific styles */
+.node--leaf circle { fill: #999; stroke: none; }
+.node--internal circle { fill: #555; stroke: none; }
+.node--group circle { fill: #a0a0a0; stroke: #555; stroke-width: 1px; }
+.link { fill: none; stroke: #ccc; stroke-width: 1.5px; }
+.node--leaf circle.highlighted { r: 6 !important; stroke: #555; stroke-width: 0.5px; /* Color set by JS */ }
+.node.grayed-out > circle { fill: #d3d3d3 !important; stroke: #bbb !important; opacity: 0.6; }
+.node.grayed-out > text { fill: #aaa !important; opacity: 0.7; }
+#threshold-bar { stroke: rgba(220, 53, 69, 0.7); stroke-width: 2; stroke-dasharray: 5 3; pointer-events: none; }
+.heatmap-cell { cursor: pointer; stroke: #fff; stroke-width: 0.2; /* Default, JS overrides */ }
+.heatmap-feature-label { font-size: 9px; fill: #333; text-anchor: end; dominant-baseline: middle; }
+
+/* Responsive adjustments for Dendrogram Controls */
+@media (max-width: 1200px) { /* Broader breakpoint for stacking sections earlier */
+    #treeControls.tree-controls-sections {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    .control-section {
+        border-right: none;
+        border-bottom: 1px solid #e2e8f0;
+        padding: 10px;
+        flex-basis: auto !important; /* Reset basis */
+        flex-grow: 1 !important;    /* Allow all to grow equally when stacked */
+        min-width: 0 !important;     /* Reset min-width */
+        flex-wrap: wrap; /* Allow items within section to wrap */
+    }
+    .control-section:last-child { border-bottom: none; }
+}
+
+@media (max-width: 768px) {
+    #dendrogramCard .dendro-header {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+    #dendrogramCard .dendro-header button {
+        margin-top: 10px;
+        margin-left: 0;
+        align-self: flex-start;
+    }
+    .control-section { /* Items within sections stack */
+        flex-direction: column;
+        align-items: flex-start;
+    }
+    .control-section > * {
+        margin-bottom: 8px;
+    }
+    .control-section input[type="range"] { width: 100%; max-width: 280px; }
+    .control-section select, .control-section input[type="number"], .control-section button {
+        width: auto;
+        min-width: 150px;
+    }
+    .control-section div {
+        width: 100%;
+    }
+}
+button:disabled {
+    background-color: #ccc !important;
+    color: #666 !important;
+    cursor: not-allowed !important;
+}
+button#applySankeyToHeatmapBtn:not(:disabled) {
+    background-color: #28a745 !important;
+}
+button#applySankeyToHeatmapBtn:not(:disabled):hover {
+    background-color: #218838 !important;
+}
+
+#timeline-container {
+    width: 100%;
+    height: 100px;
+    position: relative;
+}
+#timeline-container .axis .domain {
+    stroke: #666;
+}
+#timeline-container .axis .tick line {
+    stroke: #ccc;
+}
+#timeline-container .axis .tick text {
+    fill: #444;
+    font-size: 10px;
+}
+#timeline-container .context-area {
+    fill: #a0aec0;
+    fill-opacity: 0.9;
+}
+#timeline-container .brush .selection {
+    fill: #4299e1;
+    fill-opacity: 0.3;
+    stroke: #3182ce;
+    stroke-width: 1px;
+}
+#timeline-container .brush .handle {
+    fill: #f1f3f5;
+    stroke: #6c757d;
+    stroke-width: 1px;
+}
+.switch { position: relative; display: inline-block; width: 50px; height: 24px; vertical-align: middle; }
+.switch input { opacity: 0; width: 0; height: 0; }
+.slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .4s; }
+.slider:before { position: absolute; content: ""; height: 18px; width: 18px; left: 3px; bottom: 3px; background-color: white; transition: .4s; }
+input:checked + .slider { background-color: #4299e1; }
+input:focus + .slider { box-shadow: 0 0 1px #4299e1; }
+input:checked + .slider:before { transform: translateX(26px); }
+.slider.round { border-radius: 24px; }
+.slider.round:before { border-radius: 50%; }

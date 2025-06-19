@@ -1,5 +1,39 @@
 # Changelog
 
+## [2025-06-19]
+### Added
+- "Load demo file" button to allow users without a Parquet file to test the app
+- Button to show/hide timeline
+- Placeholder to max node size input box when no cluster is selected
+
+### Fixed
+- Timeline resize after closing sidebar
+- Max node size shown in input box not resetting when cluster is deselected
+- All nodes in anomalous cluster having red outline in combined cluster
+- Visual bugs applying timeline threshold after file processing
+
+### Changed
+- Separated `malscapedev.html` into `index.html`, `styles.css`, and `script.js`
+- Timeline colors adjusted for better visibility
+
+### Improved
+- Timeline now maintains selected threshold after file processing
+- Timeline auto-hides after file processing
+- Timeline give orange color to sections with attacks
+- Sidebar hide button now hidden before file is processed
+
+## [2025-06-18]
+### Added
+- Functionality to select timeline before processing file
+- Title to timeline Y-axis
+- Switch to let user select whether to process entire file or a specific timeframe
+
+### Changed
+- Timeline data preview adjusted to show more granular time intervals
+
+### Improved
+- UI Filters and buttons hidden before file is processed
+
 ## [2025-06-17]
 ### Added
 - Functionality to view new tree and heatmap of all clusters from inside a combined cluster
