@@ -1,5 +1,9 @@
 # Changelog
 
+## [2025-06-20]
+### Added
+- Functionality for the Sankey diagram to visually represent the proportion of traffic in each link that relates to a user's selection
+
 ## [2025-06-19]
 ### Added
 - "Load demo file" button to allow users without a Parquet file to test the app

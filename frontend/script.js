@@ -23,6 +23,8 @@
     window.currentSankeyDimensionsOrder = [...DEFAULT_SANKEY_DIMENSIONS];
     window.sankeyMatchingClusterIds = new Set();
 
+    window.activeSankeyFilter = null;
+
     const DEFAULT_UNKNOWN_COLOR = '#cccccc';
     const SELECTED_EDGE_COLOR = '#ff0000';
     const SELECTED_NODE_COLOR = '#ff0000';
@@ -4296,17 +4298,23 @@
         }
 
         try {
-            // START: Corrected Code
-            let url = new URL(`${API_BASE_URL}/sankey_data`);
-            url.searchParams.append('dimensions', activeDimensions.join(','));
+            const payload = {
+                dimensions: activeDimensions,
+                sankey_filter: window.activeSankeyFilter // Pass the active filter to the backend
+            };
 
+            // Also pass the main time filter if it's set
             if (window.lastAppliedTimeSelection && window.lastAppliedTimeSelection.startTime) {
-                url.searchParams.append('start_time', window.lastAppliedTimeSelection.startTime.toISOString());
-                url.searchParams.append('end_time', window.lastAppliedTimeSelection.endTime.toISOString());
+                payload.start_time = window.lastAppliedTimeSelection.startTime.toISOString();
+                payload.end_time = window.lastAppliedTimeSelection.endTime.toISOString();
             }
-            // END: Corrected Code
 
-            const response = await fetch(url.toString()); // Use the newly constructed URL
+            const response = await fetch(`${API_BASE_URL}/sankey_data`, {
+                method: 'POST', // Use POST to send the filter payload
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+
             if (!response.ok) {
                 const errData = await response.json().catch(() => ({error: `HTTP error ${response.status}`}));
                 throw new Error(errData.error || `Failed to fetch Sankey data.`);
@@ -4362,80 +4370,15 @@
             .attr("width", svgWidth)
             .attr("height", svgHeight)
             .style("font", "10px sans-serif")
+            .on("click", function(event) { // Click on background clears filter
+                if (event.target === this && window.activeSankeyFilter) {
+                    window.activeSankeyFilter = null;
+                    fetchAndRenderSankeyDiagram();
+                }
+            })
         .append("g")
             .attr("transform", `translate(${margin.left},${margin.top})`);
-
-        let focusedNode = null;
-        const highlightedLinks = new Set();
-        const highlightedNodes = new Set();
-        const applySankeyBtn = document.getElementById('applySankeyToHeatmapBtn');
-
-        function clearFocusHighlight() {
-            focusedNode = null;
-            highlightedLinks.clear();
-            highlightedNodes.clear();
-
-            // Reset link opacity
-            svg.selectAll(".link-group path").transition().duration(250).attr("stroke-opacity", 0.4);
-
-            // Animate all foreground rectangles back to full height
-            svg.selectAll(".node-rect-highlighted")
-                .transition().duration(250)
-                .attr("height", d => Math.max(1, d.y1 - d.y0));
-
-            console.log("Sankey visual focus cleared (split-node).");
-        }
-
-        function applyFocusHighlight() {
-            const linkHighlightOpacity = 0.7;
-            const linkDimOpacity = 0.1;
-
-            // Highlight links on the path and dim others (binary).
-            svg.selectAll(".link-group path")
-                .transition().duration(300)
-                .attr("stroke-opacity", d => highlightedLinks.has(d) ? linkHighlightOpacity : linkDimOpacity);
-
-            // For each node, calculate the proportion of its total flow that is part of the highlighted path.
-            nodes.forEach(node => {
-                const totalNodeValue = node.value;
-                if (totalNodeValue === 0) {
-                    node.highlightRatio = 0;
-                    return;
-                }
-                const highlightedIncomingValue = d3.sum(node.targetLinks, l => highlightedLinks.has(l) ? l.value : 0);
-                const highlightedOutgoingValue = d3.sum(node.sourceLinks, l => highlightedLinks.has(l) ? l.value : 0);
-                const highlightedFlowValue = Math.max(highlightedIncomingValue, highlightedOutgoingValue);
-                node.highlightRatio = highlightedFlowValue / totalNodeValue;
-            });
-
-            // Animate the height of the foreground rectangle based on the calculated ratio.
-            svg.selectAll(".node-rect-highlighted")
-                .transition().duration(350)
-                .attr("height", d => {
-                    const fullHeight = Math.max(1, d.y1 - d.y0);
-                    // For the selected node, the height is always 100%
-                    if (d === focusedNode) {
-                        return fullHeight;
-                    }
-                    return fullHeight * (d.highlightRatio || 0);
-                });
-
-            console.log("Sankey split-node focus applied.");
-        }
-
-        svg.on("click", function(event) {
-            if (event.target === this && focusedNode) {
-                clearFocusHighlight();
-                window.activeSankeyNodeFilter = null;
-                window.sankeyMatchingClusterIds.clear();
-                if (applySankeyBtn) {
-                    applySankeyBtn.disabled = true;
-                    applySankeyBtn.style.backgroundColor = "#6c757d";
-                }
-                updateMainViewAfterSankeyFilter();
-            }
-        });
-
+            
         const sankeyLayout = d3.sankey()
             .nodeId(d_node => d_node.node)
             .nodeAlign(d3.sankeyJustify)
@@ -4443,76 +4386,108 @@
             .extent([[1, 5], [width - 1, height - 5]]);
 
         const {nodes, links} = sankeyLayout(data);
+
+        // Calculate the filtered value for each node for dimming purposes
+        nodes.forEach(node => {
+            const incomingFiltered = d3.sum(node.targetLinks, l => l.filtered_value || 0);
+            const outgoingFiltered = d3.sum(node.sourceLinks, l => l.filtered_value || 0);
+            node.filtered_value = Math.max(incomingFiltered, outgoingFiltered);
+        });
+
         const colorScale = d3.scaleOrdinal(d3.schemeCategory10);
         nodes.forEach(node => { node.color = colorScale(node.name.split(":")[0]); });
 
-        const linkGroups = svg.append("g").attr("fill", "none").attr("stroke-opacity", 0.4)
-            .selectAll("g.link-group").data(links).join("g")
-            .attr("class", "link-group").style("mix-blend-mode", "multiply");
+        // --- RENDER LINKS (Proportional Split with Minimum Highlight Width) ---
+        const linkGroups = svg.append("g").attr("class", "links").attr("fill", "none")
+            .selectAll("g").data(links).join("g")
+            .attr("class", "link")
+            .style("mix-blend-mode", "multiply");
 
+        // 1. Background Path: Represents the TOTAL value of the link
         linkGroups.append("path")
             .attr("d", d3.sankeyLinkHorizontal())
-            .attr("stroke", d_link => d_link.source.color || d_link.target.color || "#777")
-            .attr("stroke-width", d_link => Math.max(1.5, d_link.width))
-            .on("mouseover", function(event, d_link_hovered) {
-                d3.select(this).attr("stroke-opacity", 0.7);
-                tooltip.style("display", "block")
-                    .html(`<strong>${d_link_hovered.source.name}</strong> &rarr; <strong>${d_link_hovered.target.name}</strong><br>Value: ${d_link_hovered.value.toLocaleString()}`)
-                    .style("left", (event.pageX + 10) + "px").style("top", (event.pageY - 15) + "px");
-            })
-            .on("mouseout", function(event, d_link_hovered) {
-                if (!focusedNode || highlightedLinks.has(d_link_hovered)) {
-                   d3.select(this).attr("stroke-opacity", focusedNode ? 0.7 : 0.4);
-                } else {
-                   d3.select(this).attr("stroke-opacity", 0.1);
+            .attr("stroke", "#e0e0e0") // Always light gray
+            .attr("stroke-width", d_link => Math.max(1.5, d_link.width));
+
+        // 2. Foreground Path: Represents the FILTERED portion of the link
+        linkGroups.append("path")
+            .attr("d", d3.sankeyLinkHorizontal())
+            .attr("stroke", d_link => d_link.source.color)
+            .attr("stroke-opacity", 0.8)
+            .attr("stroke-width", d_link => {
+                const MIN_HIGHLIGHT_WIDTH = 1.5;
+                const EPSILON = 1e-9; // A very small number to treat as zero
+
+                // If total value is zero or filtered value is effectively zero, draw nothing.
+                if (d_link.value <= EPSILON || !d_link.filtered_value || d_link.filtered_value <= EPSILON) {
+                    return 0;
                 }
-                tooltip.style("display", "none");
-            })
-            .append("title").text(d_title => `${d_title.source.name} \u2192 ${d_title.target.name}\nValue: ${d_title.value.toLocaleString()}`);
+
+                const totalWidth = Math.max(1.5, d_link.width);
+                const ratio = d_link.filtered_value / d_link.value;
+                let highlightWidth = totalWidth * ratio;
+
+                // If the highlight is tiny but non-zero, enforce the minimum width.
+                if (highlightWidth > 0 && highlightWidth < MIN_HIGHLIGHT_WIDTH) {
+                    highlightWidth = MIN_HIGHLIGHT_WIDTH;
+                }
+
+                // Ensure the highlight never exceeds the total width of the link.
+                return Math.min(highlightWidth, totalWidth);
+            });
+
+        // Add a tooltip to the link group showing both values
+        linkGroups.append("title").text(d_title => 
+            `${d_title.source.name} \u2192 ${d_title.target.name}\n` +
+            `Total Value: ${d_title.value.toLocaleString()}\n` +
+            `Selected Value: ${(d_title.filtered_value || 0).toLocaleString()}`
+        );
+
+        // --- RENDER NODES ---
+        const nodeClickHandler = function(event, d_node_clicked) {
+            event.stopPropagation();
+            
+            // If clicking the same node, clear the filter. Otherwise, set a new one.
+            if (window.activeSankeyFilter && window.activeSankeyFilter.label === d_node_clicked.name) {
+                window.activeSankeyFilter = null;
+            } else {
+                const [dimensionLabel, ...valueParts] = d_node_clicked.name.split(': ');
+                const value = valueParts.join(': ');
+                const dimensionKey = (DEFAULT_SANKEY_DIMENSIONS.find(d => d.label === dimensionLabel) || {}).value;
+
+                if (dimensionKey) {
+                    window.activeSankeyFilter = {
+                        dimensionKey: dimensionKey,
+                        value: value,
+                        label: d_node_clicked.name
+                    };
+                } else {
+                    console.error("Could not find dimension key for label:", dimensionLabel);
+                    window.activeSankeyFilter = null;
+                }
+            }
+            // Re-fetch and re-render the entire Sankey with the new filter context
+            fetchAndRenderSankeyDiagram();
+        };
 
         const nodeGroup = svg.append("g").selectAll("g.node-group").data(nodes).join("g")
             .attr("class", "node-group")
             .attr("transform", d_node => `translate(${d_node.x0}, ${d_node.y0})`)
-            .on("click", function(event, d_node_clicked) {
-                event.stopPropagation();
-                if (focusedNode === d_node_clicked) {
-                    clearFocusHighlight();
-                } else {
-                    focusedNode = d_node_clicked;
-                    const pathNodes = new Set([focusedNode]);
-                    highlightedLinks.clear();
-                    let fwdQueue = [focusedNode];
-                    while (fwdQueue.length > 0) {
-                        const curr = fwdQueue.shift();
-                        (curr.sourceLinks || []).forEach(l => { highlightedLinks.add(l); if (!pathNodes.has(l.target)) { pathNodes.add(l.target); fwdQueue.push(l.target); } });
-                    }
-                    let bwdQueue = [focusedNode];
-                    while (bwdQueue.length > 0) {
-                        const curr = bwdQueue.shift();
-                        (curr.targetLinks || []).forEach(l => { highlightedLinks.add(l); if (!pathNodes.has(l.source)) { pathNodes.add(l.source); bwdQueue.push(l.source); } });
-                    }
-                    highlightedNodes.clear();
-                    pathNodes.forEach(n => highlightedNodes.add(n));
-                    applyFocusHighlight();
-                }
-            });
+            .style("opacity", d => (d.filtered_value > 0 || !window.activeSankeyFilter) ? 1.0 : 0.3) // Dim nodes not in selection
+            .on("click", nodeClickHandler);
 
-        // Background rectangle for the "dimmed" portion (always gray).
+        // Draw a single rectangle for each node, no splitting.
         nodeGroup.append("rect")
-            .attr("class", "node-rect-dimmed")
             .attr("height", d => Math.max(1, d.y1 - d.y0))
             .attr("width", d => d.x1 - d.x0)
-            .attr("fill", "#e0e0e0")
-            .attr("stroke", "#bbb")
-            .attr("stroke-width", 0.5);
-
-        // Foreground rectangle for the "highlighted" portion (colored).
-        nodeGroup.append("rect")
-            .attr("class", "node-rect-highlighted")
-            .attr("height", d => Math.max(1, d.y1 - d.y0)) // Initially full height.
-            .attr("width", d => d.x1 - d.x0)
             .attr("fill", d => d.color)
-            .append("title").text(d_title => `${d_title.name}\nTotal Value: ${d_title.value.toLocaleString()}`);
+            .attr("stroke", "#333")
+            .attr("stroke-width", 0.5)
+            .append("title").text(d_title => 
+                `${d_title.name}\n` +
+                `Total Value: ${d_title.value.toLocaleString()}\n`+
+                `Selected Value: ${(d_title.filtered_value || 0).toLocaleString()}`
+            );
 
         nodeGroup.append("text")
             .attr("x", d_node => d_node.x0 < width / 2 ? (d_node.x1 - d_node.x0 + 8) : -8)

@@ -1604,28 +1604,27 @@ def get_cluster_table():
 
     return jsonify({"rows": rows_for_json, "total": total})
 
-@app.route('/sankey_data', methods=['GET'])
+@app.route('/sankey_data', methods=['POST'])
 def sankey_data():
     global global_df
     if global_df is None or global_df.empty:
         return jsonify({"nodes": [], "links": [], "error": "No data loaded"}), 400
 
-    # Apply time filter from GET request args
+    request_data = request.get_json()
+    if not request_data:
+        return jsonify({"error": "Invalid request body"}), 400
+
+    # Apply time filter from POST body
     df_sankey = apply_time_filter(global_df.copy(), request)
+    
+    dimensions_keys = request_data.get('dimensions', [])
+    sankey_filter = request_data.get('sankey_filter')
 
     if df_sankey.empty:
-        logging.warning("DataFrame is empty after time filter in /sankey_data.")
         return jsonify({"nodes": [], "links": []})
-
-    dimensions_str = request.args.get('dimensions', 'Protocol,SourceClassification')
-    dimensions_keys = [d.strip() for d in dimensions_str.split(',') if d.strip()]
 
     if not dimensions_keys or len(dimensions_keys) < 2:
         return jsonify({"nodes": [], "links": [], "error": "At least two dimensions are required"}), 400
-
-    for k_dim_check in range(len(dimensions_keys) - 1):
-        if dimensions_keys[k_dim_check] == dimensions_keys[k_dim_check + 1]:
-            return jsonify({"nodes": [], "links": [], "error": f"Consecutive Sankey dimensions cannot be the same: {dimensions_keys[k_dim_check]}"}), 400
 
     for key in dimensions_keys:
         if key not in df_sankey.columns:
@@ -1634,12 +1633,40 @@ def sankey_data():
 
     value_col = 'processCount' if 'processCount' in df_sankey.columns else None
 
+    # 1. Calculate TOTAL values for all links
     if value_col:
-        grouped_df = df_sankey.groupby(dimensions_keys, observed=True)[value_col].sum().reset_index(name='value')
+        total_grouped = df_sankey.groupby(dimensions_keys, observed=True)[value_col].sum().reset_index(name='value')
     else:
-        grouped_df = df_sankey.groupby(dimensions_keys, observed=True).size().reset_index(name='value')
+        total_grouped = df_sankey.groupby(dimensions_keys, observed=True).size().reset_index(name='value')
 
-    if grouped_df.empty:
+    # 2. Calculate FILTERED values if a filter is active
+    if sankey_filter and sankey_filter.get('dimensionKey') in df_sankey.columns:
+        filter_key = sankey_filter['dimensionKey']
+        filter_value = str(sankey_filter['value'])
+
+        # Create a boolean mask for the filter condition
+        mask = df_sankey[filter_key].astype(str) == filter_value
+        df_filtered = df_sankey[mask]
+
+        if not df_filtered.empty:
+            if value_col:
+                filtered_grouped = df_filtered.groupby(dimensions_keys, observed=True)[value_col].sum().reset_index(name='filtered_value')
+            else:
+                filtered_grouped = df_filtered.groupby(dimensions_keys, observed=True).size().reset_index(name='filtered_value')
+            
+            # Merge filtered values into the total dataset
+            final_grouped_df = pd.merge(total_grouped, filtered_grouped, on=dimensions_keys, how='left')
+            final_grouped_df['filtered_value'] = final_grouped_df['filtered_value'].fillna(0)
+        else:
+            # If filter yields no results, all filtered values are zero
+            total_grouped['filtered_value'] = 0
+            final_grouped_df = total_grouped
+    else:
+        # If no filter, the filtered value is the total value
+        total_grouped['filtered_value'] = total_grouped['value']
+        final_grouped_df = total_grouped
+
+    if final_grouped_df.empty:
         return jsonify({"nodes": [], "links": []})
 
     key_to_label_map = {
@@ -1650,8 +1677,10 @@ def sankey_data():
     
     links_agg = {}
     
-    for _, row in grouped_df.iterrows():
+    for _, row in final_grouped_df.iterrows():
         path_value = row['value']
+        filtered_value_on_path = row['filtered_value']
+
         for i in range(len(dimensions_keys) - 1):
             source_key = dimensions_keys[i]
             target_key = dimensions_keys[i+1]
@@ -1666,13 +1695,18 @@ def sankey_data():
             target_name = f"{target_label}: {target_val}"
             
             link_tuple = (source_name, target_name)
-            links_agg[link_tuple] = links_agg.get(link_tuple, 0) + path_value
+            if link_tuple not in links_agg:
+                links_agg[link_tuple] = {'value': 0, 'filtered_value': 0}
+
+            links_agg[link_tuple]['value'] += path_value
+            links_agg[link_tuple]['filtered_value'] += filtered_value_on_path
+
 
     nodes_map = {}
     nodes_list = []
     links_list = []
 
-    for (source_name, target_name), value in links_agg.items():
+    for (source_name, target_name), values in links_agg.items():
         if source_name not in nodes_map:
             nodes_map[source_name] = len(nodes_list)
             nodes_list.append({"name": source_name})
@@ -1683,7 +1717,8 @@ def sankey_data():
         links_list.append({
             "source": nodes_map[source_name],
             "target": nodes_map[target_name],
-            "value": value
+            "value": values['value'],
+            "filtered_value": values['filtered_value'] # Pass both values to frontend
         })
 
     for idx, node_obj in enumerate(nodes_list):
