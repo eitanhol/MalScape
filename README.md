@@ -1,6 +1,6 @@
 # Changelog
 
-## [2025-06-20]
+## [2025-06-23]
 ### Added
 - Functionality for the Sankey diagram to visually represent the proportion of traffic in each link that relates to a user's selection
 
