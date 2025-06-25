@@ -1781,6 +1781,9 @@
         const processTimelineSelectionBtn = document.getElementById('processTimelineSelectionBtn');
         const csvProcessTimeDiv = document.getElementById('csvProcessTime');
         const toggleTimelineBtn = document.getElementById('toggleTimelineBtn');
+        const manualStartTimeInput = document.getElementById('manualStartTime');
+        const manualEndTimeInput = document.getElementById('manualEndTime');
+        const applyManualTimeBtn = document.getElementById('applyManualTimeBtn');
 
         document.getElementById('dendrogramCard').style.display = 'none';
         document.getElementById('packetSimilarityCard').style.display = 'none';
@@ -1788,6 +1791,11 @@
         document.getElementById('timeline-card').style.display = 'none';
         if (csvProcessTimeDiv) csvProcessTimeDiv.style.display = 'none';
         renderSavedItemsList();
+
+        if (manualStartTimeInput && manualEndTimeInput) {
+            manualStartTimeInput.addEventListener('input', updateManualTimeButtonState);
+            manualEndTimeInput.addEventListener('input', updateManualTimeButtonState);
+        }
 
         if (toggleTimelineBtn) {
             toggleTimelineBtn.addEventListener('click', function() {
@@ -1798,7 +1806,6 @@
                 if (isHidden) {
                     timelineCard.style.display = 'block';
                     this.textContent = 'Hide Timeline';
-                    // Redraw in case the window was resized while it was hidden
                     drawTimeline();
                 } else {
                     timelineCard.style.display = 'none';
@@ -1995,37 +2002,32 @@
                 let page = parseInt(pageInput.value, 10);
                 const totalPagesStr = document.getElementById('sidebarTotalPages').textContent;
                 const totalPages = totalPagesStr === '?' ? Infinity : parseInt(totalPagesStr, 10);
+                const searchQuery = document.getElementById('sidebarTableSearchInput').value || "";
+
                 if (!isNaN(page) && page >= 1 && (page <= totalPages || totalPages === Infinity)) {
                     if (sidebarTableMode === 'cluster' && currentSidebarTableClusterId) {
-                        loadSidebarClusterTable(currentSidebarTableClusterId, page);
+                        loadSidebarClusterTable(currentSidebarTableClusterId, page, searchQuery);
                     } else if (sidebarTableMode === 'edges') {
                         let edgeList = [];
-                        if (selectedNodeId && sidebarCy) {
-                            const node = sidebarCy.getElementById(selectedNodeId);
-                            if (node && node.length > 0) {
-                                edgeList = node.connectedEdges().map(edge => ({
-                                    source: edge.data('source'),
-                                    destination: edge.data('target'),
-                                    protocol: edge.data('Protocol')
-                                }));
-                            }
-                        } else if (selectedSidebarEdges.size > 0) {
-                            edgeList = Array.from(selectedSidebarEdges).map(key => {
-                                const parts = key.split('|');
-                                return {
-                                    source: parts[0],
-                                    destination: parts[1],
-                                    protocol: parts[2]
-                                };
+                        if (selectedSidebarNodes.size > 0 && sidebarCy) {
+                            selectedSidebarNodes.forEach(nodeId => {
+                                const node = sidebarCy.getElementById(nodeId);
+                                if (node && node.length > 0) {
+                                   node.connectedEdges().forEach(edge => {
+                                        edgeList.push({ source: edge.data('source'), destination: edge.data('target'), protocol: edge.data('Protocol') });
+                                   });
+                                }
                             });
+                            edgeList = Array.from(new Set(edgeList.map(JSON.stringify)), JSON.parse);
+                        } else if (selectedSidebarEdges.size > 0) {
+                           edgeList = Array.from(selectedSidebarEdges).map(key => {
+                               const parts = key.split('|');
+                               return { source: parts[0], destination: parts[1], protocol: parts[2] };
+                           });
                         }
                         if (edgeList.length > 0) {
-                            loadSidebarMultiEdgeTable(edgeList, page);
-                        } else {
-                            console.warn("Sidebar pagination in edge mode, but no edges/nodes identified for table.");
+                            loadSidebarMultiEdgeTable(edgeList, page, searchQuery);
                         }
-                    } else {
-                        console.warn("Sidebar pagination clicked, but table context (cluster/edge) is unclear or no target ID.");
                     }
                 } else {
                     alert(`Please enter a valid page number between 1 and ${totalPagesStr}.`);
@@ -2268,6 +2270,60 @@
                     reclusterMessageDiv.style.color = "#757575";
                 }
                 if (cancelLoadingBtn) cancelLoadingBtn.disabled = true;
+            });
+        }
+
+        if (applyManualTimeBtn) {
+            applyManualTimeBtn.addEventListener('click', () => {
+                if (!window.timelineXScale || !window.timelineBrush) {
+                    alert("The timeline chart is not active. Please load data first.");
+                    return;
+                }
+        
+                const startTimeValue = manualStartTimeInput.value;
+                const endTimeValue = manualEndTimeInput.value;
+        
+                if (!startTimeValue || !endTimeValue) {
+                    alert("Please enter both a start and end time.");
+                    return;
+                }
+        
+                const startTime = new Date(startTimeValue);
+                const endTime = new Date(endTimeValue);
+        
+                if (isNaN(startTime.getTime()) || isNaN(endTime.getTime())) {
+                    alert("Invalid date format. Please use the format 'YYYY-MM-DD HH:MM:SS'.");
+                    return;
+                }
+        
+                if (endTime <= startTime) {
+                    alert("End time must be after the start time.");
+                    return;
+                }
+
+                const [domainStart, domainEnd] = window.timelineXScale.domain();
+                if (startTime < domainStart || endTime > domainEnd) {
+                    alert("The entered times are outside the range of the loaded data.\nPlease select a time between " + formatDateTimeForInput(domainStart) + " and " + formatDateTimeForInput(domainEnd));
+                    
+                    if (window.lastAppliedTimeSelection) {
+                        updateManualTimeInputs(window.lastAppliedTimeSelection.startTime, window.lastAppliedTimeSelection.endTime);
+                    } else {
+                        updateManualTimeInputs(domainStart, domainEnd);
+                    }
+                    // Explicitly disable the button after reverting the invalid input.
+                    disableManualApplyButton();
+                    return;
+                }
+        
+                const startPixel = window.timelineXScale(startTime);
+                const endPixel = window.timelineXScale(endTime);
+        
+                const brushGroup = d3.select("#timeline-container .brush");
+                if (!brushGroup.empty() && window.timelineBrush) {
+                    brushGroup.call(window.timelineBrush.move, [startPixel, endPixel]);
+                } else {
+                    console.error("Could not find the timeline brush element to update.");
+                }
             });
         }
 
@@ -4788,7 +4844,7 @@
         if (!isViewInitialized) {
             // State before initial processing is done
             applyBtn.style.display = 'none';
-            resetBtn.style.display = 'none';
+            resetBtn.style.display = 'inline-block'; // Changed to make reset button visible
             processBtn.style.display = 'inline-block';
             
             const brushGroup = d3.select("#timeline-container .brush");
@@ -4805,7 +4861,6 @@
             const currentSelection = window.currentTimeSelection;
             const appliedSelection = window.lastAppliedTimeSelection;
 
-            // **FIX:** Add checks for existence of selection objects to prevent errors
             if (!currentSelection || !appliedSelection) {
                 applyBtn.disabled = true;
                 resetBtn.disabled = true;
@@ -4834,10 +4889,17 @@
             return;
         }
 
-        // Assign the 'Apply' button's click behavior
+        // Assign the 'Apply' button's click behavior to re-initialize the full view
         applyBtn.onclick = () => {
-            console.log("Apply button clicked. Updating all visualizations.");
-            updateAllVisualizations();
+            if (window.currentTimeSelection) {
+                console.log("Re-processing new time window.");
+                initializeAndLoadVisuals(
+                    window.currentTimeSelection.startTime.toISOString(),
+                    window.currentTimeSelection.endTime.toISOString()
+                );
+            } else {
+                alert("No time window selected to process.");
+            }
         };
 
         timelineContainer.innerHTML = '';
@@ -4978,9 +5040,9 @@
 
             const brush = d3.brushX().extent([[0, 0], [width, height]]).on("end", brushended);
             const brushGroup = context.append("g").attr("class", "brush").call(brush);
+            window.timelineBrush = brush;
             
             function brushended(event) {
-                if (!event.sourceEvent) return; 
                 const selection = event.selection;
                 
                 if (!selection) {
@@ -4988,7 +5050,13 @@
                 } else {
                     const [x0, x1] = selection.map(x.invert);
                     window.currentTimeSelection = { startTime: x0, endTime: x1 };
+                    
+                    updateManualTimeInputs(x0, x1);
                 }
+
+                // Directly disable the manual apply button whenever the brush selection changes.
+                disableManualApplyButton();
+                
                 console.log("Time window selection updated.");
                 updateTimelineButtonStates();
             }
@@ -5308,11 +5376,28 @@
     }
 
     async function handleSuccessfulFileLoad(responseData) {
-        console.log("File loaded on backend. Resetting UI.", responseData);
-        
+        console.log("File loaded on backend. Resetting UI for new file.", responseData);
+
+        // Reset UI to its initial, pre-processed state
+        document.getElementById('mainFilterGroup').style.display = 'none';
         document.getElementById('dendrogramCard').style.display = 'none';
         document.getElementById('packetSimilarityCard').style.display = 'none';
         document.getElementById('sankeyCard').style.display = 'none';
+        
+        // Hide all optional view/action buttons until data is processed
+        document.getElementById('showSankeyBtn').style.display = 'none';
+        document.getElementById('showPacketSimilarityBtn').style.display = 'none';
+        document.getElementById('toggleTimelineBtn').style.display = 'none';
+        document.getElementById('createSubtreeBtn').style.display = 'none';
+        document.getElementById('backToMainTreeBtn').style.display = 'none';
+        
+        // Ensure the manual time button is disabled by default on a new file load
+        const applyManualTimeBtn = document.getElementById('applyManualTimeBtn');
+        if(applyManualTimeBtn) {
+            applyManualTimeBtn.disabled = true;
+        }
+
+        // Clear any visualizations or selections from the previous file
         clearSidebarVisualization();
         window.lastTreeData = null;
 
@@ -5330,6 +5415,72 @@
             } else {
                 throw new Error("Backend did not return a valid time range for automatic processing.");
             }
+        }
+    }
+
+    function formatDateTimeForInput(date) {
+        if (!date || isNaN(date.getTime())) return "";
+
+        const pad = (num) => num.toString().padStart(2, '0');
+
+        const year = date.getFullYear();
+        const month = pad(date.getMonth() + 1);
+        const day = pad(date.getDate());
+        const hours = pad(date.getHours());
+        const minutes = pad(date.getMinutes());
+        const seconds = pad(date.getSeconds());
+
+        return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+    }
+
+    function updateManualTimeInputs(startTime, endTime) {
+        const manualStartTimeInput = document.getElementById('manualStartTime');
+        const manualEndTimeInput = document.getElementById('manualEndTime');
+
+        if (manualStartTimeInput && manualEndTimeInput) {
+            manualStartTimeInput.value = formatDateTimeForInput(startTime);
+            manualEndTimeInput.value = formatDateTimeForInput(endTime);
+        }
+    }
+
+    function updateManualTimeButtonState() {
+        const applyBtn = document.getElementById('applyManualTimeBtn');
+        const startInput = document.getElementById('manualStartTime');
+        const endInput = document.getElementById('manualEndTime');
+    
+        if (!applyBtn || !startInput || !endInput) return;
+    
+        let enable = false;
+    
+        // Check against the current timeline selection
+        const currentSelection = window.currentTimeSelection;
+    
+        if (currentSelection && startInput.value && endInput.value) {
+            const inputStartTime = new Date(startInput.value);
+            const inputEndTime = new Date(endInput.value);
+    
+            // Check if the typed-in dates are valid and form a correct range
+            if (!isNaN(inputStartTime) && !isNaN(inputEndTime) && inputEndTime > inputStartTime) {
+                // Compare the user's input against the current selection, ignoring milliseconds
+                const currentStartSeconds = Math.floor(currentSelection.startTime.getTime() / 1000);
+                const currentEndSeconds = Math.floor(currentSelection.endTime.getTime() / 1000);
+                const inputStartSeconds = Math.floor(inputStartTime.getTime() / 1000);
+                const inputEndSeconds = Math.floor(inputEndTime.getTime() / 1000);
+    
+                // Enable the button only if the new time is different
+                if (inputStartSeconds !== currentStartSeconds || inputEndSeconds !== currentEndSeconds) {
+                    enable = true;
+                }
+            }
+        }
+    
+        applyBtn.disabled = !enable;
+    }
+
+    function disableManualApplyButton() {
+        const applyBtn = document.getElementById('applyManualTimeBtn');
+        if (applyBtn) {
+            applyBtn.disabled = true;
         }
     }
 

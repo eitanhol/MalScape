@@ -1,5 +1,17 @@
 # Changelog
 
+## [2025-06-24]
+### Added
+- Input boxes for manual timeline selection
+- "Reset timeline selection" button before file processing
+
+### Fixed
+- "Apply manual time" button remains grayed out until a valid change is made
+- Timeline reset button behavior after file processing
+- Number of packets displayed not updating after timeline selection change
+- "Show Sankey diagram" and "Show timeline" buttons not hiding after uploading a second file
+- "Apply manual time" button not graying out after uploading second file
+
 ## [2025-06-23]
 ### Added
 - Functionality for the Sankey diagram to visually represent the proportion of traffic in each link that relates to a user's selection

@@ -148,11 +148,21 @@
             
             <div>
                 <button id="processTimelineSelectionBtn" style="padding: 4px 8px; font-size: 12px; background-color: #007bff; display: none;">Process Selection</button>
-                <button id="applyTimelineBtn" style="padding: 4px 8px; font-size: 12px; background-color: #28a745; display: none;">Apply</button>
+                <button id="applyTimelineBtn" style="padding: 4px 8px; font-size: 12px; background-color: #28a745; display: none;">Process Selection</button>
                 <button id="resetTimelineBtn" style="padding: 4px 8px; font-size: 12px; background-color: #6c757d; display: none;">Reset</button>
             </div>
             </div>
         <div id="timeline-container"></div>
+        
+        <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #eee; display: flex; align-items: center; flex-wrap: wrap; gap: 10px;">
+            <label for="manualStartTime" style="font-size: 12px;">Start Time:</label>
+            <input type="text" id="manualStartTime" placeholder="YYYY-MM-DD HH:MM:SS" style="padding: 4px 6px; font-size: 11px; border: 1px solid #ccc; border-radius: 4px; width: 160px;">
+            
+            <label for="manualEndTime" style="font-size: 12px; margin-left: 10px;">End Time:</label>
+            <input type="text" id="manualEndTime" placeholder="YYYY-MM-DD HH:MM:SS" style="padding: 4px 6px; font-size: 11px; border: 1px solid #ccc; border-radius: 4px; width: 160px;">
+            
+            <button id="applyManualTimeBtn" style="padding: 6px 10px; font-size: 12px; background-color: #007bff; margin-left: 10px; color: white; border: none; border-radius: 4px; cursor: pointer;" disabled>Apply Manual Time</button>
+        </div>
     </div>
 
     <div id="dendrogramCard" style="display: none; background: #fff; box-shadow: 0 2px 10px rgba(0,0,0,0.1); padding: 20px; border-radius: 12px; margin: 20px 0; border: 1px solid #e2e8f0;">
