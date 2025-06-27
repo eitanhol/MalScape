@@ -4895,16 +4895,15 @@
         const timelineContainer = document.getElementById('timeline-container');
         const resetBtn = document.getElementById('resetTimelineBtn');
         const applyBtn = document.getElementById('applyTimelineBtn');
+        const tooltip = d3.select("#tooltip");
         
-        if (!timelineCard || !timelineContainer || !resetBtn || !applyBtn) {
-            console.error("Timeline container or buttons not found.");
+        if (!timelineCard || !timelineContainer || !resetBtn || !applyBtn || !tooltip.node()) {
+            console.error("Timeline container, buttons, or tooltip not found.");
             return;
         }
 
-        // Assign the 'Apply' button's click behavior to re-initialize the full view
         applyBtn.onclick = () => {
             if (window.currentTimeSelection) {
-                console.log("Re-processing new time window.");
                 initializeAndLoadVisuals(
                     window.currentTimeSelection.startTime.toISOString(),
                     window.currentTimeSelection.endTime.toISOString()
@@ -4919,26 +4918,21 @@
 
         try {
             const timelineResponse = await fetch(`${API_BASE_URL}/timeline_data`);
-
-            if (!timelineResponse.ok) throw new Error(`HTTP error ${timelineResponse.status} fetching timeline data`);
-            
+            if (!timelineResponse.ok) throw new Error(`HTTP error ${timelineResponse.status}`);
             let data = await timelineResponse.json();
 
             if (!data || data.length === 0) {
-                console.warn("Not enough data to draw timeline.");
                 timelineCard.style.display = 'none';
                 return;
             }
 
             timelineCard.style.display = 'block';
-
             const parseDate = d3.isoParse;
             data.forEach(d => {
                 d.time = parseDate(d.time);
                 d.value = +d.value;
             });
 
-            // Calculate end times for each data bar
             if (data.length > 0) {
                 for (let i = 0; i < data.length - 1; i++) {
                     data[i].endTime = data[i+1].time;
@@ -4946,9 +4940,8 @@
                 if (data.length > 1) {
                     const lastInterval = data[data.length - 2].endTime.getTime() - data[data.length - 2].time.getTime();
                     data[data.length-1].endTime = new Date(data[data.length - 1].time.getTime() + lastInterval);
-                } else { // Handle a single data point
-                    const oneMinute = 60 * 1000;
-                    data[0].endTime = new Date(data[0].time.getTime() + oneMinute);
+                } else {
+                    data[0].endTime = new Date(data[0].time.getTime() + (60 * 1000));
                 }
             }
 
@@ -4961,21 +4954,13 @@
                 .attr("preserveAspectRatio", "xMinYMid meet")
                 .style("width", "100%").style("height", "100%");
 
-            const context = svg.append("g")
-                .attr("class", "context")
-                .attr("transform", `translate(${margin.left},${margin.top})`);
-
+            const context = svg.append("g").attr("transform", `translate(${margin.left},${margin.top})`);
             const x = d3.scaleTime().range([0, width]);
             const y = d3.scaleLinear().range([height, 0]);
-
             const yMax = d3.max(data, d => d.value) || 1;
             
-            if (data.length > 0) {
-                x.domain([data[0].time, data[data.length - 1].endTime]);
-            }
-            
+            if (data.length > 0) x.domain([data[0].time, data[data.length - 1].endTime]);
             y.domain([0, yMax * 1.1]);
-
             window.timelineXScale = x;
 
             context.selectAll(".bar")
@@ -4985,30 +4970,25 @@
                 .attr("shape-rendering", "crispEdges")
                 .attr("x", d => x(d.time))
                 .attr("y", d => y(d.value))
-                .attr("width", d => {
-                    if (d.endTime) {
-                        return x(d.endTime) - x(d.time);
-                    }
-                    return 0;
-                })
+                .attr("width", d => d.endTime ? (x(d.endTime) - x(d.time)) : 0)
                 .attr("height", d => height - y(d.value))
                 .attr("fill", d => d.isAttack ? "orange" : "#a0aec0");
-            
+
             context.append("g").attr("class", "axis axis--x").attr("transform", `translate(0,${height})`).call(d3.axisBottom(x));
             context.append("g").attr("class", "axis axis--y").call(d3.axisLeft(y).ticks(4).tickFormat(d3.format(".2s")));
-
-            context.append("text")
-                .attr("transform", "rotate(-90)")
-                .attr("y", 0 - margin.left)
-                .attr("x", 0 - (height / 2))
-                .attr("dy", "1em")
-                .style("text-anchor", "middle")
-                .style("font-size", "12px")
-                .style("fill", "#333")
-                .style("font-weight", "500")
-                .text("Packets");
             
-            const timeFormat = d3.timeFormat("%Y-%m-%d %H:%M:%S");
+            context.append("text")
+                    .attr("transform", "rotate(-90)")
+                    .attr("y", 0 - margin.left)
+                    .attr("x", 0 - (height / 2))
+                    .attr("dy", "1em")
+                    .style("text-anchor", "middle")
+                    .style("font-size", "12px")
+                    .style("fill", "#333")
+                    .style("font-weight", "500")
+                    .text("Packets");
+                
+            const timeFormatAxis = d3.timeFormat("%Y-%m-%d %H:%M:%S");
             const [startDate, endDate] = x.domain();
 
             context.append("text")
@@ -5016,14 +4996,14 @@
                 .attr("y", height + margin.bottom - 10)
                 .attr("text-anchor", "start")
                 .style("font-size", "11px").style("fill", "#333").style("font-weight", "500")
-                .text(`Start: ${timeFormat(startDate)}`);
+                .text(`Start: ${timeFormatAxis(startDate)}`);
 
             context.append("text")
                 .attr("x", width)
                 .attr("y", height + margin.bottom - 10)
                 .attr("text-anchor", "end")
                 .style("font-size", "11px").style("fill", "#333").style("font-weight", "500")
-                .text(`End: ${timeFormat(endDate)}`);
+                .text(`End: ${timeFormatAxis(endDate)}`);
 
             const brush = d3.brushX().extent([[0, 0], [width, height]]).on("end", brushended);
             const brushGroup = context.append("g").attr("class", "brush").call(brush);
@@ -5040,17 +5020,52 @@
                     
                     updateManualTimeInputs(x0, x1);
                 }
-
-                // Directly disable the manual apply button whenever the brush selection changes.
                 disableManualApplyButton();
-                
-                console.log("Time window selection updated.");
                 updateTimelineButtonStates();
             }
 
             resetBtn.onclick = () => {
                 brushGroup.call(brush.move, x.range());
             };
+
+            const bisectDate = d3.bisector(d => d.time).left;
+
+            brushGroup
+                .on("mouseover", function() { tooltip.style("display", "block"); })
+                .on("mouseout", function() { tooltip.style("display", "none"); })
+                .on("mousemove", function(event) {
+                    const pointer = d3.pointer(event, this);
+                    const x0 = x.invert(pointer[0]);
+                    const i = bisectDate(data, x0, 1);
+                    const d0 = data[i - 1];
+                    const d1 = data[i];
+                    const d = (d1 && (x0 - d0.time > d1.time - x0)) ? d1 : d0;
+                    
+                    const timeFormat = d3.timeFormat("%H:%M:%S");
+                    let tooltipHtml = `<strong>Time:</strong> ${timeFormat(d.time)} - ${timeFormat(d.endTime)}<br>`;
+                    tooltipHtml += `<strong>Total Packets:</strong> ${d.value.toLocaleString()}<br>`;
+                    tooltipHtml += `<strong>Status:</strong> <span style="color:${d.isAttack ? 'orange' : 'green'};">${d.isAttack ? 'Attack Detected' : 'Normal'}</span>`;
+
+                    // NEW: Logic to display the list of specific attacks
+                    if (d.isAttack && d.attackDetails && d.attackDetails.length > 0) {
+                        const attackEntriesHtml = d.attackDetails
+                            .map(attack => `<li>${attack.AttackType}: ${attack.Source}</li>`)
+                            .join('');
+                        tooltipHtml += `<ul style="margin: 2px 0 0 15px; padding: 0;">${attackEntriesHtml}</ul>`;
+                    }
+
+                    if (d.topSources && Object.keys(d.topSources).length > 0) {
+                        tooltipHtml += `<hr style="margin: 4px 0;"><strong>Top Sources:</strong>`;
+                        const sourcesHtml = Object.entries(d.topSources)
+                            .map(([ip, count]) => `<li>${ip} (${count.toLocaleString()} pkts)</li>`)
+                            .join('');
+                        tooltipHtml += `<ul style="margin: 2px 0 0 15px; padding: 0;">${sourcesHtml}</ul>`;
+                    }
+                    
+                    tooltip.html(tooltipHtml)
+                        .style("left", (event.pageX + 15) + "px")
+                        .style("top", (event.pageY - 28) + "px");
+                });
             
             if (window.lastAppliedTimeSelection && window.lastAppliedTimeSelection.startTime && window.lastAppliedTimeSelection.endTime) {
                 const appliedStart = window.lastAppliedTimeSelection.startTime;

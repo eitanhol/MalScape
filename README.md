@@ -1,5 +1,15 @@
 # Changelog
 
+## [2025-06-27]
+### Improved
+- Accuracy of anomaly detection on timeline
+
+### Added
+- Timeline tooltips
+
+### Fixed
+- File processing bug
+
 ## [2025-06-26]
 ### Fixed
 - Completed fix of anomaly detection not working for some files

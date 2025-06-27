@@ -131,11 +131,12 @@ def compute_clusters(df, resolution=2.5):
     return final_partition
 
 
-def load_attack_data(filename: str = "GroundTruth.csv", start_time_filter_str: str = None, end_time_filter_str: str = None) -> tuple[dict, list, set]:
+def load_attack_data(filename: str = "GroundTruth.csv", start_time_filter_str: str = None, end_time_filter_str: str = None) -> tuple[dict, pd.DataFrame, set]:
     """
-    Loads attack data, filtering by time and returning a list of attack timeframes.
-    Returns: A tuple containing (attack_details_map, attack_timeframes_list, attacking_sources_set)
+    MODIFIED: Loads attack data and returns a DataFrame of attack timeframes.
+    Returns: A tuple containing (attack_details_map, attack_timeframes_dataframe, attacking_sources_set)
     """
+    global attack_timeframes_df_cache
     attack_details_map = {}
     attack_timeframes_list = []
     attacking_sources_set = set()
@@ -145,7 +146,7 @@ def load_attack_data(filename: str = "GroundTruth.csv", start_time_filter_str: s
 
     if not os.path.exists(path):
         logging.warning(f"Attack data file not found at '{path}'.")
-        return {}, [], set()
+        return {}, pd.DataFrame(), set()
 
     try:
         gt_dtypes = {"Event Type": "category", "Source IP": "str", "Destination IP": "str", "Start Time": "str", "Stop Time": "str"}
@@ -155,24 +156,17 @@ def load_attack_data(filename: str = "GroundTruth.csv", start_time_filter_str: s
         gt["Start Time DT"] = pd.to_datetime(gt["Start Time"], errors='coerce', utc=True)
         gt["Stop Time DT"] = pd.to_datetime(gt["Stop Time"], errors='coerce', utc=True)
         gt.dropna(subset=["Start Time DT", "Stop Time DT"], inplace=True)
-
-        # --- NEW LOGIC TO WIDEN TIME WINDOW ---
-        # If start and stop time are the same, assume it's a minute-long event.
+        
         one_minute_mask = gt["Start Time DT"] == gt["Stop Time DT"]
         gt.loc[one_minute_mask, "Stop Time DT"] = gt.loc[one_minute_mask, "Stop Time DT"] + timedelta(seconds=59)
-        if one_minute_mask.any():
-            logging.info(f"Expanded {one_minute_mask.sum()} attack entries to a 1-minute window for matching.")
-        # --- END OF NEW LOGIC ---
 
         if not gt.empty and start_time_filter_str and end_time_filter_str:
             start_filter_dt = pd.to_datetime(start_time_filter_str, errors='coerce', utc=True)
             end_filter_dt = pd.to_datetime(end_time_filter_str, errors='coerce', utc=True)
             if pd.notna(start_filter_dt) and pd.notna(end_filter_dt):
-                initial_rows = len(gt)
-                # The filter logic itself is correct
                 gt = gt[(gt["Start Time DT"] <= end_filter_dt) & (gt["Stop Time DT"] >= start_filter_dt)]
-                logging.info(f"GroundTruth filtered from {initial_rows} to {len(gt)} rows based on capture time.")
         
+        attack_timeframes_list = []
         for _, row in gt.iterrows():
             s_ip = str(row["Source IP"]).strip()
             d_ip = str(row["Destination IP"]).strip()
@@ -180,20 +174,26 @@ def load_attack_data(filename: str = "GroundTruth.csv", start_time_filter_str: s
 
             if s_ip and d_ip and event:
                 attack_details_map[(s_ip, d_ip)] = event
-                attack_timeframes_list.append({
-                    'source': s_ip,
-                    'destination': d_ip,
-                    'start': row["Start Time DT"],
-                    'stop': row["Stop Time DT"]
-                })
+                # This list is now just for the details map, not the primary timeframe data
                 attacking_sources_set.add(s_ip)
         
-        logging.info(f"Successfully loaded {len(attack_timeframes_list)} attack timeframes and {len(attacking_sources_set)} attacking sources.")
+        # NEW: Create and cache a DataFrame for efficient lookups
+        if not gt.empty:
+            attack_df = gt[['Start Time DT', 'Stop Time DT', 'Source IP', 'Destination IP']].copy()
+            attack_df.rename(columns={'Start Time DT': 'start', 'Stop Time DT': 'end', 'Source IP': 'source', 'Destination IP': 'destination'}, inplace=True)
+            attack_df['is_attack_interval'] = True
+            attack_df.sort_values(by='start', inplace=True)
+            attack_timeframes_df_cache = attack_df
+        else:
+            attack_timeframes_df_cache = pd.DataFrame()
+
+        logging.info(f"Successfully loaded and processed {len(gt)} attacks into a DataFrame.")
         
     except Exception as e:
         logging.error(f"Error reading or processing attack data file '{path}': {e}", exc_info=True)
+        return {}, pd.DataFrame(), set()
     
-    return attack_details_map, attack_timeframes_list, attacking_sources_set
+    return attack_details_map, attack_timeframes_df_cache, attacking_sources_set
 
 def generate_tree_from_df(df_input, resolution=2.5, is_subtree=False):
     """
@@ -939,10 +939,10 @@ def initialize_main_view():
         if not df.empty:
             df["AttackType"] = pd.Series(list(zip(df["Source"].astype(str), df["Destination"].astype(str))), index=df.index).map(attack_detail_map_cache).fillna("N/A").astype('category')
             df['Anomaly'] = 'normal'
-            if attack_timeframes_cache:
-                for attack in attack_timeframes_cache:
-                    if pd.notna(attack['start']) and pd.notna(attack['stop']):
-                        mask = (df['Source'] == attack['source']) & (df['Destination'] == attack['destination']) & (df['Time'] >= attack['start']) & (df['Time'] <= attack['stop'])
+            if not attack_timeframes_cache.empty:
+                for _, attack in attack_timeframes_cache.iterrows():
+                    if pd.notna(attack['start']) and pd.notna(attack['end']):
+                        mask = (df['Source'] == attack['source']) & (df['Destination'] == attack['destination']) & (df['Time'] >= attack['start']) & (df['Time'] <= attack['end'])
                         
                         # --- THIS IS THE NEW DIAGNOSTIC LINE ---
                         logging.info(f"Attack match found for {attack['source']} -> {attack['destination']}. Flagging {mask.sum()} packets as anomalous.")
@@ -1469,90 +1469,108 @@ def cluster_network():
 @app.route('/timeline_data', methods=['GET'])
 def timeline_data():
     """
-    MODIFIED: Provides data from the RAW DataFrame for the initial view, but switches
-    to the fully processed global_df after initialization to show attack data.
+    OPTIMIZED & ENHANCED: Provides data for the timeline, now including a detailed
+    list of specific attacks (type and source) for the tooltip.
     """
-    global raw_global_df, global_df
+    global raw_global_df, global_df, attack_timeframes_df_cache, attack_detail_map_cache
 
-    # Determine which DataFrame to use. Prioritize the fully processed one.
+    # Determine which DataFrame to use
     df_to_use = None
     is_processed_view = False
     if global_df is not None and not global_df.empty:
         df_to_use = global_df.copy()
+        df_to_use.reset_index(inplace=True)
         is_processed_view = True
         logging.info("/timeline_data using processed global_df.")
     elif raw_global_df is not None and not raw_global_df.empty:
         df_to_use = raw_global_df.copy()
+        df_to_use.reset_index(inplace=True)
         logging.info("/timeline_data using raw_global_df.")
     else:
         logging.warning("/timeline_data called but no data is available.")
         return jsonify([])
 
-    # The index should already be a DatetimeIndex
-    if not isinstance(df_to_use.index, pd.DatetimeIndex) or df_to_use.index.empty:
-        logging.warning("Timeline data requested, but DataFrame index is not a DatetimeIndex or is empty.")
-        return jsonify([])
-        
-    df_to_use.index.name = 'Time'
+    if 'Time' not in df_to_use.columns or not pd.api.types.is_datetime64_any_dtype(df_to_use['Time']):
+         logging.warning("Timeline data requested, but DataFrame has no valid 'Time' column.")
+         return jsonify([])
 
-    # Dynamically determine frequency for resampling
-    duration_seconds = (df_to_use.index.max() - df_to_use.index.min()).total_seconds()
-    # FIX: Changed frequency strings to lowercase 's' to address FutureWarning
-    if duration_seconds <= 180:      # Up to 3 minutes
-        freq = '1s'
-    elif duration_seconds <= 600:    # Up to 10 minutes
-        freq = '2s'
-    elif duration_seconds <= 1800:   # Up to 30 minutes
-        freq = '5s'
-    elif duration_seconds <= 3600:   # Up to 1 hour
-        freq = '10s'
-    elif duration_seconds <= 7200:   # Up to 2 hours
-        freq = '15s'
-    elif duration_seconds <= 21600:  # Up to 6 hours
-        freq = '30s'
-    elif duration_seconds <= 43200:  # Up to 12 hours
-        freq = '1Min'
-    elif duration_seconds <= 86400:  # Up to 24 hours
-        freq = '2Min'
-    else:                            # More than 24 hours
-        freq = '5Min'
+    df_to_use.sort_values(by='Time', inplace=True)
 
-    # FIX: Changed aggregation to a two-step process (agg then rename) to resolve KeyError
-    # Step 1: Define aggregation spec using original column names
-    agg_spec = {}
-    if 'processCount' in df_to_use.columns:
-        agg_spec['processCount'] = 'sum'
-    else:
-        agg_spec['Time'] = 'size'
+    # --- Vectorized Attack Flagging & Detail Extraction ---
+    if not is_processed_view:
+        if attack_timeframes_df_cache is not None and not attack_timeframes_df_cache.empty:
+            df_to_use['Time'] = df_to_use['Time'].astype('datetime64[ns, UTC]')
+            attack_timeframes_df_cache['start'] = attack_timeframes_df_cache['start'].astype('datetime64[ns, UTC]')
+            attack_timeframes_df_cache['end'] = attack_timeframes_df_cache['end'].astype('datetime64[ns, UTC]')
+            
+            merged_df = pd.merge_asof(
+                df_to_use, attack_timeframes_df_cache,
+                left_on='Time', right_on='start',
+                left_by=['Source', 'Destination'], right_by=['source', 'destination'],
+                direction='backward'
+            )
+            is_attack_mask = (merged_df['Time'] <= merged_df['end'])
+            df_to_use['Anomaly'] = np.where(is_attack_mask.fillna(False), 'anomaly', 'normal')
+            
+            # Map the detailed attack type using the pre-loaded dictionary
+            df_to_use['AttackType'] = list(zip(df_to_use["Source"], df_to_use["Destination"]))
+            df_to_use['AttackType'] = df_to_use['AttackType'].map(attack_detail_map_cache).fillna('N/A')
+            df_to_use.loc[df_to_use['Anomaly'] == 'normal', 'AttackType'] = 'N/A'
 
-    if is_processed_view and 'Anomaly' in df_to_use.columns:
-        agg_spec['Anomaly'] = lambda s: (s == 'anomaly').any()
+        else:
+            df_to_use['Anomaly'] = 'normal'
+            df_to_use['AttackType'] = 'N/A'
     
-    time_series = df_to_use.resample(freq).agg(agg_spec)
+    df_to_use.set_index('Time', inplace=True)
 
-    # Step 2: Rename columns to what the frontend expects
-    rename_map = {}
-    if 'processCount' in time_series.columns:
-        rename_map['processCount'] = 'value'
-    elif 'Time' in time_series.columns:
-        rename_map['Time'] = 'value'
+    # --- Resampling and Aggregation ---
+    duration_seconds = (df_to_use.index.max() - df_to_use.index.min()).total_seconds()
+    freq_map = [
+        (180, '1s'), (600, '2s'), (1800, '5s'), (3600, '10s'),
+        (7200, '15s'), (21600, '30s'), (43200, '1Min'), (86400, '2Min')
+    ]
+    freq = '5Min'
+    for threshold, frequency in freq_map:
+        if duration_seconds <= threshold:
+            freq = frequency
+            break
+            
+    def aggregate_group_details(group):
+        packet_count = group['processCount'].sum() if 'processCount' in group else len(group)
+        is_attack = (group['Anomaly'] == 'anomaly').any()
+        
+        # NEW: Detailed attack list
+        attack_details = []
+        if is_attack and 'AttackType' in group:
+            attacks_in_group = group[group['AttackType'] != 'N/A'][['AttackType', 'Source']].copy()
+            # Group by type and source to get unique pairs
+            unique_attacks = attacks_in_group.drop_duplicates()
+            attack_details = unique_attacks.to_dict('records')
+            
+        top_sources = {}
+        if not group.empty:
+            top_sources = group['Source'].value_counts().nlargest(3).to_dict()
 
-    if 'Anomaly' in time_series.columns:
-        rename_map['Anomaly'] = 'isAttack'
+        return pd.Series({
+            'value': packet_count,
+            'isAttack': is_attack,
+            'attackDetails': attack_details, # Send the new detailed list
+            'topSources': top_sources
+        })
 
-    if rename_map:
-        time_series.rename(columns=rename_map, inplace=True)
+    time_series = df_to_use.resample(freq).apply(aggregate_group_details)
     
     # Generate the JSON response
-    timeline_json = []
-    for ts, row in time_series.iterrows():
-        is_attack_flag = bool(row.get('isAttack', False))
-        
-        timeline_json.append({
+    timeline_json = [
+        {
             "time": ts.isoformat(), 
             "value": int(row.get('value', 0)),
-            "isAttack": is_attack_flag
-        })
+            "isAttack": bool(row.get('isAttack', False)),
+            "attackDetails": row.get('attackDetails', []), # Include new field
+            "topSources": row.get('topSources', {})
+        }
+        for ts, row in time_series.iterrows()
+    ]
         
     return jsonify(timeline_json)
 
