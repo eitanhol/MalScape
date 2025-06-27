@@ -50,7 +50,7 @@
     const metrics = [
         { label: "Count", value: "count" }, { label: "Unique IPs", value: "Unique IPs" },
         { label: "Unique Sources", value: "Unique Sources" }, { label: "Unique Destinations", value: "Unique Destinations" },
-        { label: "Packet Length", value: "Length" }, { label: "Payload Length", value: "Len" },
+        { label: "Packet Length", value: "Length" }, { label: "Payload Length", value: "PayloadLength" },
         { label: "Payload Size Variance", value: "Payload Size Variance" },
         { label: "Start Time", value: "Start Time" },
         { label: "Duration", value: "Duration" },
@@ -2571,35 +2571,47 @@
         const aggregatedLeafData = new Map();
         const aggregateOriginalClusters = (originalIds, isGroupNode) => {
             const aggregatedMetrics = {};
+            // Use the 'Count' metric data as the single source of truth for anomaly status.
+            const countMetricStore = window.fullHeatmapData['Count'] || []; 
             const isSingleOriginalCluster = originalIds.length === 1 && !isGroupNode;
 
+            // --- FIX: Part 1 ---
+            // First, determine the definitive anomaly status for the entire group of original clusters.
+            let definitiveClusterAnomaly = 'normal';
+            originalIds.forEach(originalId => {
+                const countEntry = countMetricStore.find(entry => String(entry.cluster) === String(originalId));
+                // If we find the cluster in the 'Count' data and its anomaly status is 'anomaly',
+                // the entire group is considered anomalous.
+                if (countEntry && countEntry.clusterAnomaly === 'anomaly') {
+                    definitiveClusterAnomaly = 'anomaly';
+                }
+            });
+
+            // --- FIX: Part 2 ---
+            // Now, loop through all the features to aggregate their values.
             features.forEach(metricLabel => {
                 const metricStore = window.fullHeatmapData[metricLabel] || [];
-                let clusterAnomaly = 'normal';
                 let valuesForAggregation = [];
 
                 originalIds.forEach(originalId => {
                     const originalEntry = metricStore.find(entry => String(entry.cluster) === String(originalId));
                     if (originalEntry) {
                         const value = originalEntry.value;
-                        if (originalEntry.clusterAnomaly === 'anomaly') {
-                            clusterAnomaly = 'anomaly';
-                        }
-                        const countEntry = window.fullHeatmapData['Count']?.find(entry => String(entry.cluster) === String(originalId));
-                        const weight = countEntry?.value || 1;
+                        // We still need the count for weighted averages.
+                        const countEntryForWeight = countMetricStore.find(entry => String(entry.cluster) === String(originalId));
+                        const weight = countEntryForWeight?.value || 1;
 
                         if (value !== null && typeof value !== 'undefined' && isFinite(value)) {
-                            valuesForAggregation.push({
-                                value,
-                                weight
-                            });
+                            valuesForAggregation.push({ value, weight });
                         }
                     }
                 });
-
-                aggregatedMetrics[`${metricLabel}_anomaly`] = clusterAnomaly;
+                
+                // Apply the definitive anomaly status we found in Part 1.
+                aggregatedMetrics[`${metricLabel}_anomaly`] = definitiveClusterAnomaly;
                 let finalValue = null;
 
+                // The rest of the value aggregation logic remains the same.
                 if (valuesForAggregation.length > 0) {
                     if (isSingleOriginalCluster) {
                         finalValue = valuesForAggregation[0].value;
@@ -4906,16 +4918,11 @@
         window.timelineXScale = null;
 
         try {
-            const [timelineResponse, attacksResponse] = await Promise.all([
-                fetch(`${API_BASE_URL}/timeline_data`),
-                fetch(`${API_BASE_URL}/attack_timeframes`)
-            ]);
+            const timelineResponse = await fetch(`${API_BASE_URL}/timeline_data`);
 
             if (!timelineResponse.ok) throw new Error(`HTTP error ${timelineResponse.status} fetching timeline data`);
-            if (!attacksResponse.ok) throw new Error(`HTTP error ${attacksResponse.status} fetching attack data`);
             
             let data = await timelineResponse.json();
-            let attacks = await attacksResponse.json();
 
             if (!data || data.length === 0) {
                 console.warn("Not enough data to draw timeline.");
@@ -4929,11 +4936,6 @@
             data.forEach(d => {
                 d.time = parseDate(d.time);
                 d.value = +d.value;
-            });
-
-            attacks.forEach(a => {
-                a.start = parseDate(a.start);
-                a.stop = parseDate(a.stop);
             });
 
             // Calculate end times for each data bar
@@ -4990,22 +4992,7 @@
                     return 0;
                 })
                 .attr("height", d => height - y(d.value))
-                .attr("fill", d => {
-                    const barStart = d.time;
-                    const barEnd = d.endTime;
-                    let isAttack = false;
-                    if (barEnd) {
-                        for (const attack of attacks) {
-                            if (attack.start && attack.stop) {
-                                if (attack.start <= barEnd && attack.stop >= barStart) {
-                                    isAttack = true;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                    return isAttack ? "orange" : "#a0aec0";
-                });
+                .attr("fill", d => d.isAttack ? "orange" : "#a0aec0");
             
             context.append("g").attr("class", "axis axis--x").attr("transform", `translate(0,${height})`).call(d3.axisBottom(x));
             context.append("g").attr("class", "axis axis--y").call(d3.axisLeft(y).ticks(4).tickFormat(d3.format(".2s")));

@@ -16,6 +16,7 @@ from scipy.cluster.hierarchy import linkage, to_tree
 from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
 import time
+from datetime import timedelta
 
 # --- Global Variables ---
 global_df = None
@@ -136,7 +137,7 @@ def load_attack_data(filename: str = "GroundTruth.csv", start_time_filter_str: s
     Returns: A tuple containing (attack_details_map, attack_timeframes_list, attacking_sources_set)
     """
     attack_details_map = {}
-    attack_timeframes_list = [] # CHANGED: This is now a list of dicts
+    attack_timeframes_list = []
     attacking_sources_set = set()
     script_dir = os.path.dirname(os.path.abspath(__file__))
     path = os.path.join(script_dir, filename)
@@ -153,13 +154,22 @@ def load_attack_data(filename: str = "GroundTruth.csv", start_time_filter_str: s
 
         gt["Start Time DT"] = pd.to_datetime(gt["Start Time"], errors='coerce', utc=True)
         gt["Stop Time DT"] = pd.to_datetime(gt["Stop Time"], errors='coerce', utc=True)
-        gt.dropna(subset=["Start Time DT", "Stop Time DT"], inplace=True) # Drop rows with invalid dates
+        gt.dropna(subset=["Start Time DT", "Stop Time DT"], inplace=True)
+
+        # --- NEW LOGIC TO WIDEN TIME WINDOW ---
+        # If start and stop time are the same, assume it's a minute-long event.
+        one_minute_mask = gt["Start Time DT"] == gt["Stop Time DT"]
+        gt.loc[one_minute_mask, "Stop Time DT"] = gt.loc[one_minute_mask, "Stop Time DT"] + timedelta(seconds=59)
+        if one_minute_mask.any():
+            logging.info(f"Expanded {one_minute_mask.sum()} attack entries to a 1-minute window for matching.")
+        # --- END OF NEW LOGIC ---
 
         if not gt.empty and start_time_filter_str and end_time_filter_str:
             start_filter_dt = pd.to_datetime(start_time_filter_str, errors='coerce', utc=True)
             end_filter_dt = pd.to_datetime(end_time_filter_str, errors='coerce', utc=True)
             if pd.notna(start_filter_dt) and pd.notna(end_filter_dt):
                 initial_rows = len(gt)
+                # The filter logic itself is correct
                 gt = gt[(gt["Start Time DT"] <= end_filter_dt) & (gt["Stop Time DT"] >= start_filter_dt)]
                 logging.info(f"GroundTruth filtered from {initial_rows} to {len(gt)} rows based on capture time.")
         
@@ -170,7 +180,6 @@ def load_attack_data(filename: str = "GroundTruth.csv", start_time_filter_str: s
 
             if s_ip and d_ip and event:
                 attack_details_map[(s_ip, d_ip)] = event
-                # CHANGED: Store each attack as a dictionary with its specific timeframe
                 attack_timeframes_list.append({
                     'source': s_ip,
                     'destination': d_ip,
@@ -914,9 +923,8 @@ def initialize_main_view():
 
         df = prepare_dataframe_from_upload(df_slice)
         
-        # *** THIS IS THE FIX: Reset the index to make 'Time' a column again ***
+        # Reset the index to make 'Time' a column again for subsequent operations
         df.reset_index(inplace=True)
-        # *** END FIX ***
 
         if 'Time' in df.columns and not df['Time'].isnull().all():
             min_time, max_time = df['Time'].min(), df['Time'].max()
@@ -935,6 +943,10 @@ def initialize_main_view():
                 for attack in attack_timeframes_cache:
                     if pd.notna(attack['start']) and pd.notna(attack['stop']):
                         mask = (df['Source'] == attack['source']) & (df['Destination'] == attack['destination']) & (df['Time'] >= attack['start']) & (df['Time'] <= attack['stop'])
+                        
+                        # --- THIS IS THE NEW DIAGNOSTIC LINE ---
+                        logging.info(f"Attack match found for {attack['source']} -> {attack['destination']}. Flagging {mask.sum()} packets as anomalous.")
+                        
                         df.loc[mask, 'Anomaly'] = 'anomaly'
             df['Anomaly'] = df['Anomaly'].astype('category')
             if "ClusterID" in df.columns and df["ClusterID"].nunique(dropna=False) > 0:
@@ -1457,53 +1469,91 @@ def cluster_network():
 @app.route('/timeline_data', methods=['GET'])
 def timeline_data():
     """
-    MODIFIED: Provides data from the RAW DataFrame to ensure the timeline always shows the full time range.
+    MODIFIED: Provides data from the RAW DataFrame for the initial view, but switches
+    to the fully processed global_df after initialization to show attack data.
     """
-    global raw_global_df
-    if raw_global_df is None or raw_global_df.empty:
-        logging.warning("/timeline_data called but raw_global_df is None or empty.")
+    global raw_global_df, global_df
+
+    # Determine which DataFrame to use. Prioritize the fully processed one.
+    df_to_use = None
+    is_processed_view = False
+    if global_df is not None and not global_df.empty:
+        df_to_use = global_df.copy()
+        is_processed_view = True
+        logging.info("/timeline_data using processed global_df.")
+    elif raw_global_df is not None and not raw_global_df.empty:
+        df_to_use = raw_global_df.copy()
+        logging.info("/timeline_data using raw_global_df.")
+    else:
+        logging.warning("/timeline_data called but no data is available.")
         return jsonify([])
 
-    df_time = raw_global_df.copy()
-
-    if not isinstance(df_time.index, pd.DatetimeIndex) or df_time.index.empty:
-        logging.warning("Timeline data requested, but raw_global_df index is not a DatetimeIndex or is empty.")
+    # The index should already be a DatetimeIndex
+    if not isinstance(df_to_use.index, pd.DatetimeIndex) or df_to_use.index.empty:
+        logging.warning("Timeline data requested, but DataFrame index is not a DatetimeIndex or is empty.")
         return jsonify([])
         
-    df_time.index.name = 'Time'
-    value_col = 'processCount' if 'processCount' in df_time.columns else None
+    df_to_use.index.name = 'Time'
 
-    # START: Updated Code Block
-    duration_seconds = (df_time.index.max() - df_time.index.min()).total_seconds()
+    # Dynamically determine frequency for resampling
+    duration_seconds = (df_to_use.index.max() - df_to_use.index.min()).total_seconds()
+    # FIX: Changed frequency strings to lowercase 's' to address FutureWarning
     if duration_seconds <= 180:      # Up to 3 minutes
-        freq = '1S'
+        freq = '1s'
     elif duration_seconds <= 600:    # Up to 10 minutes
-        freq = '2S'
+        freq = '2s'
     elif duration_seconds <= 1800:   # Up to 30 minutes
-        freq = '5S'
+        freq = '5s'
     elif duration_seconds <= 3600:   # Up to 1 hour
-        freq = '10S'
+        freq = '10s'
     elif duration_seconds <= 7200:   # Up to 2 hours
-        freq = '15S'
+        freq = '15s'
     elif duration_seconds <= 21600:  # Up to 6 hours
-        freq = '30S'
+        freq = '30s'
     elif duration_seconds <= 43200:  # Up to 12 hours
         freq = '1Min'
     elif duration_seconds <= 86400:  # Up to 24 hours
         freq = '2Min'
     else:                            # More than 24 hours
         freq = '5Min'
-    # END: Updated Code Block
 
-    if value_col:
-        time_series = df_time.resample(freq)[value_col].sum()
+    # FIX: Changed aggregation to a two-step process (agg then rename) to resolve KeyError
+    # Step 1: Define aggregation spec using original column names
+    agg_spec = {}
+    if 'processCount' in df_to_use.columns:
+        agg_spec['processCount'] = 'sum'
     else:
-        time_series = df_time.resample(freq).size()
+        agg_spec['Time'] = 'size'
+
+    if is_processed_view and 'Anomaly' in df_to_use.columns:
+        agg_spec['Anomaly'] = lambda s: (s == 'anomaly').any()
     
-    timeline_json = [
-        {"time": ts.isoformat(), "value": int(val)}
-        for ts, val in time_series.items()
-    ]
+    time_series = df_to_use.resample(freq).agg(agg_spec)
+
+    # Step 2: Rename columns to what the frontend expects
+    rename_map = {}
+    if 'processCount' in time_series.columns:
+        rename_map['processCount'] = 'value'
+    elif 'Time' in time_series.columns:
+        rename_map['Time'] = 'value'
+
+    if 'Anomaly' in time_series.columns:
+        rename_map['Anomaly'] = 'isAttack'
+
+    if rename_map:
+        time_series.rename(columns=rename_map, inplace=True)
+    
+    # Generate the JSON response
+    timeline_json = []
+    for ts, row in time_series.iterrows():
+        is_attack_flag = bool(row.get('isAttack', False))
+        
+        timeline_json.append({
+            "time": ts.isoformat(), 
+            "value": int(row.get('value', 0)),
+            "isAttack": is_attack_flag
+        })
+        
     return jsonify(timeline_json)
 
 @app.route('/get_cluster_rows', methods=['GET'])

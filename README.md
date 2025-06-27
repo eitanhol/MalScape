@@ -1,5 +1,16 @@
 # Changelog
 
+## [2025-06-26]
+### Fixed
+- Completed fix of anomaly detection not working for some files
+
+### Improved
+- Show more accurate attack times on timeline after file processing
+
+## [2025-06-25]
+### Attempted
+- Attempted to fix anomaly detection with certain files
+
 ## [2025-06-24]
 ### Added
 - Input boxes for manual timeline selection

@@ -13,8 +13,7 @@ from io import StringIO
 def aggregate_packets_optimized(df):
     """
     Aggregates identical and consecutive packets that occur within a 1-second window
-    using a vectorized pandas approach. This function is copied from pconverter.py
-    to ensure the output format is identical.
+    using a vectorized pandas approach. This function is identical to the one in pconverter.py.
 
     Args:
         df (pd.DataFrame): The input DataFrame of packets, expected to be sorted by time.
@@ -121,8 +120,8 @@ def decompress_file(compressed_file):
 
 def pcap_to_dataframe(pcap_file, base_time_from_filename):
     """
-    Uses tshark to convert pcap data to a Pandas DataFrame, processing timestamps
-    and other fields into a structure suitable for app.py.
+    Uses tshark to convert pcap data to a Pandas DataFrame.
+    This function is now aligned with pconverter.py for identical output.
     """
     print(f"Converting {pcap_file} to DataFrame using tshark...")
     
@@ -181,22 +180,33 @@ def pcap_to_dataframe(pcap_file, base_time_from_filename):
     df["Protocol"] = df.get("Protocol", pd.Series(dtype='object')).astype(str).fillna("Unknown")
     df["Length"] = pd.to_numeric(df.get("Length", pd.Series(dtype='float')), errors='coerce').fillna(0).astype(int)
     
-    tcp_srcport = df.get("tcp.srcport")
-    udp_srcport = df.get("udp.srcport")
-    if tcp_srcport is not None and udp_srcport is not None: df["SourcePort"] = tcp_srcport.fillna(udp_srcport)
-    elif tcp_srcport is not None: df["SourcePort"] = tcp_srcport
-    else: df["SourcePort"] = udp_srcport
-    
-    tcp_dstport = df.get("tcp.dstport")
-    udp_dstport = df.get("udp.dstport")
-    if tcp_dstport is not None and udp_dstport is not None: df["DestinationPort"] = tcp_dstport.fillna(udp_dstport)
-    elif tcp_dstport is not None: df["DestinationPort"] = tcp_dstport
-    else: df["DestinationPort"] = udp_dstport
+    # --- CORRECTED PORT HANDLING (from pconverter.py) ---
+    tcp_srcport_series = df.get("tcp.srcport")
+    udp_srcport_series = df.get("udp.srcport")
+    if tcp_srcport_series is not None and udp_srcport_series is not None:
+        df["SourcePort"] = tcp_srcport_series.fillna(udp_srcport_series)
+    elif tcp_srcport_series is not None:
+        df["SourcePort"] = tcp_srcport_series
+    elif udp_srcport_series is not None:
+        df["SourcePort"] = udp_srcport_series
+    else:
+        df["SourcePort"] = pd.NA
+
+    tcp_dstport_series = df.get("tcp.dstport")
+    udp_dstport_series = df.get("udp.dstport")
+    if tcp_dstport_series is not None and udp_dstport_series is not None:
+        df["DestinationPort"] = tcp_dstport_series.fillna(udp_dstport_series)
+    elif tcp_dstport_series is not None:
+        df["DestinationPort"] = tcp_dstport_series
+    elif udp_dstport_series is not None:
+        df["DestinationPort"] = udp_dstport_series
+    else:
+        df["DestinationPort"] = pd.NA
 
     df.drop(columns=[c for c in ["tcp.srcport", "udp.srcport", "tcp.dstport", "udp.dstport"] if c in df.columns], inplace=True)
     
-    df["SourcePort"] = pd.to_numeric(df["SourcePort"], errors='coerce').astype('Int64') 
-    df["DestinationPort"] = pd.to_numeric(df["DestinationPort"], errors='coerce').astype('Int64')
+    df["SourcePort"] = pd.to_numeric(df.get("SourcePort"), errors='coerce').astype('Int64') 
+    df["DestinationPort"] = pd.to_numeric(df.get("DestinationPort"), errors='coerce').astype('Int64')
 
     if "Flags_temp" not in df.columns: df["Flags_temp"] = 0 
     df["Flags_temp"] = df["Flags_temp"].fillna(0)
@@ -222,13 +232,16 @@ def pcap_to_dataframe(pcap_file, base_time_from_filename):
     if "Time" in df.columns:
         df.insert(0, "Time", df.pop("Time"))
 
-    final_cols = ["Time", "No.", "Source", "Destination", "Protocol", "Length", "SourcePort", "DestinationPort", "Flags_temp", "Payload"]
-    for col in final_cols:
+    # --- CORRECTED FINAL COLUMN SETUP (from pconverter.py) ---
+    final_ordered_cols = ["Time", "No.", "Source", "Destination", "Protocol", "Length", "SourcePort", "DestinationPort", "Flags_temp", "Payload"]
+    for col in final_ordered_cols:
         if col not in df.columns:
             if col == "Time": df[col] = pd.NaT
-            elif col in ["SourcePort", "DestinationPort"]: df[col] = pd.NA
-            else: df[col] = 0
-    return df[final_cols]
+            elif col in ["No.", "Length", "Flags_temp"]: df[col] = 0
+            elif col in ["SourcePort", "DestinationPort"]: df[col] = pd.NA 
+            else: df[col] = "" 
+            
+    return df[final_ordered_cols]
 
 # --- Main Execution Logic ---
 
@@ -246,7 +259,7 @@ def main():
     )
     parser.add_argument(
         "-o", "--output_file", 
-        help="Path for the final combined Parquet file. (Optional: Defaults to 'combined_output.parquet' in the target folder)."
+        help="Path for the final combined Parquet file. (Optional: Defaults to 'combined_aggregated_output.parquet' in the target folder)."
     )
     args = parser.parse_args()
 
@@ -294,8 +307,12 @@ def main():
         try:
             base_time = extract_timestamp_from_filename(filename)
             if not base_time:
-                 base_time = datetime.fromtimestamp(os.path.getmtime(full_filepath))
-                 print(f"Using file modification time as base_time: {base_time}")
+                 try:
+                     base_time = datetime.fromtimestamp(os.path.getmtime(full_filepath))
+                     print(f"Using file modification time as base_time: {base_time}")
+                 except Exception as e_stat:
+                    base_time = datetime.now()
+                    print(f"Warning: Could not get file modification time ({e_stat}). Using current time as base_time.")
 
             decompressed_temp_file = decompress_file(full_filepath)
             df = pcap_to_dataframe(decompressed_temp_file, base_time)
@@ -326,7 +343,7 @@ def main():
     print("Sorting combined data by timestamp...")
     combined_df.sort_values(by='Time', inplace=True, ignore_index=True)
     
-    # --- NEW AGGREGATION STEP ---
+    # --- AGGREGATION STEP ---
     print("\nAggregating consecutive packets in the combined data...")
     aggregated_df = aggregate_packets_optimized(combined_df)
     print(f"Aggregation complete. Rows changed from {len(combined_df)} to {len(aggregated_df)}.")
@@ -338,7 +355,14 @@ def main():
              aggregated_df['Time'] = aggregated_df['Time'].dt.tz_convert('UTC')
 
     print(f"\nSaving aggregated DataFrame with {len(aggregated_df)} rows to '{output_file}'...")
-    aggregated_df.to_parquet(output_file, index=False, engine='pyarrow')
+    # Using the exact saving parameters from pconverter.py
+    aggregated_df.to_parquet(
+        output_file, 
+        index=False, 
+        engine='pyarrow', 
+        allow_truncated_timestamps=False, 
+        coerce_timestamps='us'
+    )
 
     print("\n--- Conversion Complete! ---")
     print(f"Successfully processed {len(all_dataframes)} files, aggregated the data, and created '{output_file}'.")
