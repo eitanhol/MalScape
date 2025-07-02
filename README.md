@@ -1,5 +1,15 @@
 # Changelog
 
+## [2025-07-01]
+### Fixed
+- Show Sankey diagram being enabled after processing a new file
+- Only processed timeline section showing after processing
+- Attacks not showing on timeline after processing
+
+## [2025-06-30]
+### Fixed
+- Timeline input box "Apply" button not staying grayed out with invalid inputs
+
 ## [2025-06-27]
 ### Improved
 - Accuracy of anomaly detection on timeline

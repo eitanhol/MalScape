@@ -28,6 +28,8 @@ attack_pairs_for_anomaly_cache = set()
 attacking_sources_cache = set()
 global_backend_csv_processing_time_seconds = None
 raw_global_df = None
+full_attack_timeframes_df_cache = None
+full_attack_detail_map_cache = {}
 
 # Expected columns after all processing in app.py, for final global_df
 expected_cols = [
@@ -491,9 +493,10 @@ logging.info("--- FLASK APP INITIALIZED (Parquet Version) ---")
 def process_uploaded_file_endpoint():
     """
     MODIFIED: This endpoint now only loads the raw data and prepares it for timeline selection.
-    It does not perform the full, heavy processing.
+    It also populates a separate, full attack data cache for the timeline view.
     """
-    global raw_global_df, global_df, attack_detail_map_cache, attack_timeframes_cache, attacking_sources_cache
+    global raw_global_df, global_df, attack_detail_map_cache, attack_timeframes_df_cache, attacking_sources_cache
+    global full_attack_detail_map_cache, full_attack_timeframes_df_cache
 
     if 'file' not in request.files:
         return jsonify({"error": "No file part in the request."}), 400
@@ -507,30 +510,25 @@ def process_uploaded_file_endpoint():
             logging.info(f"Received Parquet file: {file.filename}")
             
             # Reset all global state on new file upload
-            global_df = None
-            raw_global_df = None
-            attack_detail_map_cache, attack_timeframes_cache, attacking_sources_cache = {}, [], set()
+            global_df, raw_global_df = None, None
+            attack_detail_map_cache, attack_timeframes_df_cache, attacking_sources_cache = {}, pd.DataFrame(), set()
+            full_attack_detail_map_cache, full_attack_timeframes_df_cache = {}, pd.DataFrame()
+
 
             parquet_data = BytesIO(file.read())
             df = pd.read_parquet(parquet_data)
             logging.info(f"Successfully read Parquet file into DataFrame. Shape: {df.shape}")
 
-            # --- Minimal processing for timeline ---
             if "Time" not in df.columns:
                 return jsonify({"error": "Uploaded Parquet file must contain a 'Time' column."}), 400
             
-            # Convert to datetime if not already
             if not pd.api.types.is_datetime64_any_dtype(df["Time"]):
                 df["Time"] = pd.to_datetime(df["Time"], errors='coerce')
 
-            # *** THIS IS THE FIX: Ensure the 'Time' column is timezone-aware (UTC) ***
             if df["Time"].dt.tz is None:
                 df["Time"] = df["Time"].dt.tz_localize('UTC')
-                logging.info("Localized naive 'Time' column to UTC for raw_global_df.")
             else:
                 df["Time"] = df["Time"].dt.tz_convert('UTC')
-                logging.info("Converted timezone-aware 'Time' column to UTC for raw_global_df.")
-            # *** END FIX ***
             
             if 'processCount' not in df.columns:
                 df['processCount'] = 1
@@ -540,16 +538,16 @@ def process_uploaded_file_endpoint():
             df.set_index('Time', inplace=True)
             df.sort_index(inplace=True)
             
-            raw_global_df = df # Store the minimally processed DF
+            raw_global_df = df
 
-            # Pre-load attack data for the entire timeline
-            attack_detail_map_cache, attack_timeframes_cache, attacking_sources_cache = load_attack_data()
-            logging.info(f"Pre-loaded {len(attack_timeframes_cache)} attacks for the initial timeline view.")
+            # Load attack data for the entire timeline and store it in the dedicated 'full' cache
+            temp_attack_details, temp_attack_timeframes, _ = load_attack_data()
+            full_attack_detail_map_cache = temp_attack_details.copy()
+            full_attack_timeframes_df_cache = temp_attack_timeframes.copy() if temp_attack_timeframes is not None else pd.DataFrame()
+            logging.info(f"Pre-loaded and cached {len(full_attack_timeframes_df_cache)} attacks for the full timeline view.")
             
             logging.info(f"Raw data loaded and stored. Shape: {raw_global_df.shape}")
             
-            # START: Replaced Code Block
-            # Get and return the full time range for the frontend.
             min_time = raw_global_df.index.min()
             max_time = raw_global_df.index.max()
             start_time_iso = min_time.isoformat() if pd.notna(min_time) else None
@@ -561,7 +559,6 @@ def process_uploaded_file_endpoint():
                 "start_time": start_time_iso,
                 "end_time": end_time_iso
             }), 200
-            # END: Replaced Code Block
 
         except Exception as e:
             logging.exception(f"Error processing uploaded Parquet file '{file.filename}'")
@@ -1242,13 +1239,11 @@ def louvain_ip_graph_data():
 @app.route('/load_demo_file', methods=['POST'])
 def load_demo_file_endpoint():
     """
-    Loads a predefined demo Parquet file from the server.
-    This performs the same initial processing as the file upload endpoint.
+    Loads a predefined demo Parquet file and populates the dedicated full attack data cache.
     """
-    global raw_global_df, global_df, attack_detail_map_cache, attack_timeframes_cache, attacking_sources_cache
+    global raw_global_df, global_df, attack_detail_map_cache, attack_timeframes_df_cache, attacking_sources_cache
+    global full_attack_detail_map_cache, full_attack_timeframes_df_cache
 
-    # The demo file should be in the same directory as the script.
-    # You must provide this "Demo.parquet" file yourself.
     demo_filename = "Demo.parquet" 
     script_dir = os.path.dirname(os.path.abspath(__file__))
     demo_file_path = os.path.join(script_dir, demo_filename)
@@ -1261,15 +1256,13 @@ def load_demo_file_endpoint():
         logging.info(f"Loading demo Parquet file: {demo_filename}")
         
         # Reset all global state on new file upload
-        global_df = None
-        raw_global_df = None
-        attack_detail_map_cache, attack_timeframes_cache, attacking_sources_cache = {}, [], set()
+        global_df, raw_global_df = None, None
+        attack_detail_map_cache, attack_timeframes_df_cache, attacking_sources_cache = {}, pd.DataFrame(), set()
+        full_attack_detail_map_cache, full_attack_timeframes_df_cache = {}, pd.DataFrame()
 
-        # Read the local demo file
         df = pd.read_parquet(demo_file_path)
         logging.info(f"Successfully read demo Parquet file into DataFrame. Shape: {df.shape}")
 
-        # --- This part is identical to the /process_uploaded_file endpoint ---
         if "Time" not in df.columns:
             return jsonify({"error": "Demo Parquet file must contain a 'Time' column."}), 400
         
@@ -1278,10 +1271,8 @@ def load_demo_file_endpoint():
 
         if df["Time"].dt.tz is None:
             df["Time"] = df["Time"].dt.tz_localize('UTC')
-            logging.info("Localized naive 'Time' column to UTC for raw_global_df.")
         else:
             df["Time"] = df["Time"].dt.tz_convert('UTC')
-            logging.info("Converted timezone-aware 'Time' column to UTC for raw_global_df.")
         
         if 'processCount' not in df.columns:
             df['processCount'] = 1
@@ -1291,10 +1282,13 @@ def load_demo_file_endpoint():
         df.set_index('Time', inplace=True)
         df.sort_index(inplace=True)
         
-        raw_global_df = df # Store the minimally processed DF
+        raw_global_df = df
 
-        attack_detail_map_cache, attack_timeframes_cache, attacking_sources_cache = load_attack_data()
-        logging.info(f"Pre-loaded {len(attack_timeframes_cache)} attacks for the initial timeline view.")
+        # Load attack data into the dedicated 'full' cache
+        temp_attack_details, temp_attack_timeframes, _ = load_attack_data()
+        full_attack_detail_map_cache = temp_attack_details.copy()
+        full_attack_timeframes_df_cache = temp_attack_timeframes.copy() if temp_attack_timeframes is not None else pd.DataFrame()
+        logging.info(f"Pre-loaded and cached {len(full_attack_timeframes_df_cache)} attacks for the full timeline view.")
         
         logging.info(f"Raw demo data loaded and stored. Shape: {raw_global_df.shape}")
         
@@ -1469,61 +1463,50 @@ def cluster_network():
 @app.route('/timeline_data', methods=['GET'])
 def timeline_data():
     """
-    OPTIMIZED & ENHANCED: Provides data for the timeline, now including a detailed
-    list of specific attacks (type and source) for the tooltip.
+    MODIFIED: This endpoint now exclusively uses the raw_global_df and the
+    new full_attack_timeframes_df_cache to ensure the timeline always shows
+    the full, correctly annotated time range of the originally uploaded file.
     """
-    global raw_global_df, global_df, attack_timeframes_df_cache, attack_detail_map_cache
+    global raw_global_df, full_attack_timeframes_df_cache, full_attack_detail_map_cache
 
-    # Determine which DataFrame to use
-    df_to_use = None
-    is_processed_view = False
-    if global_df is not None and not global_df.empty:
-        df_to_use = global_df.copy()
-        df_to_use.reset_index(inplace=True)
-        is_processed_view = True
-        logging.info("/timeline_data using processed global_df.")
-    elif raw_global_df is not None and not raw_global_df.empty:
-        df_to_use = raw_global_df.copy()
-        df_to_use.reset_index(inplace=True)
-        logging.info("/timeline_data using raw_global_df.")
-    else:
-        logging.warning("/timeline_data called but no data is available.")
+    if raw_global_df is None or raw_global_df.empty:
+        logging.warning("/timeline_data called but raw_global_df is not available.")
         return jsonify([])
 
+    df_to_use = raw_global_df.copy()
+    df_to_use.reset_index(inplace=True)
+
     if 'Time' not in df_to_use.columns or not pd.api.types.is_datetime64_any_dtype(df_to_use['Time']):
-         logging.warning("Timeline data requested, but DataFrame has no valid 'Time' column.")
+         logging.warning("Timeline data requested, but raw DataFrame has no valid 'Time' column.")
          return jsonify([])
 
     df_to_use.sort_values(by='Time', inplace=True)
 
-    # --- Vectorized Attack Flagging & Detail Extraction ---
-    if not is_processed_view:
-        if attack_timeframes_df_cache is not None and not attack_timeframes_df_cache.empty:
-            df_to_use['Time'] = df_to_use['Time'].astype('datetime64[ns, UTC]')
-            attack_timeframes_df_cache['start'] = attack_timeframes_df_cache['start'].astype('datetime64[ns, UTC]')
-            attack_timeframes_df_cache['end'] = attack_timeframes_df_cache['end'].astype('datetime64[ns, UTC]')
-            
-            merged_df = pd.merge_asof(
-                df_to_use, attack_timeframes_df_cache,
-                left_on='Time', right_on='start',
-                left_by=['Source', 'Destination'], right_by=['source', 'destination'],
-                direction='backward'
-            )
-            is_attack_mask = (merged_df['Time'] <= merged_df['end'])
-            df_to_use['Anomaly'] = np.where(is_attack_mask.fillna(False), 'anomaly', 'normal')
-            
-            # Map the detailed attack type using the pre-loaded dictionary
-            df_to_use['AttackType'] = list(zip(df_to_use["Source"], df_to_use["Destination"]))
-            df_to_use['AttackType'] = df_to_use['AttackType'].map(attack_detail_map_cache).fillna('N/A')
-            df_to_use.loc[df_to_use['Anomaly'] == 'normal', 'AttackType'] = 'N/A'
-
-        else:
-            df_to_use['Anomaly'] = 'normal'
-            df_to_use['AttackType'] = 'N/A'
+    if full_attack_timeframes_df_cache is not None and not full_attack_timeframes_df_cache.empty:
+        df_to_use['Time'] = df_to_use['Time'].astype('datetime64[ns, UTC]')
+        
+        temp_attack_timeframes = full_attack_timeframes_df_cache.copy()
+        temp_attack_timeframes['start'] = temp_attack_timeframes['start'].astype('datetime64[ns, UTC]')
+        temp_attack_timeframes['end'] = temp_attack_timeframes['end'].astype('datetime64[ns, UTC]')
+        
+        merged_df = pd.merge_asof(
+            df_to_use, temp_attack_timeframes,
+            left_on='Time', right_on='start',
+            left_by=['Source', 'Destination'], right_by=['source', 'destination'],
+            direction='backward'
+        )
+        is_attack_mask = (merged_df['Time'] <= merged_df['end'])
+        df_to_use['Anomaly'] = np.where(is_attack_mask.fillna(False), 'anomaly', 'normal')
+        
+        df_to_use['AttackType'] = list(zip(df_to_use["Source"], df_to_use["Destination"]))
+        df_to_use['AttackType'] = df_to_use['AttackType'].map(full_attack_detail_map_cache).fillna('N/A')
+        df_to_use.loc[df_to_use['Anomaly'] == 'normal', 'AttackType'] = 'N/A'
+    else:
+        df_to_use['Anomaly'] = 'normal'
+        df_to_use['AttackType'] = 'N/A'
     
     df_to_use.set_index('Time', inplace=True)
 
-    # --- Resampling and Aggregation ---
     duration_seconds = (df_to_use.index.max() - df_to_use.index.min()).total_seconds()
     freq_map = [
         (180, '1s'), (600, '2s'), (1800, '5s'), (3600, '10s'),
@@ -1536,14 +1519,12 @@ def timeline_data():
             break
             
     def aggregate_group_details(group):
-        packet_count = group['processCount'].sum() if 'processCount' in group else len(group)
+        packet_count = group['processCount'].sum() if 'processCount' in group.columns else len(group)
         is_attack = (group['Anomaly'] == 'anomaly').any()
         
-        # NEW: Detailed attack list
         attack_details = []
-        if is_attack and 'AttackType' in group:
+        if is_attack and 'AttackType' in group.columns:
             attacks_in_group = group[group['AttackType'] != 'N/A'][['AttackType', 'Source']].copy()
-            # Group by type and source to get unique pairs
             unique_attacks = attacks_in_group.drop_duplicates()
             attack_details = unique_attacks.to_dict('records')
             
@@ -1554,19 +1535,18 @@ def timeline_data():
         return pd.Series({
             'value': packet_count,
             'isAttack': is_attack,
-            'attackDetails': attack_details, # Send the new detailed list
+            'attackDetails': attack_details,
             'topSources': top_sources
         })
 
     time_series = df_to_use.resample(freq).apply(aggregate_group_details)
     
-    # Generate the JSON response
     timeline_json = [
         {
             "time": ts.isoformat(), 
             "value": int(row.get('value', 0)),
             "isAttack": bool(row.get('isAttack', False)),
-            "attackDetails": row.get('attackDetails', []), # Include new field
+            "attackDetails": row.get('attackDetails', []),
             "topSources": row.get('topSources', {})
         }
         for ts, row in time_series.iterrows()

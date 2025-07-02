@@ -25,6 +25,8 @@
 
     window.activeSankeyFilter = null;
 
+    window.fullTimelineData = null;
+
     const DEFAULT_UNKNOWN_COLOR = '#cccccc';
     const SELECTED_EDGE_COLOR = '#ff0000';
     const SELECTED_NODE_COLOR = '#ff0000';
@@ -1747,7 +1749,6 @@
         tooltip = d3.select("#tooltip");
         const fileInput = document.getElementById('fileInput');
         const loadDemoBtn = document.getElementById('loadDemoBtn');
-        const downloadButton = document.getElementById('downloadProcessedDataBtn');
         const applyFiltersBtn = document.getElementById('applyFiltersBtn');
         const sidebarToggleBtn = document.getElementById('sidebar-toggle');
         const resetSidebarBtn = document.getElementById('resetSidebarBtn');
@@ -1907,16 +1908,6 @@
             });
         }
 
-        if (downloadButton) {
-            downloadButton.addEventListener('click', function() {
-                const dataLoadedCheck = window.originalTreeData && Object.keys(window.originalTreeData).length > 0 && !window.originalTreeData.error;
-                if (dataLoadedCheck) {
-                    window.location.href = `${API_BASE_URL}/download_processed_data`;
-                } else {
-                    alert("No processed data available to download. Please upload a Parquet file first.");
-                }
-            });
-        }
         if (applyFiltersBtn) {
             applyFiltersBtn.addEventListener('click', async () => {
                 showLoading();
@@ -2013,17 +2004,17 @@
                             selectedSidebarNodes.forEach(nodeId => {
                                 const node = sidebarCy.getElementById(nodeId);
                                 if (node && node.length > 0) {
-                                   node.connectedEdges().forEach(edge => {
+                                node.connectedEdges().forEach(edge => {
                                         edgeList.push({ source: edge.data('source'), destination: edge.data('target'), protocol: edge.data('Protocol') });
-                                   });
+                                });
                                 }
                             });
                             edgeList = Array.from(new Set(edgeList.map(JSON.stringify)), JSON.parse);
                         } else if (selectedSidebarEdges.size > 0) {
-                           edgeList = Array.from(selectedSidebarEdges).map(key => {
-                               const parts = key.split('|');
-                               return { source: parts[0], destination: parts[1], protocol: parts[2] };
-                           });
+                        edgeList = Array.from(selectedSidebarEdges).map(key => {
+                            const parts = key.split('|');
+                            return { source: parts[0], destination: parts[1], protocol: parts[2] };
+                        });
                         }
                         if (edgeList.length > 0) {
                             loadSidebarMultiEdgeTable(edgeList, page, searchQuery);
@@ -2310,7 +2301,6 @@
                     } else {
                         updateManualTimeInputs(domainStart, domainEnd);
                     }
-                    // Explicitly disable the button after reverting the invalid input.
                     disableManualApplyButton();
                     return;
                 }
@@ -5046,7 +5036,6 @@
                     tooltipHtml += `<strong>Total Packets:</strong> ${d.value.toLocaleString()}<br>`;
                     tooltipHtml += `<strong>Status:</strong> <span style="color:${d.isAttack ? 'orange' : 'green'};">${d.isAttack ? 'Attack Detected' : 'Normal'}</span>`;
 
-                    // NEW: Logic to display the list of specific attacks
                     if (d.isAttack && d.attackDetails && d.attackDetails.length > 0) {
                         const attackEntriesHtml = d.attackDetails
                             .map(attack => `<li>${attack.AttackType}: ${attack.Source}</li>`)
@@ -5311,7 +5300,8 @@
     async function initializeAndLoadVisuals(startTime, endTime) {
         showLoading();
         try {
-            // Step 1: Initialize the main view with the given time range
+            globalAbortController = new AbortController();
+
             const initResponse = await fetch(`${API_BASE_URL}/initialize_main_view`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -5327,23 +5317,27 @@
                 const errText = await initResponse.text();
                 throw new Error(`Failed to initialize main view: ${errText}`);
             }
-            console.log("Main view initialized by backend for the selected/full time range.");
+            console.log("Main view initialized by backend for the selected time range.");
             
-            // Store the applied time selection globally
             window.lastAppliedTimeSelection = { startTime: new Date(startTime), endTime: new Date(endTime) };
 
-            // Step 2: Load all the visualizations
             await updateHeatmap();
             await updateTimeInfoDisplay();
             await loadInlineDendrogram();
             
-            // Step 3: Update UI state
-            updateControlsState();
-            updateRowOrderSelectState();
-            updateLegend();
-            await drawTimeline(); // Draw the timeline so it's ready
+            if (!window.fullTimelineData) {
+                await drawTimeline(); 
+            } else {
+                const brushGroup = d3.select("#timeline-container .brush");
+                if (!brushGroup.empty() && window.timelineBrush && window.timelineXScale) {
+                    const selection = [
+                        window.timelineXScale(window.lastAppliedTimeSelection.startTime),
+                        window.timelineXScale(window.lastAppliedTimeSelection.endTime)
+                    ];
+                    brushGroup.call(window.timelineBrush.move, selection);
+                }
+            }
             
-            // Hide the timeline by default and show the toggle button
             const timelineCard = document.getElementById('timeline-card');
             const toggleTimelineBtn = document.getElementById('toggleTimelineBtn');
             if (timelineCard) timelineCard.style.display = 'none';
@@ -5352,23 +5346,18 @@
                 toggleTimelineBtn.style.display = 'inline-block';
             }
 
-            // Show the controls
-            document.getElementById('mainFilterGroup').style.display = 'block';
+            updateControlsState();
+            updateRowOrderSelectState();
+            updateLegend();
             
-            // Make control buttons visible after successful load
+            document.getElementById('mainFilterGroup').style.display = 'block';
             document.getElementById('showSankeyBtn').style.display = 'inline-block';
             document.getElementById('sidebar-toggle').style.display = 'block';
-
 
         } catch (error) {
             if (error.name !== 'AbortError') {
                 console.error("Error during data processing and visualization:", error);
                 alert(`Error processing data: ${error.message}`);
-                // Re-show the prompt on error if it's a manual selection case
-                const selectTimeframeManually = document.getElementById('selectTimeframeToggle').checked;
-                if (selectTimeframeManually) {
-                    // The prompt element was removed, do nothing.
-                }
             }
         } finally {
             if (!globalAbortController.signal.aborted) {
@@ -5380,28 +5369,29 @@
     async function handleSuccessfulFileLoad(responseData) {
         console.log("File loaded on backend. Resetting UI for new file.", responseData);
 
-        // Reset UI to its initial, pre-processed state
         document.getElementById('mainFilterGroup').style.display = 'none';
         document.getElementById('dendrogramCard').style.display = 'none';
         document.getElementById('packetSimilarityCard').style.display = 'none';
         document.getElementById('sankeyCard').style.display = 'none';
+        document.getElementById('downloadProcessedDataBtn').style.display = 'none';
         
-        // Hide all optional view/action buttons until data is processed
-        document.getElementById('showSankeyBtn').style.display = 'none';
-        document.getElementById('showPacketSimilarityBtn').style.display = 'none';
+        const showSankeyBtn = document.getElementById('showSankeyBtn');
+        if (showSankeyBtn) showSankeyBtn.style.display = 'none';
+        
+        // Ensure the button is hidden as per the requirement
+        const showPacketSimilarityBtn = document.getElementById('showPacketSimilarityBtn');
+        if (showPacketSimilarityBtn) showPacketSimilarityBtn.style.display = 'none';
+
         document.getElementById('toggleTimelineBtn').style.display = 'none';
         document.getElementById('createSubtreeBtn').style.display = 'none';
         document.getElementById('backToMainTreeBtn').style.display = 'none';
         
-        // Ensure the manual time button is disabled by default on a new file load
         const applyManualTimeBtn = document.getElementById('applyManualTimeBtn');
-        if(applyManualTimeBtn) {
-            applyManualTimeBtn.disabled = true;
-        }
+        if(applyManualTimeBtn) applyManualTimeBtn.disabled = true;
 
-        // Clear any visualizations or selections from the previous file
         clearSidebarVisualization();
         window.lastTreeData = null;
+        window.fullTimelineData = null;
 
         const selectTimeframeManually = document.getElementById('selectTimeframeToggle').checked;
 
@@ -5450,28 +5440,27 @@
         const startInput = document.getElementById('manualStartTime');
         const endInput = document.getElementById('manualEndTime');
     
-        if (!applyBtn || !startInput || !endInput) return;
+        if (!applyBtn || !startInput || !endInput || !window.timelineXScale) return;
     
         let enable = false;
     
-        // Check against the current timeline selection
         const currentSelection = window.currentTimeSelection;
     
         if (currentSelection && startInput.value && endInput.value) {
             const inputStartTime = new Date(startInput.value);
             const inputEndTime = new Date(endInput.value);
     
-            // Check if the typed-in dates are valid and form a correct range
             if (!isNaN(inputStartTime) && !isNaN(inputEndTime) && inputEndTime > inputStartTime) {
-                // Compare the user's input against the current selection, ignoring milliseconds
-                const currentStartSeconds = Math.floor(currentSelection.startTime.getTime() / 1000);
-                const currentEndSeconds = Math.floor(currentSelection.endTime.getTime() / 1000);
-                const inputStartSeconds = Math.floor(inputStartTime.getTime() / 1000);
-                const inputEndSeconds = Math.floor(inputEndTime.getTime() / 1000);
+                const [domainStart, domainEnd] = window.timelineXScale.domain();
+                if (inputStartTime >= domainStart && inputEndTime <= domainEnd) { 
+                    const currentStartSeconds = Math.floor(currentSelection.startTime.getTime() / 1000);
+                    const currentEndSeconds = Math.floor(currentSelection.endTime.getTime() / 1000);
+                    const inputStartSeconds = Math.floor(inputStartTime.getTime() / 1000);
+                    const inputEndSeconds = Math.floor(inputEndTime.getTime() / 1000);
     
-                // Enable the button only if the new time is different
-                if (inputStartSeconds !== currentStartSeconds || inputEndSeconds !== currentEndSeconds) {
-                    enable = true;
+                    if (inputStartSeconds !== currentStartSeconds || inputEndSeconds !== currentEndSeconds) {
+                        enable = true;
+                    }
                 }
             }
         }
