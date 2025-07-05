@@ -1,5 +1,22 @@
 # Changelog
 
+## [2025-07-04]
+### Fixed
+- Timeline tooltips going off screen
+
+### Changed
+- Timeline edge blocks now have variable width, and their height is proportional to the amount of data taking their length into account
+
+### Improved
+- Timeline tooltips are hidden while dragging timeline selection
+
+## [2025-07-03]
+### Fixed
+- Issue with heatmap cell colors after reset grouping
+
+### Added
+- Transparent border to processed timeframe on timeline
+
 ## [2025-07-01]
 ### Fixed
 - Show Sankey diagram being enabled after processing a new file

@@ -758,88 +758,63 @@
         sidebarCy.removeListener('click');
         sidebarCy.removeListener('tap');
 
-        sidebarCy.on('mouseover', 'node', (event) => {
-            const node = event.target;
-            const nodeData = node.data();
-            let packetsIn = 0;
-            let packetsOut = 0;
+        sidebarCy.on('mouseover', 'node, edge', (event) => {
+            const el = event.target;
+            const isNode = el.isNode();
+            const data = el.data();
+            let tooltipHTML = '';
 
-            node.connectedEdges().forEach(edge => {
-                const edgeData = edge.data();
-                const count = edgeData.processCount || 0;
-                if (edgeData.target === nodeData.id) {
-                    packetsIn += count;
+            if (isNode) {
+                let packetsIn = 0;
+                let packetsOut = 0;
+                el.connectedEdges().forEach(edge => {
+                    const edgeData = edge.data();
+                    const count = edgeData.processCount || 0;
+                    if (edgeData.target === data.id) packetsIn += count;
+                    if (edgeData.source === data.id) packetsOut += count;
+                });
+                tooltipHTML = `Node: ${data.label || data.id}<br>Class: ${data.Classification || 'N/A'}<br>Cluster: ${data.clusterID}<br>`;
+                if (data.is_attacker) tooltipHTML += `<strong style="color:#FF3333;">Role: Attacker</strong><br>`;
+                tooltipHTML += `Packets In: ${packetsIn}<br>Packets Out: ${packetsOut}`;
+                if (data.InvolvedAttackTypes && data.InvolvedAttackTypes.length > 0) {
+                    tooltipHTML += `<br><strong style="color:crimson;">Node Involved in Attacks: ${data.InvolvedAttackTypes.join(', ')}</strong>`;
                 }
-                if (edgeData.source === nodeData.id) {
-                    packetsOut += count;
+            } else { // Edge
+                tooltipHTML = `Src: ${data.source}<br>Dst: ${data.target}<br>Proto: ${data.Protocol}<br>Count: ${data.processCount || 0}<br>Cluster: ${data.clusterID}`;
+                if (data.AttackType && data.AttackType !== "N/A") {
+                    tooltipHTML += `<br><strong style="color:crimson;">Edge Attack: ${data.AttackType}</strong>`;
                 }
-            });
-
-            let tooltipHTML = `Node: ${nodeData.label || nodeData.id}<br>` +
-                        `Class: ${nodeData.Classification || 'N/A'}<br>` +
-                        `Cluster: ${nodeData.clusterID}<br>`;
-
-            if (nodeData.is_attacker) {
-                tooltipHTML += `<strong style="color:#FF3333;">Role: Attacker</strong><br>`;
             }
 
-            tooltipHTML += `Packets In: ${packetsIn}<br>` +
-                           `Packets Out: ${packetsOut}`;
+            tooltip.html(tooltipHTML).style("display", "block");
 
-            if (nodeData.InvolvedAttackTypes && nodeData.InvolvedAttackTypes.length > 0) {
-                tooltipHTML += `<br><strong style="color:crimson;">Node Involved in Attacks: ${nodeData.InvolvedAttackTypes.join(', ')}</strong>`;
-            }
+            const tooltipNode = tooltip.node();
+            const tooltipWidth = tooltipNode.offsetWidth;
+            const tooltipHeight = tooltipNode.offsetHeight;
+            const windowWidth = window.innerWidth;
+            const windowHeight = window.innerHeight;
             
-            tooltip.style("display", "block")
-                .html(tooltipHTML);
+            let left = (event.originalEvent?.pageX ?? (event.renderedPosition?.x + (document.getElementById('sidebar-cy')?.getBoundingClientRect().left ?? 0))) + 10;
+            let top = (event.originalEvent?.pageY ?? (event.renderedPosition?.y + (document.getElementById('sidebar-cy')?.getBoundingClientRect().top ?? 0))) + (isNode ? 10 : -15);
             
-            if (event.originalEvent && typeof event.originalEvent.pageX === 'number' && typeof event.originalEvent.pageY === 'number') {
-                tooltip.style("left", (event.originalEvent.pageX + 10) + "px")
-                       .style("top", (event.originalEvent.pageY + 10) + "px");
-            } else if (event.renderedPosition) {
-                const sidebarCyContainer = document.getElementById('sidebar-cy');
-                const containerRect = sidebarCyContainer.getBoundingClientRect();
-                tooltip.style("left", (containerRect.left + event.renderedPosition.x + 10) + "px")
-                       .style("top", (containerRect.top + event.renderedPosition.y + 10) + "px");
-            } else {
-                console.warn("Tooltip on node: Could not determine position.");
+            if (left + tooltipWidth > windowWidth) {
+                left = (event.originalEvent?.pageX ?? event.renderedPosition.x) - tooltipWidth - 10;
             }
-        });
-
-        sidebarCy.on('mouseover', 'edge', (event) => {
-            const edge = event.target;
-            const edgeData = edge.data();
-
-            let edgeTooltipHTML = `Src: ${edgeData.source}<br>` +
-                                `Dst: ${edgeData.target}<br>` +
-                                `Proto: ${edgeData.Protocol}<br>` +
-                                `Count: ${edgeData.processCount || 0}<br>` +
-                                `Cluster: ${edgeData.clusterID}`;
-
-            if (edgeData.AttackType && edgeData.AttackType !== "N/A") {
-                edgeTooltipHTML += `<br><strong style="color:crimson;">Edge Attack: ${edgeData.AttackType}</strong>`;
+            if (top + tooltipHeight > windowHeight) {
+                top = (event.originalEvent?.pageY ?? event.renderedPosition.y) - tooltipHeight - (isNode ? -10 : 15);
+            }
+            if (top < 0) {
+                top = 0;
             }
 
-            tooltip.style("display", "block")
-                .html(edgeTooltipHTML);
-
-            if (event.originalEvent && typeof event.originalEvent.pageX === 'number' && typeof event.originalEvent.pageY === 'number') {
-                tooltip.style("left", (event.originalEvent.pageX + 10) + "px")
-                       .style("top", (event.originalEvent.pageY + 10) + "px");
-            } else if (event.renderedPosition) {
-                const sidebarCyContainer = document.getElementById('sidebar-cy');
-                const containerRect = sidebarCyContainer.getBoundingClientRect();
-                tooltip.style("left", (containerRect.left + event.renderedPosition.x + 10) + "px")
-                       .style("top", (containerRect.top + event.renderedPosition.y - 15) + "px");
-            } else {
-                console.warn("Tooltip on edge: Could not determine position.");
-            }
+            tooltip.style("left", `${left}px`).style("top", `${top}px`);
         });
 
         sidebarCy.on('mouseout', 'node, edge', () => {
             tooltip.style("display", "none");
         });
 
+        // --- CLICK AND TAP EVENTS (No changes needed for tooltip logic here) ---
         sidebarCy.on('click', 'node', (event) => {
             const clickedNode = event.target;
             const clickedNodeId = clickedNode.id();
@@ -3221,7 +3196,11 @@
         const thresholdSlider = document.getElementById('thresholdSlider');
         const thresholdValueSpan = document.getElementById('thresholdValue');
 
-        if (!window.originalTreeData) { // Check 1: Original data must exist
+        // MOVED: Clear selections and highlights before redrawing
+        clearSidebarVisualization(); 
+        updateLegend(); 
+
+        if (!window.originalTreeData) {
             console.error("Cannot reset grouping: Original tree data is missing.");
             alert("Error: Cannot reset grouping, original data not found.");
             if (messageDiv) messageDiv.textContent = "Error: Original data missing.";
@@ -3229,34 +3208,28 @@
         }
 
         // Restore original data and state
-        window.lastTreeData = window.originalTreeData; // CRITICAL: Revert to original
+        window.lastTreeData = window.originalTreeData;
         window.currentGroupingApplied = false;
         window.lastAppliedThreshold = 100;
         
         try {
-            // CRITICAL: Recreate the d3 hierarchy object for lastTreeRoot from the original data
             window.lastTreeRoot = d3.hierarchy(window.originalTreeData); 
             console.log("Restored original tree data and reset grouping state. lastTreeRoot updated.");
         } catch (e) {
             console.error("Error creating hierarchy from originalTreeData on reset:", e, window.originalTreeData);
             alert("Error restoring original tree structure.");
-            // Attempt to clear or show an error state in the dendrogram if restoration fails
             showInlineDendrogram(null); 
             return;
         }
 
-
         if (messageDiv) messageDiv.textContent = '';
 
-        // Redraw the dendrogram with the original data
-        // This will also set currentD3LayoutHeight correctly based on the original tree.
+        // Redraw the dendrogram with the original (ungrouped) data
         showInlineDendrogram(window.originalTreeData, currentDendrogramHeight); 
 
         if (thresholdSlider) {
             thresholdSlider.value = 100;
-            // The text content will be updated by the dispatched 'input' event.
             requestAnimationFrame(() => {
-                // Ensure lastTreeRoot is the one derived from originalTreeData
                 if (window.lastTreeRoot && window.lastTreeRoot.data === window.originalTreeData) {
                     thresholdSlider.dispatchEvent(new Event('input'));
                 } else {
@@ -3266,11 +3239,9 @@
             console.log("Reset threshold slider visually.");
         }
 
-        clearSidebarVisualization(); // This clears highlights and sidebar graph/table
-        updateLegend(); // Reset legend to global state (if applicable)
-
-        updateControlsState(); // Update button states (Reset should become disabled)
-        updateSubtreeButtonState(); // ADD THIS CALL
+        // Update button states
+        updateControlsState();
+        updateSubtreeButtonState();
 
         console.log("Grouping reset to the original state.");
     }
@@ -4886,7 +4857,7 @@
         const resetBtn = document.getElementById('resetTimelineBtn');
         const applyBtn = document.getElementById('applyTimelineBtn');
         const tooltip = d3.select("#tooltip");
-        
+
         if (!timelineCard || !timelineContainer || !resetBtn || !applyBtn || !tooltip.node()) {
             console.error("Timeline container, buttons, or tooltip not found.");
             return;
@@ -4920,20 +4891,9 @@
             const parseDate = d3.isoParse;
             data.forEach(d => {
                 d.time = parseDate(d.time);
+                d.endTime = d.endTime ? parseDate(d.endTime) : null; 
                 d.value = +d.value;
             });
-
-            if (data.length > 0) {
-                for (let i = 0; i < data.length - 1; i++) {
-                    data[i].endTime = data[i+1].time;
-                }
-                if (data.length > 1) {
-                    const lastInterval = data[data.length - 2].endTime.getTime() - data[data.length - 2].time.getTime();
-                    data[data.length-1].endTime = new Date(data[data.length - 1].time.getTime() + lastInterval);
-                } else {
-                    data[0].endTime = new Date(data[0].time.getTime() + (60 * 1000));
-                }
-            }
 
             const margin = { top: 10, right: 30, bottom: 40, left: 50 };
             const width = timelineContainer.clientWidth - margin.left - margin.right;
@@ -4948,8 +4908,11 @@
             const x = d3.scaleTime().range([0, width]);
             const y = d3.scaleLinear().range([height, 0]);
             const yMax = d3.max(data, d => d.value) || 1;
-            
-            if (data.length > 0) x.domain([data[0].time, data[data.length - 1].endTime]);
+
+            if (data.length > 0) {
+                const lastEndTime = data[data.length - 1].endTime;
+                x.domain([data[0].time, lastEndTime]);
+            }
             y.domain([0, yMax * 1.1]);
             window.timelineXScale = x;
 
@@ -4964,9 +4927,25 @@
                 .attr("height", d => height - y(d.value))
                 .attr("fill", d => d.isAttack ? "orange" : "#a0aec0");
 
+            // ADDED: Logic to draw the processed timeframe overlay
+            if (window.lastAppliedTimeSelection) {
+                const domain = x.domain();
+                const start = window.lastAppliedTimeSelection.startTime;
+                const end = window.lastAppliedTimeSelection.endTime;
+                // Ensure the overlay is within the visible domain
+                if (start >= domain[0] && end <= domain[1]) {
+                    context.append("rect")
+                        .attr("class", "processed-time-overlay")
+                        .attr("x", x(start))
+                        .attr("y", 0)
+                        .attr("width", x(end) - x(start))
+                        .attr("height", height);
+                }
+            }
+
             context.append("g").attr("class", "axis axis--x").attr("transform", `translate(0,${height})`).call(d3.axisBottom(x));
             context.append("g").attr("class", "axis axis--y").call(d3.axisLeft(y).ticks(4).tickFormat(d3.format(".2s")));
-            
+
             context.append("text")
                     .attr("transform", "rotate(-90)")
                     .attr("y", 0 - margin.left)
@@ -4977,7 +4956,7 @@
                     .style("fill", "#333")
                     .style("font-weight", "500")
                     .text("Packets");
-                
+
             const timeFormatAxis = d3.timeFormat("%Y-%m-%d %H:%M:%S");
             const [startDate, endDate] = x.domain();
 
@@ -4995,19 +4974,25 @@
                 .style("font-size", "11px").style("fill", "#333").style("font-weight", "500")
                 .text(`End: ${timeFormatAxis(endDate)}`);
 
-            const brush = d3.brushX().extent([[0, 0], [width, height]]).on("end", brushended);
+            const brush = d3.brushX()
+                .extent([[0, 0], [width, height]])
+                .on("start brush", function() {
+                    tooltip.style("display", "none");
+                })
+                .on("end", brushended);
+
             const brushGroup = context.append("g").attr("class", "brush").call(brush);
             window.timelineBrush = brush;
-            
+
             function brushended(event) {
+                brushGroup.on("mouseover", function() { tooltip.style("display", "block"); });
+
                 const selection = event.selection;
-                
                 if (!selection) {
                     window.currentTimeSelection = null;
                 } else {
                     const [x0, x1] = selection.map(x.invert);
                     window.currentTimeSelection = { startTime: x0, endTime: x1 };
-                    
                     updateManualTimeInputs(x0, x1);
                 }
                 disableManualApplyButton();
@@ -5030,7 +5015,7 @@
                     const d0 = data[i - 1];
                     const d1 = data[i];
                     const d = (d1 && (x0 - d0.time > d1.time - x0)) ? d1 : d0;
-                    
+
                     const timeFormat = d3.timeFormat("%H:%M:%S");
                     let tooltipHtml = `<strong>Time:</strong> ${timeFormat(d.time)} - ${timeFormat(d.endTime)}<br>`;
                     tooltipHtml += `<strong>Total Packets:</strong> ${d.value.toLocaleString()}<br>`;
@@ -5051,11 +5036,31 @@
                         tooltipHtml += `<ul style="margin: 2px 0 0 15px; padding: 0;">${sourcesHtml}</ul>`;
                     }
                     
-                    tooltip.html(tooltipHtml)
-                        .style("left", (event.pageX + 15) + "px")
-                        .style("top", (event.pageY - 28) + "px");
+                    tooltip.html(tooltipHtml);
+
+                    const tooltipNode = tooltip.node();
+                    const tooltipWidth = tooltipNode.offsetWidth;
+                    const tooltipHeight = tooltipNode.offsetHeight;
+                    const windowWidth = window.innerWidth;
+                    const windowHeight = window.innerHeight;
+
+                    let left = event.pageX + 15;
+                    let top = event.pageY - 28;
+
+                    if (left + tooltipWidth > windowWidth) {
+                        left = event.pageX - tooltipWidth - 15;
+                    }
+                    if (top + tooltipHeight > windowHeight) {
+                        top = event.pageY - tooltipHeight;
+                    }
+                    if (top < 0) {
+                        top = 0;
+                    }
+
+                    tooltip.style("left", left + "px")
+                        .style("top", top + "px");
                 });
-            
+
             if (window.lastAppliedTimeSelection && window.lastAppliedTimeSelection.startTime && window.lastAppliedTimeSelection.endTime) {
                 const appliedStart = window.lastAppliedTimeSelection.startTime;
                 const appliedEnd = window.lastAppliedTimeSelection.endTime;
@@ -5074,154 +5079,12 @@
                 const [initialStartTime, initialEndTime] = x.domain();
                 window.currentTimeSelection = { startTime: initialStartTime, endTime: initialEndTime };
             }
-            
+
             updateTimelineButtonStates();
 
         } catch (error) {
             console.error("Error drawing timeline:", error);
             timelineCard.style.display = 'none';
-        }
-    }
-
-    async function updateAllVisualizations() {
-        // Close sidebar and clear its state when applying a new time window
-        if (isSidebarOpen) {
-            toggleSidebar(false);
-        }
-        const createSubtreeBtn = document.getElementById('createSubtreeBtn');
-        if (createSubtreeBtn) {
-            createSubtreeBtn.style.display = 'none';
-        }
-        clearSidebarVisualization();
-
-        showLoading();
-        try {
-            globalAbortController = new AbortController(); // Use a new controller for this operation
-            console.log("Applying new time filter to visualizations...");
-
-            if (!window.currentTimeSelection) {
-                throw new Error("Cannot apply filter: No time window selected.");
-            }
-
-            // The current brush selection now becomes the officially applied filter
-            window.lastAppliedTimeSelection = { ...window.currentTimeSelection };
-
-            // Re-run the main data-fetching sequence.
-            await updateHeatmap();
-            if (globalAbortController.signal.aborted) throw new DOMException("Aborted");
-            
-            await loadInlineDendrogram();
-            if (globalAbortController.signal.aborted) throw new DOMException("Aborted");
-            
-            // If other views are visible, update them as well.
-            const sankeyCard = document.getElementById('sankeyCard');
-            if (sankeyCard && sankeyCard.style.display !== 'none') {
-                await fetchAndRenderSankeyDiagram();
-            }
-
-            const ipGraphCard = document.getElementById('packetSimilarityCard');
-            if (ipGraphCard && ipGraphCard.style.display !== 'none') {
-                await fetchAndRenderLouvainIpGraph();
-            }
-            
-            updateLegend();
-
-            console.log("All visualizations updated for the new time window.");
-
-        } catch (error) {
-            if (error.name !== 'AbortError') {
-                console.error("Error updating visualizations for new time range:", error);
-                alert(`An error occurred while updating the view: ${error.message}`);
-            } else {
-                console.log("Visualization update cancelled.");
-            }
-        } finally {
-            updateTimelineButtonStates(); // Update button states after the operation
-            hideLoading();
-        }
-    }
-
-    function updateSubtreeButtonState() {
-        const createBtn = document.getElementById('createSubtreeBtn');
-        if (!createBtn || !window.currentGroupingApplied || !window.lastTreeRoot || isSubtreeViewActive) {
-            if(createBtn) createBtn.style.display = 'none';
-            return;
-        }
-
-        let isGroupSelected = false;
-        if (clusterHighlightColors.size > 0) {
-            const currentLeaves = window.lastTreeRoot.leaves();
-            for (const selectedId of clusterHighlightColors.keys()) {
-                const leafNode = currentLeaves.find(l => String(l.data.cluster_id) === String(selectedId));
-                if (leafNode && leafNode.data.isGroup) {
-                    isGroupSelected = true;
-                    break;
-                }
-            }
-        }
-
-        createBtn.style.display = isGroupSelected ? 'inline-block' : 'none';
-    }
-
-    async function handleCreateSubtree() {
-        if (!window.currentGroupingApplied || !window.lastTreeRoot || clusterHighlightColors.size === 0) {
-            alert("This function requires a grouped tree with at least one group selected.");
-            return;
-        }
-
-        const originalClusterIds = new Set();
-        const currentLeaves = window.lastTreeRoot.leaves();
-
-        for (const selectedId of clusterHighlightColors.keys()) {
-            const leafNode = currentLeaves.find(l => String(l.data.cluster_id) === String(selectedId));
-            if (leafNode && leafNode.data.isGroup && leafNode.data.originalLeaves) {
-                 leafNode.data.originalLeaves.forEach(id => originalClusterIds.add(String(id)));
-            }
-        }
-
-        if (originalClusterIds.size === 0) {
-            alert("No underlying original clusters found for the selected groups.");
-            return;
-        }
-
-        showLoading();
-        try {
-            const response = await fetch(`${API_BASE_URL}/create_subtree`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ original_cluster_ids: Array.from(originalClusterIds) }),
-                signal: globalAbortController.signal
-            });
-
-            if (!response.ok) {
-                const errData = await response.json().catch(() => ({error: `HTTP Error: ${response.status}`}));
-                throw new Error(errData.error);
-            }
-            
-            const subtreeData = await response.json();
-            
-            // Save the current main tree view before switching
-            mainTreeViewBeforeSubtree = window.lastTreeData;
-            isSubtreeViewActive = true;
-
-            // Clear selections before drawing the new tree
-            clearSidebarVisualization();
-
-            // Draw the new subtree
-            showInlineDendrogram(subtreeData, document.getElementById("inline-dendrogram-container").clientHeight);
-
-            // Update UI state for subtree view
-            document.getElementById('treeControls').style.display = 'none';
-            document.getElementById('createSubtreeBtn').style.display = 'none';
-            document.getElementById('backToMainTreeBtn').style.display = 'inline-block';
-
-        } catch (error) {
-            if (error.name !== 'AbortError') {
-                console.error("Error creating subtree:", error);
-                alert(`Failed to create sub-tree: ${error.message}`);
-            }
-        } finally {
-            hideLoading();
         }
     }
 
@@ -5472,6 +5335,70 @@
         const applyBtn = document.getElementById('applyManualTimeBtn');
         if (applyBtn) {
             applyBtn.disabled = true;
+        }
+    }
+
+    function handleCreateSubtree() {
+        const selectedClusters = Array.from(clusterHighlightColors.keys());
+        if (selectedClusters.length === 0) {
+            alert("Please select one or more clusters from the heatmap to create a subtree.");
+            return;
+        }
+
+        console.log(`Creating subtree from ${selectedClusters.length} selected clusters.`);
+        showLoading();
+
+        // Use the /create_subtree endpoint
+        fetch(`${API_BASE_URL}/create_subtree`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ original_cluster_ids: selectedClusters })
+        })
+        .then(response => {
+            if (!response.ok) {
+                throw new Error('Network response was not ok');
+            }
+            return response.json();
+        })
+        .then(subtreeData => {
+            hideLoading();
+            if (subtreeData.error) {
+                throw new Error(subtreeData.error);
+            }
+
+            // Save the current main tree view before showing the subtree
+            mainTreeViewBeforeSubtree = window.lastTreeData;
+            isSubtreeViewActive = true;
+
+            // Display the new subtree
+            showInlineDendrogram(subtreeData, document.getElementById("inline-dendrogram-container").clientHeight);
+            
+            // Update UI to reflect subtree view
+            document.getElementById('treeControls').style.display = 'none';
+            document.getElementById('backToMainTreeBtn').style.display = 'inline-block';
+            updateSubtreeButtonState(); 
+
+        })
+        .catch(error => {
+            hideLoading();
+            console.error('Error creating subtree:', error);
+            alert(`Failed to create subtree: ${error.message}`);
+        });
+    }
+
+    function updateSubtreeButtonState() {
+        const createBtn = document.getElementById('createSubtreeBtn');
+        const backBtn = document.getElementById('backToMainTreeBtn');
+        
+        if (!createBtn || !backBtn) return;
+
+        if (isSubtreeViewActive) {
+            createBtn.style.display = 'none';
+            backBtn.style.display = 'inline-block';
+        } else {
+            backBtn.style.display = 'none';
+            // Show the create button only if there are clusters selected
+            createBtn.style.display = clusterHighlightColors.size > 0 ? 'inline-block' : 'none';
         }
     }
 

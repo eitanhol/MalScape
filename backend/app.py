@@ -1481,6 +1481,38 @@ def timeline_data():
          return jsonify([])
 
     df_to_use.sort_values(by='Time', inplace=True)
+    
+    min_time = df_to_use['Time'].min()
+    max_time = df_to_use['Time'].max()
+    duration_seconds = (max_time - min_time).total_seconds() if pd.notna(min_time) and pd.notna(max_time) else 0
+
+    if duration_seconds <= 0:
+        return jsonify([])
+
+    if duration_seconds <= 180: interval_seconds = 1
+    elif duration_seconds <= 600: interval_seconds = 2
+    elif duration_seconds <= 1800: interval_seconds = 5
+    elif duration_seconds <= 3600: interval_seconds = 10
+    elif duration_seconds <= 7200: interval_seconds = 15
+    elif duration_seconds <= 21600: interval_seconds = 30
+    elif duration_seconds <= 43200: interval_seconds = 60 
+    elif duration_seconds <= 86400: interval_seconds = 120
+    else: interval_seconds = 300
+    
+    standard_interval = pd.Timedelta(seconds=interval_seconds)
+
+    first_regular_bin_start = pd.Timestamp(min_time).ceil(standard_interval)
+    
+    bins = [min_time]
+    current_bin_start = first_regular_bin_start
+    while current_bin_start <= max_time:
+        bins.append(current_bin_start)
+        current_bin_start += standard_interval
+    
+    if not bins or bins[-1] <= max_time:
+        bins.append(max_time + pd.Timedelta(nanoseconds=1))
+
+    df_to_use['time_bin'] = pd.cut(df_to_use['Time'], bins=bins, right=False, labels=bins[:-1])
 
     if full_attack_timeframes_df_cache is not None and not full_attack_timeframes_df_cache.empty:
         df_to_use['Time'] = df_to_use['Time'].astype('datetime64[ns, UTC]')
@@ -1505,23 +1537,26 @@ def timeline_data():
         df_to_use['Anomaly'] = 'normal'
         df_to_use['AttackType'] = 'N/A'
     
-    df_to_use.set_index('Time', inplace=True)
-
-    duration_seconds = (df_to_use.index.max() - df_to_use.index.min()).total_seconds()
-    freq_map = [
-        (180, '1s'), (600, '2s'), (1800, '5s'), (3600, '10s'),
-        (7200, '15s'), (21600, '30s'), (43200, '1Min'), (86400, '2Min')
-    ]
-    freq = '5Min'
-    for threshold, frequency in freq_map:
-        if duration_seconds <= threshold:
-            freq = frequency
-            break
-            
     def aggregate_group_details(group):
         packet_count = group['processCount'].sum() if 'processCount' in group.columns else len(group)
         is_attack = (group['Anomaly'] == 'anomaly').any()
         
+        # --- Start of new logic for height normalization ---
+        bin_start_time = group['time_bin'].iloc[0]
+        bin_index = bins.index(bin_start_time)
+        bin_end_time = bins[bin_index + 1] if bin_index + 1 < len(bins) else max_time
+        bin_duration_seconds = (bin_end_time - bin_start_time).total_seconds()
+        
+        # Avoid division by zero for empty bins
+        if bin_duration_seconds > 0:
+            packets_per_second = packet_count / bin_duration_seconds
+        else:
+            packets_per_second = 0
+            
+        # Normalize the height to the standard interval
+        normalized_value = packets_per_second * standard_interval.total_seconds()
+        # --- End of new logic for height normalization ---
+
         attack_details = []
         if is_attack and 'AttackType' in group.columns:
             attacks_in_group = group[group['AttackType'] != 'N/A'][['AttackType', 'Source']].copy()
@@ -1533,24 +1568,27 @@ def timeline_data():
             top_sources = group['Source'].value_counts().nlargest(3).to_dict()
 
         return pd.Series({
-            'value': packet_count,
+            'value': normalized_value, # Use the normalized value
             'isAttack': is_attack,
             'attackDetails': attack_details,
             'topSources': top_sources
         })
 
-    time_series = df_to_use.resample(freq).apply(aggregate_group_details)
-    
-    timeline_json = [
-        {
-            "time": ts.isoformat(), 
+    time_series = df_to_use.groupby('time_bin').apply(aggregate_group_details)
+
+    timeline_json = []
+    for i, (ts, row) in enumerate(time_series.iterrows()):
+        start_time = ts
+        end_time = bins[i+1] if i + 1 < len(bins) else max_time
+
+        timeline_json.append({
+            "time": start_time.isoformat(),
+            "endTime": end_time.isoformat(),
             "value": int(row.get('value', 0)),
             "isAttack": bool(row.get('isAttack', False)),
             "attackDetails": row.get('attackDetails', []),
             "topSources": row.get('topSources', {})
-        }
-        for ts, row in time_series.iterrows()
-    ]
+        })
         
     return jsonify(timeline_json)
 
