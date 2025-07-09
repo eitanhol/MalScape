@@ -1,5 +1,17 @@
 # Changelog
 
+## [2025-07-08]
+### Added
+- List number of packets from all selected clusters
+
+### Changed
+- Sidebar only opens if there are no previous clusters selected
+
+## [2025-07-07]
+### Added
+- Toggle magnifying glass button
+- Input box for magnifying glass zoom
+
 ## [2025-07-04]
 ### Fixed
 - Timeline tooltips going off screen
