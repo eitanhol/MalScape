@@ -650,3 +650,24 @@ input:checked + .slider:before { transform: translateX(26px); }
     stroke-dasharray: 3 3;
     pointer-events: none;
 }
+
+.magnifying-glass {
+    position: absolute;
+    border: 3px solid #000;
+    border-radius: 50%;
+    cursor: none;
+    width: 200px;
+    height: 200px;
+    z-index: 3000;
+    display: none;
+    overflow: hidden;
+}
+
+.magnifying-glass-content {
+    position: absolute;
+    transform-origin: top left;
+}
+
+body.magnifier-active, body.magnifier-active * {
+    cursor: none !important;
+}

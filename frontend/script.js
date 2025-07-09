@@ -33,6 +33,10 @@
     const SELECTED_EDGE_WIDTH = 3.5;
     const SELECTED_EDGE_ZINDEX = 999;
 
+    let magnifyingGlass, magnifyingContent, bodyClone;
+    let isMagnifyingGlassActive = false;
+    const zoomFactor = 2; // How much to zoom in
+
     let sankeyDiagramRendered = false;
     let globalAbortController = new AbortController();
     let louvainIpCy = null;
@@ -595,7 +599,9 @@
                 return;
             }
 
-            toggleSidebar(true);
+            if (addedSidebarClusters.size === 0) {
+                toggleSidebar(true);
+            }
             showSidebarLoading(true, false);
             sidebarInfoDiv.innerHTML = `Loading network for Cluster ${stringClusterID}...`;
             sidebarInfoDiv.style.display = 'block';
@@ -681,7 +687,7 @@
                     sidebarInfoDiv.style.display = 'block';
                     addedSidebarClusters.add(stringClusterID);
                     if (selectedSidebarNodes.size === 0 && selectedSidebarEdges.size === 0) {
-                       loadSidebarClusterTable(stringClusterID, 1);
+                    loadSidebarClusterTable(stringClusterID, 1);
                     }
                     reject(error);
                 });
@@ -1721,6 +1727,13 @@
     }
 
     document.addEventListener('DOMContentLoaded', async () => {
+        // --- Magnifying Glass Variables (Correct Placement) ---
+        const body = document.body;
+        let magnifyingGlass, magnifyingContent, bodyClone;
+        let isMagnifyingGlassActive = false;
+        const zoomFactor = 2; // How much to zoom in
+
+        // --- Get all other elements ---
         tooltip = d3.select("#tooltip");
         const fileInput = document.getElementById('fileInput');
         const loadDemoBtn = document.getElementById('loadDemoBtn');
@@ -1760,6 +1773,13 @@
         const manualStartTimeInput = document.getElementById('manualStartTime');
         const manualEndTimeInput = document.getElementById('manualEndTime');
         const applyManualTimeBtn = document.getElementById('applyManualTimeBtn');
+        
+        createMagnifyingGlass();
+        const magnifyingGlassBtn = document.getElementById('magnifyingGlassBtn');
+        if (magnifyingGlassBtn) {
+            // Pass the click event to the toggle function
+            magnifyingGlassBtn.addEventListener('click', (e) => toggleMagnifyingGlass(e));
+        }
 
         document.getElementById('dendrogramCard').style.display = 'none';
         document.getElementById('packetSimilarityCard').style.display = 'none';
@@ -2636,7 +2656,9 @@
             }
         });
 
-        if (metaDataLineDiv) {
+        function updateMetadataDisplay() {
+            if (!metaDataLineDiv) return;
+
             let metaDataParts = [];
             let clusterInfoText = `${leafCount} Clusters`;
             if (window.currentGroupingApplied && typeof window.originalLeafCount === 'number' && window.originalLeafCount > 0) {
@@ -2652,11 +2674,9 @@
                 metaDataParts.push(`End: ${timeFormat(endTime)}`);
                 metaDataParts.push(`Duration: ${formatDuration(durationSeconds)}`);
             } else {
-                metaDataParts.push("Start: N/A");
-                metaDataParts.push("End: N/A");
-                metaDataParts.push("Duration: N/A");
+                metaDataParts.push("Start: N/A", "End: N/A", "Duration: N/A");
             }
-
+            
             let totalPacketCountDendro = 0;
             let packetCountAvailable = false;
             if (aggregatedLeafData.size > 0) {
@@ -2671,17 +2691,24 @@
                     }
                 });
             }
-
-            if (packetCountAvailable) {
-                metaDataParts.push(`Packets: ${totalPacketCountDendro.toLocaleString()}`);
-            } else {
-                metaDataParts.push("Packets: N/A");
+            metaDataParts.push(packetCountAvailable ? `Packets: ${totalPacketCountDendro.toLocaleString()}` : "Packets: N/A");
+            
+            let totalSelectedPacketCount = 0;
+            if (clusterHighlightColors.size > 0) {
+                clusterHighlightColors.forEach((_, clusterId) => {
+                    const leafAggEntry = aggregatedLeafData.get(String(clusterId));
+                    if (leafAggEntry && typeof leafAggEntry['Count'] === 'number') {
+                        totalSelectedPacketCount += leafAggEntry['Count'];
+                    }
+                });
+                metaDataParts.push(`Selected Packets: ${totalSelectedPacketCount.toLocaleString()}`);
             }
 
             const separator = "&nbsp;&nbsp;|&nbsp;&nbsp;";
             metaDataLineDiv.innerHTML = metaDataParts.filter(p => p).join(separator);
         }
 
+        updateMetadataDisplay();
 
         if (selectedMetric !== 'Default' && window.fullHeatmapData && window.fullHeatmapData[selectedMetric]) {
             metricSortedLeaves.sort((a, b) => {
@@ -2912,7 +2939,9 @@
                             }
                         } else {
                             if (isGroupClick) {
-                                toggleSidebar(true);
+                                if (addedSidebarClusters.size === 0) {
+                                    toggleSidebar(true);
+                                }
                                 const groupNode = currentLeaves.find(l_node => String(l_node.data?.cluster_id) === clickedClusterOrGroupID);
                                 const originalLeaves = Array.from(groupNode?.data?.originalLeaves || []);
 
@@ -3044,6 +3073,8 @@
                                 visualizeClusterInSidebar(clickedClusterOrGroupID, targetHighlightColor, isClusterAnomalous);
                             }
                         }
+                        
+                        updateMetadataDisplay();
                         highlightTreeClusters(new Set(clusterHighlightColors.keys()));
                         updateSubtreeButtonState();
                     })
@@ -5399,6 +5430,102 @@
             backBtn.style.display = 'none';
             // Show the create button only if there are clusters selected
             createBtn.style.display = clusterHighlightColors.size > 0 ? 'inline-block' : 'none';
+        }
+    }
+
+    function createMagnifyingGlass() {
+        magnifyingGlass = document.createElement('div');
+        magnifyingGlass.classList.add('magnifying-glass');
+        
+        magnifyingContent = document.createElement('div');
+        magnifyingContent.classList.add('magnifying-glass-content'); 
+
+        magnifyingGlass.appendChild(magnifyingContent);
+        document.body.appendChild(magnifyingGlass);
+    }
+
+    function moveMagnifyingGlass(e) {
+        if (!isMagnifyingGlassActive || !magnifyingGlass) return;
+
+        // Prevent the magnifying glass from hiding when the mouse is over its button
+        const magnifyingGlassBtn = document.getElementById('magnifyingGlassBtn');
+        if (e.target === magnifyingGlassBtn) {
+            magnifyingGlass.style.display = 'none';
+            return;
+        } else {
+            magnifyingGlass.style.display = 'block';
+        }
+
+        const zoomFactor = parseFloat(document.getElementById('magnifyingGlassZoom').value) || 2;
+        const glassSize = 200; // The 'lens' size
+        const halfGlassSize = glassSize / 2;
+        const mouseX = e.pageX;
+        const mouseY = e.pageY;
+
+        // Position the magnifying glass 'lens'
+        magnifyingGlass.style.left = (mouseX - halfGlassSize) + 'px';
+        magnifyingGlass.style.top = (mouseY - halfGlassSize) + 'px';
+
+        // Position the content inside the 'lens'
+        if (magnifyingContent) {
+            const contentX = -mouseX * zoomFactor + halfGlassSize;
+            const contentY = -mouseY * zoomFactor + halfGlassSize;
+            magnifyingContent.style.left = contentX + 'px';
+            magnifyingContent.style.top = contentY + 'px';
+        }
+    }
+
+    function toggleMagnifyingGlass(event) {
+        isMagnifyingGlassActive = !isMagnifyingGlassActive;
+
+        if (isMagnifyingGlassActive) {
+            document.body.classList.add('magnifier-active'); // Add this line
+
+            const zoomFactor = parseFloat(document.getElementById('magnifyingGlassZoom').value) || 2;
+            magnifyingContent.style.transform = `scale(${zoomFactor})`;
+
+            // Create a static clone of the body for magnification
+            bodyClone = document.body.cloneNode(true);
+            // Hide the cloned magnifying glass and its button to prevent recursion
+            const clonedGlass = bodyClone.querySelector('.magnifying-glass');
+            if (clonedGlass) clonedGlass.style.display = 'none';
+            const clonedBtn = bodyClone.querySelector('#magnifyingGlassBtn');
+            if (clonedBtn) clonedBtn.style.pointerEvents = 'none'; // Make button unclickable in clone
+
+            // Set the dimensions of the clone to match the current body size
+            bodyClone.style.width = document.body.offsetWidth + 'px';
+            bodyClone.style.height = document.body.offsetHeight + 'px';
+            
+            // Add the clone to the magnifying glass content
+            magnifyingContent.innerHTML = '';
+            magnifyingContent.appendChild(bodyClone);
+
+            // Add event listeners
+            document.body.addEventListener('mousemove', moveMagnifyingGlass, { passive: true });
+            document.addEventListener('keydown', handleEscKey);
+            
+            // Initial positioning
+            if (event) {
+                moveMagnifyingGlass(event);
+            }
+
+        } else {
+            document.body.classList.remove('magnifier-active'); // Add this line
+
+            // Deactivate and clean up
+            magnifyingGlass.style.display = 'none';
+            magnifyingContent.style.transform = 'scale(1)';
+            document.body.removeEventListener('mousemove', moveMagnifyingGlass);
+            document.removeEventListener('keydown', handleEscKey);
+            if (magnifyingContent) magnifyingContent.innerHTML = '';
+            bodyClone = null;
+        }
+    }
+
+    function handleEscKey(e) {
+        // Deactivate the magnifying glass if the Escape key is pressed
+        if (e.key === 'Escape' && isMagnifyingGlassActive) {
+            toggleMagnifyingGlass();
         }
     }
 
