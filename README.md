@@ -1,5 +1,12 @@
 # Changelog
 
+## [2025-07-09]
+### Added
+- Listing of total anomalous packets from selected clusters
+
+### Fixed
+- Heatmap cell colors after "Create sub tree from selection"
+
 ## [2025-07-08]
 ### Added
 - List number of packets from all selected clusters

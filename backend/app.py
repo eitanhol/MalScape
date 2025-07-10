@@ -635,6 +635,7 @@ def filter_and_aggregate():
     # Anomaly and Attack Type maps for clusters
     anomaly_map = {}
     cluster_attack_types_map = {}
+    anomalous_counts_map = {} # ADD THIS
     if "ClusterID" in df.columns and not df.empty:
         anomaly_map = (
             df.groupby("ClusterID", observed=True)["Anomaly"] # observed=True for category performance
@@ -648,12 +649,21 @@ def filter_and_aggregate():
                 unique_cluster_attacks = group["AttackType"].astype(str).str.upper()
                 unique_cluster_attacks = unique_cluster_attacks[unique_cluster_attacks != "N/A"].unique()
                 cluster_attack_types_map[str(cluster_id_val)] = list(unique_cluster_attacks) if len(unique_cluster_attacks) > 0 else []
-    
+        
+        # ADD THIS BLOCK to calculate the actual count of anomalous packets
+        if "Anomaly" in df.columns:
+            anomalous_df = df[df['Anomaly'] == 'anomaly']
+            if not anomalous_df.empty:
+                if 'processCount' in anomalous_df.columns:
+                    anomalous_counts_map = anomalous_df.groupby('ClusterID', observed=True)['processCount'].sum().to_dict()
+                else:
+                    anomalous_counts_map = anomalous_df.groupby('ClusterID', observed=True).size().to_dict()
+
     data = request.get_json()
     logging.info(f"Request data for /filter_and_aggregate: {data}")
 
     # --- Apply Filters ---
-    # Ensure filters use .get() with defaults and handle types robustly
+    # (No changes to the filtering logic itself)
     payloadKeyword = data.get("payloadKeyword", "").strip().lower()
     sourceFilter = data.get("sourceFilter", "").strip().lower()
     destinationFilter = data.get("destinationFilter", "").strip().lower()
@@ -671,7 +681,6 @@ def filter_and_aggregate():
     min_dest_amt = int(data["minDestinationAmt"]) if data.get("minDestinationAmt","").strip() else 0
     max_dest_amt = int(data["maxDestinationAmt"]) if data.get("maxDestinationAmt","").strip() else float('inf')
 
-    # Apply other general filters
     if payloadKeyword and "Payload" in df.columns and not df.empty:
         df = df[df["Payload"].str.lower().str.contains(payloadKeyword, na=False)]
     if sourceFilter and "Source" in df.columns and not df.empty:
@@ -691,14 +700,15 @@ def filter_and_aggregate():
         return jsonify([])
 
     # --- Aggregation Logic ---
+    # (No changes to aggregation logic)
     agg = pd.Series(dtype=float)
     if not df.empty and "ClusterID" in df.columns: # Ensure ClusterID exists before grouping
         grouped_by_cluster = df.groupby("ClusterID", observed=True)
 
         if metric == "count":
-            if 'processCount' in df.columns: # processCount comes from prepare_dataframe_from_upload
+            if 'processCount' in df.columns:
                 agg = grouped_by_cluster['processCount'].sum()
-            else: # Fallback
+            else:
                 agg = grouped_by_cluster.size()
         elif metric == "% SYN packets" and "IsSYN" in df.columns:
             agg = grouped_by_cluster["IsSYN"].sum() / grouped_by_cluster.size().replace(0, 1) * 100
@@ -716,13 +726,13 @@ def filter_and_aggregate():
              agg = grouped_by_cluster.apply(lambda g: len(set(g["Source"]).union(set(g["Destination"]))))
         elif metric == "Payload Size Variance" and "PayloadLength" in df.columns:
              df["PayloadLength"] = pd.to_numeric(df["PayloadLength"], errors="coerce").fillna(0)
-             agg = grouped_by_cluster["PayloadLength"].var(ddof=0) # Population variance
+             agg = grouped_by_cluster["PayloadLength"].var(ddof=0)
         elif metric == "Packets per Second" and "Time" in df.columns:
-            df['Time'] = pd.to_datetime(df['Time'], errors='coerce') # Ensure datetime
+            df['Time'] = pd.to_datetime(df['Time'], errors='coerce')
             def packets_per_second(g):
                 if g["Time"].count() < 2 or g["Time"].isnull().all(): return 0.0
                 duration = (g["Time"].max() - g["Time"].min()).total_seconds()
-                return len(g) / duration if duration > 0 else float(len(g)) # Avoid NaN if duration is 0 but packets exist
+                return len(g) / duration if duration > 0 else float(len(g))
             agg = grouped_by_cluster.apply(packets_per_second)
         elif metric == "Total Data Sent" and "Length" in df.columns:
             df["Length"] = pd.to_numeric(df["Length"], errors='coerce').fillna(0)
@@ -740,15 +750,15 @@ def filter_and_aggregate():
         elif metric == "Average Inter-Arrival Time" and "InterArrivalTime" in df.columns:
             df["InterArrivalTime"] = pd.to_numeric(df["InterArrivalTime"], errors='coerce')
             agg = grouped_by_cluster["InterArrivalTime"].mean()
-        elif metric in df.columns: # Generic sum for other numeric columns
+        elif metric in df.columns:
             df[metric] = pd.to_numeric(df[metric], errors='coerce').fillna(0)
             agg = grouped_by_cluster[metric].sum()
-        else: # Fallback if metric is unknown or column missing
+        else:
             logging.warning(f"Metric '{metric}' not found or not supported in /filter_and_aggregate. Aggregating by size.")
-            agg = grouped_by_cluster.size() # Default to count of rows in cluster
+            agg = grouped_by_cluster.size()
 
-        agg = agg.fillna(0.0) # Ensure no NaNs in final aggregation
-        agg = agg.replace([np.inf, -np.inf], 0) # Replace infinities
+        agg = agg.fillna(0.0)
+        agg = agg.replace([np.inf, -np.inf], 0)
     else:
         if df.empty: logging.info("DataFrame empty before aggregation.")
         else: logging.warning("ClusterID column not found or no clusters to aggregate. Returning empty list.")
@@ -776,7 +786,8 @@ def filter_and_aggregate():
             "cluster": str_cluster_id_val,
             "value": processed_value,
             "clusterAnomaly": anomaly_map.get(str_cluster_id_val, "normal"),
-            "ClusterAttackTypes": cluster_attack_types_map.get(str_cluster_id_val, [])
+            "ClusterAttackTypes": cluster_attack_types_map.get(str_cluster_id_val, []),
+            "anomalousCount": anomalous_counts_map.get(cluster_id_val, 0) # ADD THIS to the response
         })
     
     logging.info(f"Number of items in filtered_pivot for metric '{metric}': {len(filtered_pivot)}")

@@ -22,7 +22,6 @@
     ];
     window.currentSankeyDimensionsOrder = [...DEFAULT_SANKEY_DIMENSIONS];
     window.sankeyMatchingClusterIds = new Set();
-
     window.activeSankeyFilter = null;
 
     window.fullTimelineData = null;
@@ -32,10 +31,6 @@
     const SELECTED_NODE_COLOR = '#ff0000';
     const SELECTED_EDGE_WIDTH = 3.5;
     const SELECTED_EDGE_ZINDEX = 999;
-
-    let magnifyingGlass, magnifyingContent, bodyClone;
-    let isMagnifyingGlassActive = false;
-    const zoomFactor = 2; // How much to zoom in
 
     let sankeyDiagramRendered = false;
     let globalAbortController = new AbortController();
@@ -2294,7 +2289,7 @@
                     if (window.lastAppliedTimeSelection) {
                         updateManualTimeInputs(window.lastAppliedTimeSelection.startTime, window.lastAppliedTimeSelection.endTime);
                     } else {
-                        updateManualTimeInputs(domainStart, domainEnd);
+                        updateManualTimeInputs(domainStart, domainend);
                     }
                     disableManualApplyButton();
                     return;
@@ -2556,24 +2551,17 @@
         const aggregatedLeafData = new Map();
         const aggregateOriginalClusters = (originalIds, isGroupNode) => {
             const aggregatedMetrics = {};
-            // Use the 'Count' metric data as the single source of truth for anomaly status.
             const countMetricStore = window.fullHeatmapData['Count'] || []; 
             const isSingleOriginalCluster = originalIds.length === 1 && !isGroupNode;
 
-            // --- FIX: Part 1 ---
-            // First, determine the definitive anomaly status for the entire group of original clusters.
             let definitiveClusterAnomaly = 'normal';
             originalIds.forEach(originalId => {
                 const countEntry = countMetricStore.find(entry => String(entry.cluster) === String(originalId));
-                // If we find the cluster in the 'Count' data and its anomaly status is 'anomaly',
-                // the entire group is considered anomalous.
                 if (countEntry && countEntry.clusterAnomaly === 'anomaly') {
                     definitiveClusterAnomaly = 'anomaly';
                 }
             });
 
-            // --- FIX: Part 2 ---
-            // Now, loop through all the features to aggregate their values.
             features.forEach(metricLabel => {
                 const metricStore = window.fullHeatmapData[metricLabel] || [];
                 let valuesForAggregation = [];
@@ -2582,7 +2570,6 @@
                     const originalEntry = metricStore.find(entry => String(entry.cluster) === String(originalId));
                     if (originalEntry) {
                         const value = originalEntry.value;
-                        // We still need the count for weighted averages.
                         const countEntryForWeight = countMetricStore.find(entry => String(entry.cluster) === String(originalId));
                         const weight = countEntryForWeight?.value || 1;
 
@@ -2592,11 +2579,9 @@
                     }
                 });
                 
-                // Apply the definitive anomaly status we found in Part 1.
                 aggregatedMetrics[`${metricLabel}_anomaly`] = definitiveClusterAnomaly;
                 let finalValue = null;
 
-                // The rest of the value aggregation logic remains the same.
                 if (valuesForAggregation.length > 0) {
                     if (isSingleOriginalCluster) {
                         finalValue = valuesForAggregation[0].value;
@@ -2609,7 +2594,6 @@
                             case 'Unique Destinations':
                                 finalValue = d3.sum(valuesForAggregation, d => d.value);
                                 break;
-
                             case '% SYN packets':
                             case '% RST packets':
                             case '% ACK packets':
@@ -2619,15 +2603,12 @@
                                 const totalWeight = d3.sum(valuesForAggregation, d => d.weight);
                                 finalValue = totalWeight > 0 ? totalValue / totalWeight : 0;
                                 break;
-
                             case 'Start Time':
                                 finalValue = d3.min(valuesForAggregation, d => d.value);
                                 break;
-
                             case 'Duration':
                                 finalValue = d3.max(valuesForAggregation, d => d.value);
                                 break;
-
                             default:
                                 finalValue = d3.mean(valuesForAggregation, d => d.value);
                                 break;
@@ -2636,6 +2617,16 @@
                 }
                 aggregatedMetrics[metricLabel] = finalValue;
             });
+            
+            let totalAnomalousCount = 0;
+            originalIds.forEach(originalId => {
+                const countEntry = countMetricStore.find(entry => String(entry.cluster) === String(originalId));
+                if (countEntry && typeof countEntry.anomalousCount === 'number') {
+                    totalAnomalousCount += countEntry.anomalousCount;
+                }
+            });
+            aggregatedMetrics['anomalousCount'] = totalAnomalousCount;
+
             return aggregatedMetrics;
         };
 
@@ -2694,14 +2685,26 @@
             metaDataParts.push(packetCountAvailable ? `Packets: ${totalPacketCountDendro.toLocaleString()}` : "Packets: N/A");
             
             let totalSelectedPacketCount = 0;
+            let totalSelectedAnomalousPacketCount = 0;
+            let isAnySelectedClusterAnomalous = false;
+
             if (clusterHighlightColors.size > 0) {
                 clusterHighlightColors.forEach((_, clusterId) => {
                     const leafAggEntry = aggregatedLeafData.get(String(clusterId));
                     if (leafAggEntry && typeof leafAggEntry['Count'] === 'number') {
                         totalSelectedPacketCount += leafAggEntry['Count'];
+                        
+                        if (leafAggEntry.anomalousCount && leafAggEntry.anomalousCount > 0) {
+                            isAnySelectedClusterAnomalous = true;
+                            totalSelectedAnomalousPacketCount += leafAggEntry.anomalousCount;
+                        }
                     }
                 });
                 metaDataParts.push(`Selected Packets: ${totalSelectedPacketCount.toLocaleString()}`);
+
+                if (isAnySelectedClusterAnomalous) {
+                    metaDataParts.push(`Anomalous Packets: ${totalSelectedAnomalousPacketCount.toLocaleString()}`);
+                }
             }
 
             const separator = "&nbsp;&nbsp;|&nbsp;&nbsp;";
@@ -2884,7 +2887,8 @@
                         cell.attr("data-original-fill", currentFill);
 
                         const userClickedHighlightColor = clusterHighlightColors.get(cellClusterIdStr);
-                        cell.attr("fill", userClickedHighlightColor ? userClickedHighlightColor : currentFill)
+                        // *** FIX: Always use the metric-based color for the fill ***
+                        cell.attr("fill", currentFill)
                             .style("stroke", userClickedHighlightColor ? userClickedHighlightColor : defaultStrokeColor)
                             .style("stroke-width", userClickedHighlightColor ? highlightStrokeWidth : defaultStrokeWidth);
                     })
@@ -4888,6 +4892,10 @@
         const resetBtn = document.getElementById('resetTimelineBtn');
         const applyBtn = document.getElementById('applyTimelineBtn');
         const tooltip = d3.select("#tooltip");
+        const manualStartTimeInput = document.getElementById('manualStartTime');
+        const manualEndTimeInput = document.getElementById('manualEndTime');
+        const applyManualTimeBtn = document.getElementById('applyManualTimeBtn');
+
 
         if (!timelineCard || !timelineContainer || !resetBtn || !applyBtn || !tooltip.node()) {
             console.error("Timeline container, buttons, or tooltip not found.");
@@ -4922,9 +4930,15 @@
             const parseDate = d3.isoParse;
             data.forEach(d => {
                 d.time = parseDate(d.time);
-                d.endTime = d.endTime ? parseDate(d.endTime) : null; 
+                d.endTime = d.endTime ? parseDate(d.endTime) : null;
                 d.value = +d.value;
             });
+            
+            const originalBlue = "#a0aec0";
+            const darkerBlue = d3.color(originalBlue).darker(0.6).toString();
+            const originalOrange = "orange";
+            const darkerOrange = d3.color(originalOrange).darker(0.6).toString();
+
 
             const margin = { top: 10, right: 30, bottom: 40, left: 50 };
             const width = timelineContainer.clientWidth - margin.left - margin.right;
@@ -4946,6 +4960,7 @@
             }
             y.domain([0, yMax * 1.1]);
             window.timelineXScale = x;
+            const bisectDate = d3.bisector(d => d.time).left;
 
             context.selectAll(".bar")
                 .data(data)
@@ -4956,97 +4971,12 @@
                 .attr("y", d => y(d.value))
                 .attr("width", d => d.endTime ? (x(d.endTime) - x(d.time)) : 0)
                 .attr("height", d => height - y(d.value))
-                .attr("fill", d => d.isAttack ? "orange" : "#a0aec0");
-
-            // ADDED: Logic to draw the processed timeframe overlay
-            if (window.lastAppliedTimeSelection) {
-                const domain = x.domain();
-                const start = window.lastAppliedTimeSelection.startTime;
-                const end = window.lastAppliedTimeSelection.endTime;
-                // Ensure the overlay is within the visible domain
-                if (start >= domain[0] && end <= domain[1]) {
-                    context.append("rect")
-                        .attr("class", "processed-time-overlay")
-                        .attr("x", x(start))
-                        .attr("y", 0)
-                        .attr("width", x(end) - x(start))
-                        .attr("height", height);
-                }
-            }
-
-            context.append("g").attr("class", "axis axis--x").attr("transform", `translate(0,${height})`).call(d3.axisBottom(x));
-            context.append("g").attr("class", "axis axis--y").call(d3.axisLeft(y).ticks(4).tickFormat(d3.format(".2s")));
-
-            context.append("text")
-                    .attr("transform", "rotate(-90)")
-                    .attr("y", 0 - margin.left)
-                    .attr("x", 0 - (height / 2))
-                    .attr("dy", "1em")
-                    .style("text-anchor", "middle")
-                    .style("font-size", "12px")
-                    .style("fill", "#333")
-                    .style("font-weight", "500")
-                    .text("Packets");
-
-            const timeFormatAxis = d3.timeFormat("%Y-%m-%d %H:%M:%S");
-            const [startDate, endDate] = x.domain();
-
-            context.append("text")
-                .attr("x", 0)
-                .attr("y", height + margin.bottom - 10)
-                .attr("text-anchor", "start")
-                .style("font-size", "11px").style("fill", "#333").style("font-weight", "500")
-                .text(`Start: ${timeFormatAxis(startDate)}`);
-
-            context.append("text")
-                .attr("x", width)
-                .attr("y", height + margin.bottom - 10)
-                .attr("text-anchor", "end")
-                .style("font-size", "11px").style("fill", "#333").style("font-weight", "500")
-                .text(`End: ${timeFormatAxis(endDate)}`);
-
-            const brush = d3.brushX()
-                .extent([[0, 0], [width, height]])
-                .on("start brush", function() {
-                    tooltip.style("display", "none");
+                .attr("fill", d => d.isAttack ? originalOrange : originalBlue)
+                .on("mouseover", function(event) {
+                    tooltip.style("display", "block");
                 })
-                .on("end", brushended);
-
-            const brushGroup = context.append("g").attr("class", "brush").call(brush);
-            window.timelineBrush = brush;
-
-            function brushended(event) {
-                brushGroup.on("mouseover", function() { tooltip.style("display", "block"); });
-
-                const selection = event.selection;
-                if (!selection) {
-                    window.currentTimeSelection = null;
-                } else {
-                    const [x0, x1] = selection.map(x.invert);
-                    window.currentTimeSelection = { startTime: x0, endTime: x1 };
-                    updateManualTimeInputs(x0, x1);
-                }
-                disableManualApplyButton();
-                updateTimelineButtonStates();
-            }
-
-            resetBtn.onclick = () => {
-                brushGroup.call(brush.move, x.range());
-            };
-
-            const bisectDate = d3.bisector(d => d.time).left;
-
-            brushGroup
-                .on("mouseover", function() { tooltip.style("display", "block"); })
                 .on("mouseout", function() { tooltip.style("display", "none"); })
-                .on("mousemove", function(event) {
-                    const pointer = d3.pointer(event, this);
-                    const x0 = x.invert(pointer[0]);
-                    const i = bisectDate(data, x0, 1);
-                    const d0 = data[i - 1];
-                    const d1 = data[i];
-                    const d = (d1 && (x0 - d0.time > d1.time - x0)) ? d1 : d0;
-
+                .on("mousemove", function(event, d) {
                     const timeFormat = d3.timeFormat("%H:%M:%S");
                     let tooltipHtml = `<strong>Time:</strong> ${timeFormat(d.time)} - ${timeFormat(d.endTime)}<br>`;
                     tooltipHtml += `<strong>Total Packets:</strong> ${d.value.toLocaleString()}<br>`;
@@ -5078,20 +5008,66 @@
                     let left = event.pageX + 15;
                     let top = event.pageY - 28;
 
-                    if (left + tooltipWidth > windowWidth) {
-                        left = event.pageX - tooltipWidth - 15;
-                    }
-                    if (top + tooltipHeight > windowHeight) {
-                        top = event.pageY - tooltipHeight;
-                    }
-                    if (top < 0) {
-                        top = 0;
-                    }
+                    if (left + tooltipWidth > windowWidth) { left = event.pageX - tooltipWidth - 15; }
+                    if (top + tooltipHeight > windowHeight) { top = event.pageY - tooltipHeight; }
+                    if (top < 0) { top = 0; }
 
-                    tooltip.style("left", left + "px")
-                        .style("top", top + "px");
+                    tooltip.style("left", left + "px").style("top", top + "px");
                 });
 
+            if (window.lastAppliedTimeSelection) {
+                const domain = x.domain();
+                const start = window.lastAppliedTimeSelection.startTime;
+                const end = window.lastAppliedTimeSelection.endTime;
+                if (start >= domain[0] && end <= domain[1]) {
+                    context.append("rect")
+                        .attr("class", "processed-time-overlay")
+                        .attr("x", x(start))
+                        .attr("y", 0)
+                        .attr("width", x(end) - x(start))
+                        .attr("height", height);
+                }
+            }
+
+            context.append("g").attr("class", "axis axis--x").attr("transform", `translate(0,${height})`).call(d3.axisBottom(x));
+            context.append("g").attr("class", "axis axis--y").call(d3.axisLeft(y).ticks(4).tickFormat(d3.format(".2s")));
+
+            context.append("text").attr("transform", "rotate(-90)").attr("y", 0 - margin.left).attr("x", 0 - (height / 2)).attr("dy", "1em").style("text-anchor", "middle").style("font-size", "12px").style("fill", "#333").style("font-weight", "500").text("Packets");
+
+            const timeFormatAxis = d3.timeFormat("%Y-%m-%d %H:%M:%S");
+            const [startDate, endDate] = x.domain();
+
+            context.append("text").attr("x", 0).attr("y", height + margin.bottom - 10).attr("text-anchor", "start").style("font-size", "11px").style("fill", "#333").style("font-weight", "500").text(`Start: ${timeFormatAxis(startDate)}`);
+            context.append("text").attr("x", width).attr("y", height + margin.bottom - 10).attr("text-anchor", "end").style("font-size", "11px").style("fill", "#333").style("font-weight", "500").text(`End: ${timeFormatAxis(endDate)}`);
+
+            const brush = d3.brushX()
+                .extent([[0, 0], [width, height]])
+                .on("end", brushended);
+
+            const brushGroup = context.append("g").attr("class", "brush").call(brush);
+            window.timelineBrush = brush;
+
+            function brushended(event) {
+                if (!event.sourceEvent) return; 
+
+                const selection = event.selection;
+                if (!selection) {
+                    window.currentTimeSelection = null;
+                } else {
+                    const [x0, x1] = selection.map(x.invert);
+                    window.currentTimeSelection = { startTime: x0, endTime: x1 };
+                    updateManualTimeInputs(x0, x1);
+                    if (manualStartTimeInput) manualStartTimeInput.disabled = false;
+                    if (manualEndTimeInput) manualEndTimeInput.disabled = false;
+                }
+                disableManualApplyButton();
+                updateTimelineButtonStates();
+            }
+
+            resetBtn.onclick = () => {
+                brushGroup.call(brush.move, x.range());
+            };
+                
             if (window.lastAppliedTimeSelection && window.lastAppliedTimeSelection.startTime && window.lastAppliedTimeSelection.endTime) {
                 const appliedStart = window.lastAppliedTimeSelection.startTime;
                 const appliedEnd = window.lastAppliedTimeSelection.endTime;
@@ -5109,6 +5085,11 @@
                 brushGroup.call(brush.move, x.range());
                 const [initialStartTime, initialEndTime] = x.domain();
                 window.currentTimeSelection = { startTime: initialStartTime, endTime: initialEndTime };
+            }
+            
+            // This is the fix: Update the inputs after the initial brush is set
+            if(window.currentTimeSelection) {
+                updateManualTimeInputs(window.currentTimeSelection.startTime, window.currentTimeSelection.endTime);
             }
 
             updateTimelineButtonStates();
