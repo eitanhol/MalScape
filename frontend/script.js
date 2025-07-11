@@ -413,6 +413,8 @@
         } catch (error) {
             console.error("Error resetting tree elements:", error);
         }
+        
+        updateSubtreeButtonState();
 
         // Reset Sidebar Layout Dropdown
         document.getElementById('sidebarLayoutSelect').value = 'cose';
@@ -422,6 +424,10 @@
         if (maxNodeSizeInput) {
             maxNodeSizeInput.placeholder = "Largest node size = N/A";
             maxNodeSizeInput.value = ""; // Also clear any user-entered value
+        }
+
+        if (typeof window.updateDendrogramMetadata === 'function') {
+            window.updateDendrogramMetadata();
         }
 
         console.log("Sidebar visualization, color map, selections, table, and related highlights cleared.");
@@ -2711,6 +2717,9 @@
             metaDataLineDiv.innerHTML = metaDataParts.filter(p => p).join(separator);
         }
 
+        // EXPOSE THE METADATA UPDATE FUNCTION TO BE CALLED EXTERNALLY
+        window.updateDendrogramMetadata = updateMetadataDisplay;
+
         updateMetadataDisplay();
 
         if (selectedMetric !== 'Default' && window.fullHeatmapData && window.fullHeatmapData[selectedMetric]) {
@@ -4889,32 +4898,17 @@
     async function drawTimeline() {
         const timelineCard = document.getElementById('timeline-card');
         const timelineContainer = document.getElementById('timeline-container');
-        const resetBtn = document.getElementById('resetTimelineBtn');
-        const applyBtn = document.getElementById('applyTimelineBtn');
-        const tooltip = d3.select("#tooltip");
-        const manualStartTimeInput = document.getElementById('manualStartTime');
-        const manualEndTimeInput = document.getElementById('manualEndTime');
-        const applyManualTimeBtn = document.getElementById('applyManualTimeBtn');
 
-
-        if (!timelineCard || !timelineContainer || !resetBtn || !applyBtn || !tooltip.node()) {
-            console.error("Timeline container, buttons, or tooltip not found.");
+        if (!timelineCard || !timelineContainer) {
+            console.error("Timeline container or card not found.");
             return;
         }
 
-        applyBtn.onclick = () => {
-            if (window.currentTimeSelection) {
-                initializeAndLoadVisuals(
-                    window.currentTimeSelection.startTime.toISOString(),
-                    window.currentTimeSelection.endTime.toISOString()
-                );
-            } else {
-                alert("No time window selected to process.");
-            }
-        };
-
-        timelineContainer.innerHTML = '';
-        window.timelineXScale = null;
+        // If data is already cached, just render it and exit.
+        if (window.fullTimelineData) {
+            _renderTimelineFromData(window.fullTimelineData);
+            return;
+        }
 
         try {
             const timelineResponse = await fetch(`${API_BASE_URL}/timeline_data`);
@@ -4926,173 +4920,17 @@
                 return;
             }
 
-            timelineCard.style.display = 'block';
+            // Process and cache the data
             const parseDate = d3.isoParse;
             data.forEach(d => {
                 d.time = parseDate(d.time);
                 d.endTime = d.endTime ? parseDate(d.endTime) : null;
                 d.value = +d.value;
             });
-            
-            const originalBlue = "#a0aec0";
-            const darkerBlue = d3.color(originalBlue).darker(0.6).toString();
-            const originalOrange = "orange";
-            const darkerOrange = d3.color(originalOrange).darker(0.6).toString();
+            window.fullTimelineData = data;
 
-
-            const margin = { top: 10, right: 30, bottom: 40, left: 50 };
-            const width = timelineContainer.clientWidth - margin.left - margin.right;
-            const height = 100 - margin.top - margin.bottom;
-
-            const svg = d3.select(timelineContainer).append("svg")
-                .attr("viewBox", `0 0 ${width + margin.left + margin.right} ${height + margin.top + margin.bottom}`)
-                .attr("preserveAspectRatio", "xMinYMid meet")
-                .style("width", "100%").style("height", "100%");
-
-            const context = svg.append("g").attr("transform", `translate(${margin.left},${margin.top})`);
-            const x = d3.scaleTime().range([0, width]);
-            const y = d3.scaleLinear().range([height, 0]);
-            const yMax = d3.max(data, d => d.value) || 1;
-
-            if (data.length > 0) {
-                const lastEndTime = data[data.length - 1].endTime;
-                x.domain([data[0].time, lastEndTime]);
-            }
-            y.domain([0, yMax * 1.1]);
-            window.timelineXScale = x;
-            const bisectDate = d3.bisector(d => d.time).left;
-
-            context.selectAll(".bar")
-                .data(data)
-                .enter().append("rect")
-                .attr("class", "bar")
-                .attr("shape-rendering", "crispEdges")
-                .attr("x", d => x(d.time))
-                .attr("y", d => y(d.value))
-                .attr("width", d => d.endTime ? (x(d.endTime) - x(d.time)) : 0)
-                .attr("height", d => height - y(d.value))
-                .attr("fill", d => d.isAttack ? originalOrange : originalBlue)
-                .on("mouseover", function(event) {
-                    tooltip.style("display", "block");
-                })
-                .on("mouseout", function() { tooltip.style("display", "none"); })
-                .on("mousemove", function(event, d) {
-                    const timeFormat = d3.timeFormat("%H:%M:%S");
-                    let tooltipHtml = `<strong>Time:</strong> ${timeFormat(d.time)} - ${timeFormat(d.endTime)}<br>`;
-                    tooltipHtml += `<strong>Total Packets:</strong> ${d.value.toLocaleString()}<br>`;
-                    tooltipHtml += `<strong>Status:</strong> <span style="color:${d.isAttack ? 'orange' : 'green'};">${d.isAttack ? 'Attack Detected' : 'Normal'}</span>`;
-
-                    if (d.isAttack && d.attackDetails && d.attackDetails.length > 0) {
-                        const attackEntriesHtml = d.attackDetails
-                            .map(attack => `<li>${attack.AttackType}: ${attack.Source}</li>`)
-                            .join('');
-                        tooltipHtml += `<ul style="margin: 2px 0 0 15px; padding: 0;">${attackEntriesHtml}</ul>`;
-                    }
-
-                    if (d.topSources && Object.keys(d.topSources).length > 0) {
-                        tooltipHtml += `<hr style="margin: 4px 0;"><strong>Top Sources:</strong>`;
-                        const sourcesHtml = Object.entries(d.topSources)
-                            .map(([ip, count]) => `<li>${ip} (${count.toLocaleString()} pkts)</li>`)
-                            .join('');
-                        tooltipHtml += `<ul style="margin: 2px 0 0 15px; padding: 0;">${sourcesHtml}</ul>`;
-                    }
-                    
-                    tooltip.html(tooltipHtml);
-
-                    const tooltipNode = tooltip.node();
-                    const tooltipWidth = tooltipNode.offsetWidth;
-                    const tooltipHeight = tooltipNode.offsetHeight;
-                    const windowWidth = window.innerWidth;
-                    const windowHeight = window.innerHeight;
-
-                    let left = event.pageX + 15;
-                    let top = event.pageY - 28;
-
-                    if (left + tooltipWidth > windowWidth) { left = event.pageX - tooltipWidth - 15; }
-                    if (top + tooltipHeight > windowHeight) { top = event.pageY - tooltipHeight; }
-                    if (top < 0) { top = 0; }
-
-                    tooltip.style("left", left + "px").style("top", top + "px");
-                });
-
-            if (window.lastAppliedTimeSelection) {
-                const domain = x.domain();
-                const start = window.lastAppliedTimeSelection.startTime;
-                const end = window.lastAppliedTimeSelection.endTime;
-                if (start >= domain[0] && end <= domain[1]) {
-                    context.append("rect")
-                        .attr("class", "processed-time-overlay")
-                        .attr("x", x(start))
-                        .attr("y", 0)
-                        .attr("width", x(end) - x(start))
-                        .attr("height", height);
-                }
-            }
-
-            context.append("g").attr("class", "axis axis--x").attr("transform", `translate(0,${height})`).call(d3.axisBottom(x));
-            context.append("g").attr("class", "axis axis--y").call(d3.axisLeft(y).ticks(4).tickFormat(d3.format(".2s")));
-
-            context.append("text").attr("transform", "rotate(-90)").attr("y", 0 - margin.left).attr("x", 0 - (height / 2)).attr("dy", "1em").style("text-anchor", "middle").style("font-size", "12px").style("fill", "#333").style("font-weight", "500").text("Packets");
-
-            const timeFormatAxis = d3.timeFormat("%Y-%m-%d %H:%M:%S");
-            const [startDate, endDate] = x.domain();
-
-            context.append("text").attr("x", 0).attr("y", height + margin.bottom - 10).attr("text-anchor", "start").style("font-size", "11px").style("fill", "#333").style("font-weight", "500").text(`Start: ${timeFormatAxis(startDate)}`);
-            context.append("text").attr("x", width).attr("y", height + margin.bottom - 10).attr("text-anchor", "end").style("font-size", "11px").style("fill", "#333").style("font-weight", "500").text(`End: ${timeFormatAxis(endDate)}`);
-
-            const brush = d3.brushX()
-                .extent([[0, 0], [width, height]])
-                .on("end", brushended);
-
-            const brushGroup = context.append("g").attr("class", "brush").call(brush);
-            window.timelineBrush = brush;
-
-            function brushended(event) {
-                if (!event.sourceEvent) return; 
-
-                const selection = event.selection;
-                if (!selection) {
-                    window.currentTimeSelection = null;
-                } else {
-                    const [x0, x1] = selection.map(x.invert);
-                    window.currentTimeSelection = { startTime: x0, endTime: x1 };
-                    updateManualTimeInputs(x0, x1);
-                    if (manualStartTimeInput) manualStartTimeInput.disabled = false;
-                    if (manualEndTimeInput) manualEndTimeInput.disabled = false;
-                }
-                disableManualApplyButton();
-                updateTimelineButtonStates();
-            }
-
-            resetBtn.onclick = () => {
-                brushGroup.call(brush.move, x.range());
-            };
-                
-            if (window.lastAppliedTimeSelection && window.lastAppliedTimeSelection.startTime && window.lastAppliedTimeSelection.endTime) {
-                const appliedStart = window.lastAppliedTimeSelection.startTime;
-                const appliedEnd = window.lastAppliedTimeSelection.endTime;
-                const fullDomain = x.domain();
-                if (appliedStart >= fullDomain[0] && appliedEnd <= fullDomain[1]) {
-                    const initialSelection = [x(appliedStart), x(appliedEnd)];
-                    brushGroup.call(brush.move, initialSelection);
-                    window.currentTimeSelection = { ...window.lastAppliedTimeSelection };
-                } else {
-                    brushGroup.call(brush.move, x.range());
-                    const [initialStartTime, initialEndTime] = x.domain();
-                    window.currentTimeSelection = { startTime: initialStartTime, endTime: initialEndTime };
-                }
-            } else {
-                brushGroup.call(brush.move, x.range());
-                const [initialStartTime, initialEndTime] = x.domain();
-                window.currentTimeSelection = { startTime: initialStartTime, endTime: initialEndTime };
-            }
-            
-            // This is the fix: Update the inputs after the initial brush is set
-            if(window.currentTimeSelection) {
-                updateManualTimeInputs(window.currentTimeSelection.startTime, window.currentTimeSelection.endTime);
-            }
-
-            updateTimelineButtonStates();
+            // Render the timeline with the newly fetched data
+            _renderTimelineFromData(data);
 
         } catch (error) {
             console.error("Error drawing timeline:", error);
@@ -5172,6 +5010,193 @@
         }
     }
 
+    function _renderTimelineFromData(data) {
+        const timelineCard = document.getElementById('timeline-card');
+        const timelineContainer = document.getElementById('timeline-container');
+        const resetBtn = document.getElementById('resetTimelineBtn');
+        const applyBtn = document.getElementById('applyTimelineBtn');
+        const tooltip = d3.select("#tooltip");
+
+        timelineContainer.innerHTML = '';
+        timelineCard.style.display = 'block';
+        
+        const originalBlue = "#a0aec0";
+        const darkerBlue = d3.color(originalBlue).darker(0.6).toString();
+        const originalOrange = "orange";
+        const darkerOrange = d3.color(originalOrange).darker(0.6).toString();
+
+        const margin = { top: 10, right: 30, bottom: 40, left: 50 };
+        const width = timelineContainer.clientWidth - margin.left - margin.right;
+        const height = 100 - margin.top - margin.bottom;
+
+        const svg = d3.select(timelineContainer).append("svg")
+            .attr("viewBox", `0 0 ${width + margin.left + margin.right} ${height + margin.top + margin.bottom}`)
+            .attr("preserveAspectRatio", "xMinYMid meet")
+            .style("width", "100%").style("height", "100%");
+
+        const context = svg.append("g").attr("transform", `translate(${margin.left},${margin.top})`);
+        const x = d3.scaleTime().range([0, width]);
+        const y = d3.scaleLinear().range([height, 0]);
+        const yMax = d3.max(data, d => d.value) || 1;
+
+        if (data.length > 0) {
+            const lastEndTime = data[data.length - 1].endTime;
+            x.domain([data[0].time, lastEndTime]);
+        }
+        y.domain([0, yMax * 1.1]);
+        window.timelineXScale = x;
+
+        context.selectAll(".bar")
+            .data(data)
+            .enter().append("rect")
+            .attr("class", "bar")
+            .attr("shape-rendering", "crispEdges")
+            .attr("x", d => x(d.time))
+            .attr("y", d => y(d.value))
+            .attr("width", d => d.endTime ? (x(d.endTime) - x(d.time)) : 0)
+            .attr("height", d => height - y(d.value))
+            .attr("fill", d => d.isAttack ? originalOrange : originalBlue)
+            .on("mouseover", function(event) {
+                tooltip.style("display", "block");
+            })
+            .on("mouseout", function() { tooltip.style("display", "none"); })
+            .on("mousemove", function(event, d) {
+                const timeFormat = d3.timeFormat("%H:%M:%S");
+                let tooltipHtml = `<strong>Time:</strong> ${timeFormat(d.time)} - ${timeFormat(d.endTime)}<br>`;
+                tooltipHtml += `<strong>Total Packets:</strong> ${d.value.toLocaleString()}<br>`;
+                tooltipHtml += `<strong>Status:</strong> <span style="color:${d.isAttack ? 'orange' : 'green'};">${d.isAttack ? 'Attack Detected' : 'Normal'}</span>`;
+
+                if (d.isAttack && d.attackDetails && d.attackDetails.length > 0) {
+                    const attackEntriesHtml = d.attackDetails
+                        .map(attack => `<li>${attack.AttackType}: ${attack.Source}</li>`)
+                        .join('');
+                    tooltipHtml += `<ul style="margin: 2px 0 0 15px; padding: 0;">${attackEntriesHtml}</ul>`;
+                }
+
+                if (d.topSources && Object.keys(d.topSources).length > 0) {
+                    tooltipHtml += `<hr style="margin: 4px 0;"><strong>Top Sources:</strong>`;
+                    const sourcesHtml = Object.entries(d.topSources)
+                        .map(([ip, count]) => `<li>${ip} (${count.toLocaleString()} pkts)</li>`)
+                        .join('');
+                    tooltipHtml += `<ul style="margin: 2px 0 0 15px; padding: 0;">${sourcesHtml}</ul>`;
+                }
+                
+                tooltip.html(tooltipHtml);
+                const tooltipNode = tooltip.node();
+                const tooltipWidth = tooltipNode.offsetWidth;
+                const tooltipHeight = tooltipNode.offsetHeight;
+                let left = event.pageX + 15;
+                if (left + tooltipWidth > window.innerWidth) { left = event.pageX - tooltipWidth - 15; }
+                tooltip.style("left", left + "px").style("top", (event.pageY - 28) + "px");
+            });
+
+        if (window.lastAppliedTimeSelection) {
+            const domain = x.domain();
+            const start = window.lastAppliedTimeSelection.startTime;
+            const end = window.lastAppliedTimeSelection.endTime;
+            if (start >= domain[0] && end <= domain[1]) {
+                context.append("rect")
+                    .attr("class", "processed-time-overlay")
+                    .attr("x", x(start))
+                    .attr("y", 0)
+                    .attr("width", x(end) - x(start))
+                    .attr("height", height);
+            }
+        }
+
+        context.append("g").attr("class", "axis axis--x").attr("transform", `translate(0,${height})`).call(d3.axisBottom(x));
+        context.append("g").attr("class", "axis axis--y").call(d3.axisLeft(y).ticks(4).tickFormat(d3.format(".2s")));
+
+        context.append("text").attr("transform", "rotate(-90)").attr("y", 0 - margin.left).attr("x", 0 - (height / 2)).attr("dy", "1em").style("text-anchor", "middle").style("font-size", "12px").style("fill", "#333").style("font-weight", "500").text("Packets");
+        
+        const timeFormatAxis = d3.timeFormat("%Y-%m-%d %H:%M:%S");
+        const [startDate, endDate] = x.domain();
+        context.append("text").attr("x", 0).attr("y", height + margin.bottom - 10).attr("text-anchor", "start").style("font-size", "11px").style("fill", "#333").style("font-weight", "500").text(`Start: ${timeFormatAxis(startDate)}`);
+        context.append("text").attr("x", width).attr("y", height + margin.bottom - 10).attr("text-anchor", "end").style("font-size", "11px").style("fill", "#333").style("font-weight", "500").text(`End: ${timeFormatAxis(endDate)}`);
+        
+        const brushGroup = context.append("g").attr("class", "brush");
+
+        function brushended(event) {
+            if (!event.sourceEvent) return; 
+
+            const selection = event.selection;
+            if (!selection) {
+                window.currentTimeSelection = null;
+            } else {
+                const [x0, x1] = selection.map(x.invert);
+                window.currentTimeSelection = { startTime: x0, endTime: x1 };
+                updateManualTimeInputs(x0, x1);
+                if (document.getElementById('manualStartTime')) document.getElementById('manualStartTime').disabled = false;
+                if (document.getElementById('manualEndTime')) document.getElementById('manualEndTime').disabled = false;
+            }
+            disableManualApplyButton();
+            updateTimelineButtonStates();
+        }
+
+        function brushing(event) {
+            if (!event.sourceEvent || !event.selection) return;
+
+            if (!event.sourceEvent.ctrlKey) {
+                const [x0_pix, x1_pix] = event.selection;
+                window.currentTimeSelection = { startTime: x.invert(x0_pix), endTime: x.invert(x1_pix) };
+                return; 
+            }
+
+            const [x0_pix, x1_pix] = event.selection;
+            const pointer_pix = d3.pointer(event.sourceEvent, context.node())[0];
+
+            let closestTime = null;
+            let minDiff = Infinity;
+
+            data.forEach(d => {
+                const diffStart = Math.abs(pointer_pix - x(d.time));
+                if (diffStart < minDiff) {
+                    minDiff = diffStart;
+                    closestTime = d.time;
+                }
+                if (d.endTime) {
+                    const diffEnd = Math.abs(pointer_pix - x(d.endTime));
+                    if (diffEnd < minDiff) {
+                        minDiff = diffEnd;
+                        closestTime = d.endTime;
+                    }
+                }
+            });
+
+            if (closestTime === null) return;
+            const snap_pix = x(closestTime);
+            const draggingStart = Math.abs(pointer_pix - x0_pix) < Math.abs(pointer_pix - x1_pix);
+            
+            if (draggingStart && snap_pix < x1_pix) {
+                d3.select(this).call(event.target.move, [snap_pix, x1_pix]);
+            } else if (!draggingStart && snap_pix > x0_pix) {
+                d3.select(this).call(event.target.move, [x0_pix, snap_pix]);
+            }
+        }
+
+        const brush = d3.brushX()
+            .extent([[0, 0], [width, height]])
+            .on("brush", brushing)
+            .on("end", brushended);
+
+        brushGroup.call(brush);
+        window.timelineBrush = brush;
+
+        resetBtn.onclick = () => brushGroup.call(brush.move, x.range());
+        
+        const initialSelection = window.lastAppliedTimeSelection || { startTime: x.domain()[0], endTime: x.domain()[1] };
+        const initialBrushRange = [x(initialSelection.startTime), x(initialSelection.endTime)];
+        brushGroup.call(brush.move, initialBrushRange);
+
+        if (!d3.brushSelection(brushGroup.node())) {
+            brushGroup.call(brush.move, initialBrushRange);
+        }
+        window.currentTimeSelection = initialSelection;
+        updateManualTimeInputs(initialSelection.startTime, initialSelection.endTime);
+        
+        updateTimelineButtonStates();
+    }
+
     async function initializeAndLoadVisuals(startTime, endTime) {
         showLoading();
         try {
@@ -5200,18 +5225,8 @@
             await updateTimeInfoDisplay();
             await loadInlineDendrogram();
             
-            if (!window.fullTimelineData) {
-                await drawTimeline(); 
-            } else {
-                const brushGroup = d3.select("#timeline-container .brush");
-                if (!brushGroup.empty() && window.timelineBrush && window.timelineXScale) {
-                    const selection = [
-                        window.timelineXScale(window.lastAppliedTimeSelection.startTime),
-                        window.timelineXScale(window.lastAppliedTimeSelection.endTime)
-                    ];
-                    brushGroup.call(window.timelineBrush.move, selection);
-                }
-            }
+            // This call now efficiently uses the cache
+            await drawTimeline(); 
             
             const timelineCard = document.getElementById('timeline-card');
             const toggleTimelineBtn = document.getElementById('toggleTimelineBtn');

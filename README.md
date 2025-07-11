@@ -1,5 +1,17 @@
 # Changelog
 
+## [2025-07-10]
+### Fixed
+- "Create sub tree from selection" button not hiding after clicking "Reset node selection"
+- Listing of packets from selected clusters not hiding after clicking "Reset node selection"
+- Timeline input boxes being empty before making a change
+
+### Added
+- Caching to timeline data to optimize visualization speed
+
+### Improved
+- Can now hold Control while dragging the timeline window to lock onto edges of timeline blocks (does not yet work if Control is held before dragging)
+
 ## [2025-07-09]
 ### Added
 - Listing of total anomalous packets from selected clusters
