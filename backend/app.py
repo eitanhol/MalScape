@@ -469,15 +469,12 @@ def prepare_dataframe_from_upload(df: pd.DataFrame):
                              right=True).astype(str).fillna('N/A').astype('category')
     logging.info(f"PROFILE: Sankey pre-computation took: {time.perf_counter() - sankey_precompute_start:.4f} seconds")
     
-    # --- PERFORMANCE OPTIMIZATION ---
     if 'Time' in df.columns and pd.api.types.is_datetime64_any_dtype(df["Time"]):
-        # Important: Reset index before setting 'Time' to avoid MultiIndex errors
         if isinstance(df.index, pd.MultiIndex):
             df.reset_index(inplace=True)
         df.set_index('Time', inplace=True)
         df.sort_index(inplace=True)
         logging.info("Set and sorted 'Time' column as the DataFrame index for performance.")
-    # --- END PERFORMANCE OPTIMIZATION ---
 
     logging.info(f"PROFILE: Total prepare_dataframe_from_upload took: {time.perf_counter() - overall_start_time:.4f} seconds")
     logging.info(f"DataFrame feature engineering complete. Shape after processing: {df.shape}")
@@ -485,8 +482,20 @@ def prepare_dataframe_from_upload(df: pd.DataFrame):
 
 # --- Flask App Setup ---
 app = Flask(__name__)
-CORS(app) # Enable CORS for all routes
-logging.info("--- FLASK APP INITIALIZED (Parquet Version) ---")
+
+# Start with your local development frontend servers
+allowed_origins = [
+    "http://127.0.0.1:5500",
+    "http://127.0.0.1:5501",
+    "http://127.0.0.1:5502",
+]
+
+heroku_url = os.environ.get("FRONTEND_URL")
+if heroku_url:
+    allowed_origins.append(heroku_url)
+
+CORS(app, resources={r"/*": {"origins": allowed_origins}})
+logging.info(f"--- FLASK APP INITIALIZED --- CORS enabled for: {allowed_origins}")
 
 
 @app.route('/process_uploaded_file', methods=['POST'])
@@ -1500,15 +1509,39 @@ def timeline_data():
     if duration_seconds <= 0:
         return jsonify([])
 
-    if duration_seconds <= 180: interval_seconds = 1
-    elif duration_seconds <= 600: interval_seconds = 2
-    elif duration_seconds <= 1800: interval_seconds = 5
-    elif duration_seconds <= 3600: interval_seconds = 10
-    elif duration_seconds <= 7200: interval_seconds = 15
-    elif duration_seconds <= 21600: interval_seconds = 30
-    elif duration_seconds <= 43200: interval_seconds = 60 
-    elif duration_seconds <= 86400: interval_seconds = 120
-    else: interval_seconds = 300
+    # Check for user-defined granularity from request arguments
+    interval_ms_str = request.args.get('interval_ms')
+    if interval_ms_str:
+        try:
+            interval_ms = int(interval_ms_str)
+            if interval_ms > 0:
+                interval_seconds = interval_ms / 1000.0
+                logging.info(f"Using user-defined timeline granularity: {interval_ms}ms ({interval_seconds}s)")
+            else:
+                raise ValueError("Interval must be positive.")
+        except (ValueError, TypeError):
+            logging.warning(f"Invalid interval_ms '{interval_ms_str}' received. Falling back to automatic calculation.")
+            # Fallback to automatic calculation
+            if duration_seconds <= 180: interval_seconds = 1
+            elif duration_seconds <= 600: interval_seconds = 2
+            elif duration_seconds <= 1800: interval_seconds = 5
+            elif duration_seconds <= 3600: interval_seconds = 10
+            elif duration_seconds <= 7200: interval_seconds = 15
+            elif duration_seconds <= 21600: interval_seconds = 30
+            elif duration_seconds <= 43200: interval_seconds = 60 
+            elif duration_seconds <= 86400: interval_seconds = 120
+            else: interval_seconds = 300
+    else:
+        # Default automatic calculation if parameter is not provided
+        if duration_seconds <= 180: interval_seconds = 1
+        elif duration_seconds <= 600: interval_seconds = 2
+        elif duration_seconds <= 1800: interval_seconds = 5
+        elif duration_seconds <= 3600: interval_seconds = 10
+        elif duration_seconds <= 7200: interval_seconds = 15
+        elif duration_seconds <= 21600: interval_seconds = 30
+        elif duration_seconds <= 43200: interval_seconds = 60 
+        elif duration_seconds <= 86400: interval_seconds = 120
+        else: interval_seconds = 300
     
     standard_interval = pd.Timedelta(seconds=interval_seconds)
 

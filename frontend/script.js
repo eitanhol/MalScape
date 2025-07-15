@@ -1774,7 +1774,16 @@
         const manualStartTimeInput = document.getElementById('manualStartTime');
         const manualEndTimeInput = document.getElementById('manualEndTime');
         const applyManualTimeBtn = document.getElementById('applyManualTimeBtn');
-        
+        const applyGranularityBtn = document.getElementById('applyGranularityBtn');
+
+        if (applyGranularityBtn) {
+            applyGranularityBtn.addEventListener('click', () => {
+                // Invalidate the cache to force a refetch with the new granularity
+                window.fullTimelineData = null;
+                drawTimeline();
+            });
+        }
+
         createMagnifyingGlass();
         const magnifyingGlassBtn = document.getElementById('magnifyingGlassBtn');
         if (magnifyingGlassBtn) {
@@ -4444,8 +4453,13 @@
             .attr("height", svgHeight)
             .style("font", "10px sans-serif")
             .on("click", function(event) { // Click on background clears filter
-                if (event.target === this && window.activeSankeyFilter) {
+                if (event.target === this) {
                     window.activeSankeyFilter = null;
+                    window.activeSankeyNodeFilter = null; // Also clear the node filter
+                    const applyBtn = document.getElementById('applySankeyToHeatmapBtn');
+                    if (applyBtn) {
+                        applyBtn.disabled = true;
+                    }
                     fetchAndRenderSankeyDiagram();
                 }
             })
@@ -4470,7 +4484,6 @@
         const colorScale = d3.scaleOrdinal(d3.schemeCategory10);
         nodes.forEach(node => { node.color = colorScale(node.name.split(":")[0]); });
 
-        // --- RENDER LINKS (Proportional Split with Minimum Highlight Width) ---
         const linkGroups = svg.append("g").attr("class", "links").attr("fill", "none")
             .selectAll("g").data(links).join("g")
             .attr("class", "link")
@@ -4516,12 +4529,12 @@
             `Selected Value: ${(d_title.filtered_value || 0).toLocaleString()}`
         );
 
-        // --- RENDER NODES ---
         const nodeClickHandler = function(event, d_node_clicked) {
             event.stopPropagation();
             
             // If clicking the same node, clear the filter. Otherwise, set a new one.
-            if (window.activeSankeyFilter && window.activeSankeyFilter.label === d_node_clicked.name) {
+            if (window.activeSankeyNodeFilter && window.activeSankeyNodeFilter.label === d_node_clicked.name) {
+                window.activeSankeyNodeFilter = null;
                 window.activeSankeyFilter = null;
             } else {
                 const [dimensionLabel, ...valueParts] = d_node_clicked.name.split(': ');
@@ -4529,16 +4542,25 @@
                 const dimensionKey = (DEFAULT_SANKEY_DIMENSIONS.find(d => d.label === dimensionLabel) || {}).value;
 
                 if (dimensionKey) {
-                    window.activeSankeyFilter = {
+                    const newFilter = {
                         dimensionKey: dimensionKey,
                         value: value,
                         label: d_node_clicked.name
                     };
+                    window.activeSankeyNodeFilter = newFilter;
+                    window.activeSankeyFilter = newFilter; // Also set the visual filter
                 } else {
                     console.error("Could not find dimension key for label:", dimensionLabel);
+                    window.activeSankeyNodeFilter = null;
                     window.activeSankeyFilter = null;
                 }
             }
+            
+            const applyBtn = document.getElementById('applySankeyToHeatmapBtn');
+            if (applyBtn) {
+                applyBtn.disabled = !window.activeSankeyNodeFilter;
+            }
+
             // Re-fetch and re-render the entire Sankey with the new filter context
             fetchAndRenderSankeyDiagram();
         };
@@ -4904,14 +4926,24 @@
             return;
         }
 
-        // If data is already cached, just render it and exit.
+        // If data is already cached, just render it and exit. The 'Apply' button listener
+        // handles clearing this cache to force a refetch.
         if (window.fullTimelineData) {
             _renderTimelineFromData(window.fullTimelineData);
             return;
         }
 
         try {
-            const timelineResponse = await fetch(`${API_BASE_URL}/timeline_data`);
+            let url = new URL(`${API_BASE_URL}/timeline_data`);
+            const granularityInput = document.getElementById('timelineGranularityInput');
+            const granularityMs = granularityInput ? parseInt(granularityInput.value, 10) : null;
+            
+            // Append granularity parameter to the URL if it's a valid positive number
+            if (granularityMs && !isNaN(granularityMs) && granularityMs > 0) {
+                url.searchParams.append('interval_ms', granularityMs);
+            }
+
+            const timelineResponse = await fetch(url);
             if (!timelineResponse.ok) throw new Error(`HTTP error ${timelineResponse.status}`);
             let data = await timelineResponse.json();
 
@@ -5013,17 +5045,13 @@
     function _renderTimelineFromData(data) {
         const timelineCard = document.getElementById('timeline-card');
         const timelineContainer = document.getElementById('timeline-container');
-        const resetBtn = document.getElementById('resetTimelineBtn');
-        const applyBtn = document.getElementById('applyTimelineBtn');
         const tooltip = d3.select("#tooltip");
 
         timelineContainer.innerHTML = '';
         timelineCard.style.display = 'block';
-        
+
         const originalBlue = "#a0aec0";
-        const darkerBlue = d3.color(originalBlue).darker(0.6).toString();
         const originalOrange = "orange";
-        const darkerOrange = d3.color(originalOrange).darker(0.6).toString();
 
         const margin = { top: 10, right: 30, bottom: 40, left: 50 };
         const width = timelineContainer.clientWidth - margin.left - margin.right;
@@ -5055,41 +5083,8 @@
             .attr("y", d => y(d.value))
             .attr("width", d => d.endTime ? (x(d.endTime) - x(d.time)) : 0)
             .attr("height", d => height - y(d.value))
-            .attr("fill", d => d.isAttack ? originalOrange : originalBlue)
-            .on("mouseover", function(event) {
-                tooltip.style("display", "block");
-            })
-            .on("mouseout", function() { tooltip.style("display", "none"); })
-            .on("mousemove", function(event, d) {
-                const timeFormat = d3.timeFormat("%H:%M:%S");
-                let tooltipHtml = `<strong>Time:</strong> ${timeFormat(d.time)} - ${timeFormat(d.endTime)}<br>`;
-                tooltipHtml += `<strong>Total Packets:</strong> ${d.value.toLocaleString()}<br>`;
-                tooltipHtml += `<strong>Status:</strong> <span style="color:${d.isAttack ? 'orange' : 'green'};">${d.isAttack ? 'Attack Detected' : 'Normal'}</span>`;
-
-                if (d.isAttack && d.attackDetails && d.attackDetails.length > 0) {
-                    const attackEntriesHtml = d.attackDetails
-                        .map(attack => `<li>${attack.AttackType}: ${attack.Source}</li>`)
-                        .join('');
-                    tooltipHtml += `<ul style="margin: 2px 0 0 15px; padding: 0;">${attackEntriesHtml}</ul>`;
-                }
-
-                if (d.topSources && Object.keys(d.topSources).length > 0) {
-                    tooltipHtml += `<hr style="margin: 4px 0;"><strong>Top Sources:</strong>`;
-                    const sourcesHtml = Object.entries(d.topSources)
-                        .map(([ip, count]) => `<li>${ip} (${count.toLocaleString()} pkts)</li>`)
-                        .join('');
-                    tooltipHtml += `<ul style="margin: 2px 0 0 15px; padding: 0;">${sourcesHtml}</ul>`;
-                }
-                
-                tooltip.html(tooltipHtml);
-                const tooltipNode = tooltip.node();
-                const tooltipWidth = tooltipNode.offsetWidth;
-                const tooltipHeight = tooltipNode.offsetHeight;
-                let left = event.pageX + 15;
-                if (left + tooltipWidth > window.innerWidth) { left = event.pageX - tooltipWidth - 15; }
-                tooltip.style("left", left + "px").style("top", (event.pageY - 28) + "px");
-            });
-
+            .attr("fill", d => d.isAttack ? originalOrange : originalBlue);
+        
         if (window.lastAppliedTimeSelection) {
             const domain = x.domain();
             const start = window.lastAppliedTimeSelection.startTime;
@@ -5134,6 +5129,7 @@
         }
 
         function brushing(event) {
+            tooltip.style("display", "none");
             if (!event.sourceEvent || !event.selection) return;
 
             if (!event.sourceEvent.ctrlKey) {
@@ -5176,13 +5172,12 @@
 
         const brush = d3.brushX()
             .extent([[0, 0], [width, height]])
+            .filter(event => !event.button)
             .on("brush", brushing)
             .on("end", brushended);
 
         brushGroup.call(brush);
         window.timelineBrush = brush;
-
-        resetBtn.onclick = () => brushGroup.call(brush.move, x.range());
         
         const initialSelection = window.lastAppliedTimeSelection || { startTime: x.domain()[0], endTime: x.domain()[1] };
         const initialBrushRange = [x(initialSelection.startTime), x(initialSelection.endTime)];
@@ -5195,6 +5190,55 @@
         updateManualTimeInputs(initialSelection.startTime, initialSelection.endTime);
         
         updateTimelineButtonStates();
+
+        const bisector = d3.bisector(d => d.time).left;
+
+        svg.on("mousemove", function(event) {
+            if (!data || data.length === 0) return;
+
+            const [mx, my] = d3.pointer(event, this);
+            const mouseDate = x.invert(mx - margin.left);
+            const index = bisector(data, mouseDate, 1);
+            const d = data[index - 1];
+
+            if (d && mx >= margin.left && mx <= width + margin.left && my >= margin.top && my <= height + margin.top) {
+                const timeFormat = d3.timeFormat("%H:%M:%S");
+                let tooltipHtml = `<strong>Time:</strong> ${timeFormat(d.time)} - ${timeFormat(d.endTime)}<br>`;
+                tooltipHtml += `<strong>Total Packets:</strong> ${d.value.toLocaleString()}<br>`;
+                tooltipHtml += `<strong>Status:</strong> <span style="color:${d.isAttack ? 'orange' : 'green'};">${d.isAttack ? 'Attack Detected' : 'Normal'}</span>`;
+
+                if (d.isAttack && d.attackDetails && d.attackDetails.length > 0) {
+                    const attackEntriesHtml = d.attackDetails
+                        .map(attack => `<li>${attack.AttackType}: ${attack.Source}</li>`)
+                        .join('');
+                    tooltipHtml += `<ul style="margin: 2px 0 0 15px; padding: 0;">${attackEntriesHtml}</ul>`;
+                }
+
+                if (d.topSources && Object.keys(d.topSources).length > 0) {
+                    tooltipHtml += `<hr style="margin: 4px 0;"><strong>Top Sources:</strong>`;
+                    const sourcesHtml = Object.entries(d.topSources)
+                        .map(([ip, count]) => `<li>${ip} (${count.toLocaleString()} pkts)</li>`)
+                        .join('');
+                    tooltipHtml += `<ul style="margin: 2px 0 0 15px; padding: 0;">${sourcesHtml}</ul>`;
+                }
+                
+                tooltip.html(tooltipHtml).style("display", "block");
+
+                const tooltipNode = tooltip.node();
+                const tooltipWidth = tooltipNode.offsetWidth;
+                let left = event.pageX + 15;
+                if (left + tooltipWidth > window.innerWidth) {
+                    left = event.pageX - tooltipWidth - 15;
+                }
+                tooltip.style("left", left + "px").style("top", (event.pageY - 28) + "px");
+            } else {
+                tooltip.style("display", "none");
+            }
+        });
+
+        svg.on("mouseleave", function() {
+            tooltip.style("display", "none");
+        });
     }
 
     async function initializeAndLoadVisuals(startTime, endTime) {

@@ -1,5 +1,17 @@
 # Changelog
 
+## [2025-07-14]
+### Fixed
+- Sankey "Apply to heatmap" button not working with new selection functionality from 6/23
+- Holding Control before starting timeline window drag not working
+- Timeline tooltips not showing
+
+### Added
+- Option to choose timeline block granularity in milliseconds, with an "Apply" button
+
+### Improved
+- Alignment on timeline input boxes
+
 ## [2025-07-10]
 ### Fixed
 - "Create sub tree from selection" button not hiding after clicking "Reset node selection"

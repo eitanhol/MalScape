@@ -151,15 +151,22 @@
         <div style="display: flex; justify-content: space-between; align-items: center;">
             <h3 style="margin-top:0; margin-bottom: 5px;">Time Window Selector</h3>
             
-            <div>
-                <button id="processTimelineSelectionBtn" style="padding: 4px 8px; font-size: 12px; background-color: #007bff; display: none;">Process Selection</button>
-                <button id="applyTimelineBtn" style="padding: 4px 8px; font-size: 12px; background-color: #28a745; display: none;">Process Selection</button>
-                <button id="resetTimelineBtn" style="padding: 4px 8px; font-size: 12px; background-color: #6c757d; display: none;">Reset</button>
+            <div style="display: flex; align-items: baseline; gap: 15px;">
+                <div style="display: flex; align-items: baseline; gap: 5px;" title="Set timeline block size in milliseconds. Press Apply to refresh.">
+                    <label for="timelineGranularityInput" style="font-size: 12px; margin-bottom: 0; white-space: nowrap;">Granularity (ms):</label>
+                    <input type="number" id="timelineGranularityInput" value="2000" min="0" step="500" style="width: 80px; padding: 4px 6px; font-size: 11px;">
+                    <button id="applyGranularityBtn" style="padding: 4px 8px; font-size: 12px;">Apply</button>
+                </div>
+                <div>
+                    <button id="processTimelineSelectionBtn" style="padding: 4px 8px; font-size: 12px; background-color: #007bff; display: none;">Process Selection</button>
+                    <button id="applyTimelineBtn" style="padding: 4px 8px; font-size: 12px; background-color: #28a745; display: none;">Process Selection</button>
+                    <button id="resetTimelineBtn" style="padding: 4px 8px; font-size: 12px; background-color: #6c757d; display: none;">Reset</button>
+                </div>
             </div>
-            </div>
+        </div>
         <div id="timeline-container"></div>
         
-        <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #eee; display: flex; align-items: center; flex-wrap: wrap; gap: 10px;">
+        <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #eee; display: flex; align-items: baseline; flex-wrap: wrap; gap: 10px;">
             <label for="manualStartTime" style="font-size: 12px;">Start Time:</label>
             <input type="text" id="manualStartTime" placeholder="YYYY-MM-DD HH:MM:SS" style="padding: 4px 6px; font-size: 11px; border: 1px solid #ccc; border-radius: 4px; width: 160px;">
             
