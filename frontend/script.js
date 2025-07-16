@@ -1741,6 +1741,7 @@
         const applyFiltersBtn = document.getElementById('applyFiltersBtn');
         const sidebarToggleBtn = document.getElementById('sidebar-toggle');
         const resetSidebarBtn = document.getElementById('resetSidebarBtn');
+        const resetSidebarZoomBtn = document.getElementById('resetSidebarZoomBtn');
         const sidebarTableContainer = document.getElementById('sidebar-table-container');
         const sidebarGoPageBtn = document.getElementById('sidebarGoPageBtn');
         const sidebarSearchInput = document.getElementById('sidebarTableSearchInput');
@@ -1980,6 +1981,11 @@
                 document.getElementById('sidebarLayoutSelect').value = 'cose';
             });
         }
+
+        if (resetSidebarZoomBtn) {
+            resetSidebarZoomBtn.addEventListener('click', resetSidebarZoom);
+        }
+
         if (sidebarFullscreenBtn) {
             sidebarFullscreenBtn.addEventListener('click', toggleSidebarFullscreen);
         }
@@ -5566,6 +5572,170 @@
         // Deactivate the magnifying glass if the Escape key is pressed
         if (e.key === 'Escape' && isMagnifyingGlassActive) {
             toggleMagnifyingGlass();
+        }
+    }
+
+    function resetSidebarZoom() {
+        if (sidebarCy) {
+            // Re-apply the currently selected layout to reset positions
+            const layoutConfig = sidebarLayoutOptions[document.getElementById('sidebarLayoutSelect').value];
+            sidebarCy.layout(layoutConfig).run();
+
+            // Fit the graph to the viewport with default padding
+            sidebarCy.fit(null, 30);
+            console.log("Sidebar zoom and layout reset.");
+        }
+    }
+
+    async function showInitialDashboard() {
+        const dashboard = document.getElementById('initial-dashboard');
+        if (!dashboard) return;
+
+        try {
+            const response = await fetch(`${API_BASE_URL}/summary_stats`);
+            if (!response.ok) throw new Error('Failed to fetch summary stats');
+            const stats = await response.json();
+
+            document.getElementById('stat-total-packets').textContent = stats.total_packets.toLocaleString();
+            document.getElementById('stat-data-volume').textContent = formatBytes(stats.total_volume);
+            document.getElementById('stat-unique-sources').textContent = stats.unique_sources.toLocaleString();
+            document.getElementById('stat-unique-dests').textContent = stats.unique_dests.toLocaleString();
+
+            const protocolList = document.getElementById('stat-top-protocols');
+            protocolList.innerHTML = '';
+            if (stats.top_protocols && stats.top_protocols.length > 0) {
+                stats.top_protocols.slice(0, 3).forEach(proto => {
+                    const li = document.createElement('li');
+                    li.textContent = `${proto.protocol} (${proto.percentage.toFixed(1)}%)`;
+                    protocolList.appendChild(li);
+                });
+            } else {
+                protocolList.innerHTML = '<li>N/A</li>';
+            }
+
+            dashboard.style.display = 'block';
+
+        } catch (error) {
+            console.error("Error displaying initial dashboard:", error);
+            dashboard.innerHTML = '<p style="color:red;">Could not load initial data overview.</p>';
+            dashboard.style.display = 'block';
+        }
+    }
+
+    function formatBytes(bytes, decimals = 2) {
+        if (bytes === 0) return '0 Bytes';
+        const k = 1024;
+        const dm = decimals < 0 ? 0 : decimals;
+        const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB', 'PB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+    }
+
+    async function handleSuccessfulFileLoad(responseData) {
+        console.log("File loaded on backend. Resetting UI for new file.", responseData);
+
+        document.getElementById('mainFilterGroup').style.display = 'none';
+        document.getElementById('dendrogramCard').style.display = 'none';
+        document.getElementById('packetSimilarityCard').style.display = 'none';
+        document.getElementById('sankeyCard').style.display = 'none';
+        document.getElementById('downloadProcessedDataBtn').style.display = 'none';
+        document.getElementById('initial-dashboard').style.display = 'none'; // Hide it initially
+        
+        const showSankeyBtn = document.getElementById('showSankeyBtn');
+        if (showSankeyBtn) showSankeyBtn.style.display = 'none';
+        
+        const showPacketSimilarityBtn = document.getElementById('showPacketSimilarityBtn');
+        if (showPacketSimilarityBtn) showPacketSimilarityBtn.style.display = 'none';
+
+        document.getElementById('toggleTimelineBtn').style.display = 'none';
+        document.getElementById('createSubtreeBtn').style.display = 'none';
+        document.getElementById('backToMainTreeBtn').style.display = 'none';
+        
+        const applyManualTimeBtn = document.getElementById('applyManualTimeBtn');
+        if(applyManualTimeBtn) applyManualTimeBtn.disabled = true;
+
+        clearSidebarVisualization();
+        window.lastTreeData = null;
+        window.fullTimelineData = null;
+
+        const selectTimeframeManually = document.getElementById('selectTimeframeToggle').checked;
+
+        if (selectTimeframeManually) {
+            document.getElementById('topControls').style.display = 'block';
+            const timelineCard = document.getElementById('timeline-card');
+            if(timelineCard) timelineCard.style.display = 'block';
+            
+            await showInitialDashboard(); // Show the new dashboard
+            await drawTimeline();
+        } else {
+            if (responseData.start_time && responseData.end_time) {
+                document.getElementById('topControls').style.display = 'block';
+                await initializeAndLoadVisuals(responseData.start_time, responseData.end_time);
+            } else {
+                throw new Error("Backend did not return a valid time range for automatic processing.");
+            }
+        }
+    }
+
+    async function initializeAndLoadVisuals(startTime, endTime) {
+        // Hide the dashboard when processing starts
+        const dashboard = document.getElementById('initial-dashboard');
+        if (dashboard) dashboard.style.display = 'none';
+        
+        showLoading();
+        try {
+            globalAbortController = new AbortController();
+
+            const initResponse = await fetch(`${API_BASE_URL}/initialize_main_view`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    start_time: startTime,
+                    end_time: endTime,
+                }),
+                signal: globalAbortController.signal
+            });
+
+            if (globalAbortController.signal.aborted) throw new DOMException("Aborted");
+            if (!initResponse.ok) {
+                const errText = await initResponse.text();
+                throw new Error(`Failed to initialize main view: ${errText}`);
+            }
+            console.log("Main view initialized by backend for the selected time range.");
+            
+            window.lastAppliedTimeSelection = { startTime: new Date(startTime), endTime: new Date(endTime) };
+
+            await updateHeatmap();
+            await updateTimeInfoDisplay();
+            await loadInlineDendrogram();
+            
+            await drawTimeline(); 
+            
+            const timelineCard = document.getElementById('timeline-card');
+            const toggleTimelineBtn = document.getElementById('toggleTimelineBtn');
+            if (timelineCard) timelineCard.style.display = 'none';
+            if (toggleTimelineBtn) {
+                toggleTimelineBtn.textContent = 'Show Timeline';
+                toggleTimelineBtn.style.display = 'inline-block';
+            }
+
+            updateControlsState();
+            updateRowOrderSelectState();
+            updateLegend();
+            
+            document.getElementById('mainFilterGroup').style.display = 'block';
+            document.getElementById('showSankeyBtn').style.display = 'inline-block';
+            document.getElementById('sidebar-toggle').style.display = 'block';
+
+        } catch (error) {
+            if (error.name !== 'AbortError') {
+                console.error("Error during data processing and visualization:", error);
+                alert(`Error processing data: ${error.message}`);
+            }
+        } finally {
+            if (!globalAbortController.signal.aborted) {
+                hideLoading();
+            }
         }
     }
 

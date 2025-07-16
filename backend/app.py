@@ -994,6 +994,41 @@ def initialize_main_view():
         global_df = None
         return jsonify({"error": f"An unexpected server error occurred during data processing: {str(e)}"}), 500
 
+@app.route('/summary_stats', methods=['GET'])
+def summary_stats():
+    global raw_global_df
+
+    if raw_global_df is None or raw_global_df.empty:
+        return jsonify({"error": "No data loaded"}), 400
+
+    df = raw_global_df.copy()
+
+    total_packets = df['processCount'].sum() if 'processCount' in df.columns else len(df)
+    total_volume = df['Length'].sum() if 'Length' in df.columns else 0
+    unique_sources = df['Source'].nunique() if 'Source' in df.columns else 0
+    unique_dests = df['Destination'].nunique() if 'Destination' in df.columns else 0
+
+    top_protocols = []
+    if 'Protocol' in df.columns:
+        # Use processCount for a weighted count of protocols, otherwise count occurrences
+        protocol_counts = df.groupby('Protocol')['processCount'].sum() if 'processCount' in df.columns else df['Protocol'].value_counts()
+        total_protocol_packets = protocol_counts.sum()
+        if total_protocol_packets > 0:
+            protocol_percentages = (protocol_counts / total_protocol_packets) * 100
+            protocol_percentages.name = 'percentage'
+            
+            # FIX: Rename the 'Protocol' column to 'protocol' (lowercase) to match frontend expectations
+            top_protocols = protocol_percentages.nlargest(5).reset_index().rename(columns={'Protocol': 'protocol'}).to_dict('records')
+
+
+    return jsonify({
+        "total_packets": int(total_packets),
+        "total_volume": int(total_volume),
+        "unique_sources": int(unique_sources),
+        "unique_dests": int(unique_dests),
+        "top_protocols": top_protocols
+    })
+
 @app.route('/create_subtree', methods=['POST'])
 def create_subtree():
     """

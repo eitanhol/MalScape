@@ -1,5 +1,17 @@
 # Changelog
 
+## [2025-07-16]
+### Added
+- Dashboard of important information before processing file  
+  - Lists total packets, data volume, number of source and destination IPs, and top 3 protocols by percentage
+
+## [2025-07-15]
+### Added
+- Reset zoom button to sidebar visualization and fullscreen view
+
+### Changed
+- Moved timeline granularity input box and Apply button to bottom right of timeline window
+
 ## [2025-07-14]
 ### Fixed
 - Sankey "Apply to heatmap" button not working with new selection functionality from 6/23
