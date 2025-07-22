@@ -1,5 +1,15 @@
 # Changelog
 
+## [2025-07-22]
+### Changed
+- Timeline selection before full file processing is now default
+- Renamed "Select timeframe manually" switch to "Skip timeline selection"
+
+## [2025-07-21]
+### Fixed
+- Magnifying glass behavior
+- Magnifying glass now hidden until after file processing
+
 ## [2025-07-16]
 ### Added
 - Dashboard of important information before processing file  

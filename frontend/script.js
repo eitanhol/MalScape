@@ -69,6 +69,9 @@
         isSet: false
     };
 
+    let isMagnifyingGlassActive = false;
+    let magnifyingGlass, magnifyingContent, bodyClone;
+
     let protocolColorMap = {};
     let globalCy;
     let sidebarCy;
@@ -1728,10 +1731,8 @@
     }
 
     document.addEventListener('DOMContentLoaded', async () => {
-        // --- Magnifying Glass Variables (Correct Placement) ---
+        // --- Magnifying Glass Variables are now GLOBAL ---
         const body = document.body;
-        let magnifyingGlass, magnifyingContent, bodyClone;
-        let isMagnifyingGlassActive = false;
         const zoomFactor = 2; // How much to zoom in
 
         // --- Get all other elements ---
@@ -5247,78 +5248,21 @@
         });
     }
 
-    async function initializeAndLoadVisuals(startTime, endTime) {
-        showLoading();
-        try {
-            globalAbortController = new AbortController();
-
-            const initResponse = await fetch(`${API_BASE_URL}/initialize_main_view`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    start_time: startTime,
-                    end_time: endTime,
-                }),
-                signal: globalAbortController.signal
-            });
-
-            if (globalAbortController.signal.aborted) throw new DOMException("Aborted");
-            if (!initResponse.ok) {
-                const errText = await initResponse.text();
-                throw new Error(`Failed to initialize main view: ${errText}`);
-            }
-            console.log("Main view initialized by backend for the selected time range.");
-            
-            window.lastAppliedTimeSelection = { startTime: new Date(startTime), endTime: new Date(endTime) };
-
-            await updateHeatmap();
-            await updateTimeInfoDisplay();
-            await loadInlineDendrogram();
-            
-            // This call now efficiently uses the cache
-            await drawTimeline(); 
-            
-            const timelineCard = document.getElementById('timeline-card');
-            const toggleTimelineBtn = document.getElementById('toggleTimelineBtn');
-            if (timelineCard) timelineCard.style.display = 'none';
-            if (toggleTimelineBtn) {
-                toggleTimelineBtn.textContent = 'Show Timeline';
-                toggleTimelineBtn.style.display = 'inline-block';
-            }
-
-            updateControlsState();
-            updateRowOrderSelectState();
-            updateLegend();
-            
-            document.getElementById('mainFilterGroup').style.display = 'block';
-            document.getElementById('showSankeyBtn').style.display = 'inline-block';
-            document.getElementById('sidebar-toggle').style.display = 'block';
-
-        } catch (error) {
-            if (error.name !== 'AbortError') {
-                console.error("Error during data processing and visualization:", error);
-                alert(`Error processing data: ${error.message}`);
-            }
-        } finally {
-            if (!globalAbortController.signal.aborted) {
-                hideLoading();
-            }
-        }
-    }
-
     async function handleSuccessfulFileLoad(responseData) {
         console.log("File loaded on backend. Resetting UI for new file.", responseData);
 
+        // Hide controls on new file upload
         document.getElementById('mainFilterGroup').style.display = 'none';
         document.getElementById('dendrogramCard').style.display = 'none';
         document.getElementById('packetSimilarityCard').style.display = 'none';
         document.getElementById('sankeyCard').style.display = 'none';
         document.getElementById('downloadProcessedDataBtn').style.display = 'none';
+        document.getElementById('initial-dashboard').style.display = 'none';
+        document.getElementById('magnifying-glass-controls').style.display = 'none'; // Hide on new file load
         
         const showSankeyBtn = document.getElementById('showSankeyBtn');
         if (showSankeyBtn) showSankeyBtn.style.display = 'none';
         
-        // Ensure the button is hidden as per the requirement
         const showPacketSimilarityBtn = document.getElementById('showPacketSimilarityBtn');
         if (showPacketSimilarityBtn) showPacketSimilarityBtn.style.display = 'none';
 
@@ -5333,20 +5277,28 @@
         window.lastTreeData = null;
         window.fullTimelineData = null;
 
-        const selectTimeframeManually = document.getElementById('selectTimeframeToggle').checked;
-
-        if (selectTimeframeManually) {
-            document.getElementById('topControls').style.display = 'block';
-            const timelineCard = document.getElementById('timeline-card');
-            if(timelineCard) timelineCard.style.display = 'block';
-            await drawTimeline();
+        let skipTimelineSelection = false;
+        const skipToggle = document.getElementById('skipTimelineSelectionToggle');
+        if (skipToggle) {
+            skipTimelineSelection = skipToggle.checked;
         } else {
+            console.warn("skipTimelineSelectionToggle not found, defaulting to manual selection.");
+        }
+
+        if (skipTimelineSelection) {
             if (responseData.start_time && responseData.end_time) {
                 document.getElementById('topControls').style.display = 'block';
                 await initializeAndLoadVisuals(responseData.start_time, responseData.end_time);
             } else {
                 throw new Error("Backend did not return a valid time range for automatic processing.");
             }
+        } else {
+            document.getElementById('topControls').style.display = 'block';
+            const timelineCard = document.getElementById('timeline-card');
+            if(timelineCard) timelineCard.style.display = 'block';
+            
+            await showInitialDashboard(); // Show the new dashboard
+            await drawTimeline();
         }
     }
 
@@ -5658,22 +5610,28 @@
         window.lastTreeData = null;
         window.fullTimelineData = null;
 
-        const selectTimeframeManually = document.getElementById('selectTimeframeToggle').checked;
-
-        if (selectTimeframeManually) {
-            document.getElementById('topControls').style.display = 'block';
-            const timelineCard = document.getElementById('timeline-card');
-            if(timelineCard) timelineCard.style.display = 'block';
-            
-            await showInitialDashboard(); // Show the new dashboard
-            await drawTimeline();
+        let skipTimelineSelection = false;
+        const skipToggle = document.getElementById('skipTimelineSelectionToggle');
+        if (skipToggle) {
+            skipTimelineSelection = skipToggle.checked;
         } else {
+            console.warn("skipTimelineSelectionToggle not found, defaulting to manual selection.");
+        }
+
+        if (skipTimelineSelection) {
             if (responseData.start_time && responseData.end_time) {
                 document.getElementById('topControls').style.display = 'block';
                 await initializeAndLoadVisuals(responseData.start_time, responseData.end_time);
             } else {
                 throw new Error("Backend did not return a valid time range for automatic processing.");
             }
+        } else {
+            document.getElementById('topControls').style.display = 'block';
+            const timelineCard = document.getElementById('timeline-card');
+            if(timelineCard) timelineCard.style.display = 'block';
+            
+            await showInitialDashboard(); // Show the new dashboard
+            await drawTimeline();
         }
     }
 
@@ -5726,6 +5684,7 @@
             document.getElementById('mainFilterGroup').style.display = 'block';
             document.getElementById('showSankeyBtn').style.display = 'inline-block';
             document.getElementById('sidebar-toggle').style.display = 'block';
+            document.getElementById('magnifying-glass-controls').style.display = 'inline-block'; // Show after processing
 
         } catch (error) {
             if (error.name !== 'AbortError') {

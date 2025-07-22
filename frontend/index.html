@@ -131,10 +131,10 @@
             <input type="file" id="fileInput" accept=".parquet" title="Select Parquet file to visualize.">
             <button id="loadDemoBtn" title="Load a demo file to test the application." style="margin-left: 8px; background-color: transparent; border: none; color: #3182ce; padding: 4px 8px; font-size: 13px; font-weight: normal; text-decoration: underline; vertical-align: middle;">Load Demo File</button>
             
-            <div style="display: inline-flex; align-items: center; margin-left: 20px; vertical-align: middle;" title="When ON, you must select a time range to process after upload. When OFF, the entire file is processed automatically.">
-                <label for="selectTimeframeToggle" style="margin-right: 8px; font-weight: normal; font-size: 14px;">Select Timeframe Manually:</label>
+            <div style="display: inline-flex; align-items: center; margin-left: 20px; vertical-align: middle;" title="When ON, the entire file is processed automatically, skipping manual timeline selection.">
+                <label for="skipTimelineSelectionToggle" style="margin-right: 8px; font-weight: normal; font-size: 14px;">Skip Timeline Selection:</label>
                 <label class="switch">
-                    <input type="checkbox" id="selectTimeframeToggle">
+                    <input type="checkbox" id="skipTimelineSelectionToggle">
                     <span class="slider round"></span>
                 </label>
             </div>
@@ -144,39 +144,43 @@
             <button id="toggleTimelineBtn" title="Show/Hide Timeline" style="margin-left: 8px; display: none;">Show Timeline</button>
             <button id="createSubtreeBtn" title="Create a new detailed tree from selected combined clusters" style="display: none; background-color: #ff9800; margin-left: 8px;">Create Sub-Tree from Selection</button>
             <button id="backToMainTreeBtn" title="Return to the main tree view" style="display: none; background-color: #03a9f4; margin-left: 8px;">Back to Main Tree</button>
-            <button id="magnifyingGlassBtn" title="Toggle magnifying glass" style="margin-left: 8px;">Magnifying Glass</button>
-            <div style="display: inline-block; margin-left: 15px;">
-                <label for="magnifyingGlassZoom">Zoom:</label>
-                <input type="number" id="magnifyingGlassZoom" value="2" min="1" max="10" step="0.5" style="width: 60px;">
+            
+            <div id="magnifying-glass-controls" style="display: none;">
+                <button id="magnifyingGlassBtn" title="Toggle magnifying glass" style="margin-left: 8px;">Magnifying Glass</button>
+                <div style="display: inline-block; margin-left: 15px;">
+                    <label for="magnifyingGlassZoom">Zoom:</label>
+                    <input type="number" id="magnifyingGlassZoom" value="2" min="1" max="10" step="0.5" style="width: 60px;">
+                </div>
             </div>
         </div>
         <div id="csvProcessTime" style="font-size: 0.75em; color: #555; margin-top: -12px; margin-bottom: 12px; padding-left: 2px; text-align: left; display: none; height: 1.2em;"></div>
-    <div id="mainFilterGroup" class="control-group" title="Filter data displayed in heatmap." style="display: none;">
-        <label for="rowOrderSelect">Order Cells By:</label>
-        <select id="rowOrderSelect" title="Order heatmap rows by metric value."> <option value="descending">Descending</option> <option value="ascending">Ascending</option> </select>
-        <label for="minSourceAmtFilter">Min Src:</label>
-        <input type="number" id="minSourceAmtFilter" placeholder="1" step="1" style="width:60px;" title="Minimum source appearances.">
-        <label for="maxSourceAmtFilter">Max Src:</label>
-        <input type="number" id="maxSourceAmtFilter" placeholder="Inf" step="1" style="width:60px;" title="Maximum source appearances.">
-        <label for="minDestinationAmtFilter">Min Dst:</label>
-        <input type="number" id="minDestinationAmtFilter" placeholder="1" step="1" style="width:60px;" title="Minimum destination appearances.">
-        <label for="maxDestinationAmtFilter">Max Dst:</label>
-        <input type="number" id="maxDestinationAmtFilter" placeholder="Inf" step="1" style="width:60px;" title="Maximum destination appearances.">
-        
-        <label for="payloadSearch" style="display:none;">Payload:</label>
-        <input type="text" id="payloadSearch" placeholder="Keyword" style="width:100px; display:none;" title="Filter by payload keyword (disabled for current CSV format).">
-        
-        <label for="sourceFilter">Src IP:</label>
-        <input type="text" id="sourceFilter" placeholder="IP" style="width:100px;" title="Filter by source IP/subnet.">
-        <label for="destinationFilter">Dst IP:</label>
-        <input type="text" id="destinationFilter" placeholder="IP" style="width:100px;" title="Filter by destination IP/subnet.">
-        <label for="protocolFilter">Proto:</label>
-        <input type="text" id="protocolFilter" placeholder="TCP" style="width:60px;" title="Filter by protocol name.">
-        
-        <label for="entropyMinFilter" style="display:none;">Min Ent:</label> <input type="number" id="entropyMinFilter" placeholder="0.0" step="0.1" style="width:60px; display:none;" title="Minimum payload entropy.">
-        <label for="entropyMaxFilter" style="display:none;">Max Ent:</label> <input type="number" id="entropyMaxFilter" placeholder="Inf" step="0.1" style="width:60px; display:none;" title="Maximum payload entropy.">
-        
-        <button id="applyFiltersBtn" style="margin-left: 10px;" title="Apply selected filters to heatmap.">Apply Filters</button>
+        <div id="mainFilterGroup" class="control-group" title="Filter data displayed in heatmap." style="display: none;">
+            <label for="rowOrderSelect">Order Cells By:</label>
+            <select id="rowOrderSelect" title="Order heatmap rows by metric value."> <option value="descending">Descending</option> <option value="ascending">Ascending</option> </select>
+            <label for="minSourceAmtFilter">Min Src:</label>
+            <input type="number" id="minSourceAmtFilter" placeholder="1" step="1" style="width:60px;" title="Minimum source appearances.">
+            <label for="maxSourceAmtFilter">Max Src:</label>
+            <input type="number" id="maxSourceAmtFilter" placeholder="Inf" step="1" style="width:60px;" title="Maximum source appearances.">
+            <label for="minDestinationAmtFilter">Min Dst:</label>
+            <input type="number" id="minDestinationAmtFilter" placeholder="1" step="1" style="width:60px;" title="Minimum destination appearances.">
+            <label for="maxDestinationAmtFilter">Max Dst:</label>
+            <input type="number" id="maxDestinationAmtFilter" placeholder="Inf" step="1" style="width:60px;" title="Maximum destination appearances.">
+            
+            <label for="payloadSearch" style="display:none;">Payload:</label>
+            <input type="text" id="payloadSearch" placeholder="Keyword" style="width:100px; display:none;" title="Filter by payload keyword (disabled for current CSV format).">
+            
+            <label for="sourceFilter">Src IP:</label>
+            <input type="text" id="sourceFilter" placeholder="IP" style="width:100px;" title="Filter by source IP/subnet.">
+            <label for="destinationFilter">Dst IP:</label>
+            <input type="text" id="destinationFilter" placeholder="IP" style="width:100px;" title="Filter by destination IP/subnet.">
+            <label for="protocolFilter">Proto:</label>
+            <input type="text" id="protocolFilter" placeholder="TCP" style="width:60px;" title="Filter by protocol name.">
+            
+            <label for="entropyMinFilter" style="display:none;">Min Ent:</label> <input type="number" id="entropyMinFilter" placeholder="0.0" step="0.1" style="width:60px; display:none;" title="Minimum payload entropy.">
+            <label for="entropyMaxFilter" style="display:none;">Max Ent:</label> <input type="number" id="entropyMaxFilter" placeholder="Inf" step="0.1" style="width:60px; display:none;" title="Maximum payload entropy.">
+            
+            <button id="applyFiltersBtn" style="margin-left: 10px;" title="Apply selected filters to heatmap.">Apply Filters</button>
+        </div>
     </div>
 
     <div id="timeline-card" style="display: none; background: #fff; box-shadow: 0 2px 10px rgba(0,0,0,0.1); padding: 15px 20px; border-radius: 12px; margin: 20px 0; border: 1px solid #e2e8f0;">
