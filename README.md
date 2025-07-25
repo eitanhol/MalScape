@@ -1,5 +1,14 @@
 # Changelog
 
+## [2025-07-24]
+### Added
+- "Filter HTTP Sessions" button: reclusters using all out-of-session HTTP data and redraws heatmap and tree with those new clusters
+
+## [2025-07-23]
+### Updated
+- Pconverter to make Parquet files include raw data required to define sessions
+- Program to define HTTP sessions
+
 ## [2025-07-22]
 ### Changed
 - Timeline selection before full file processing is now default
