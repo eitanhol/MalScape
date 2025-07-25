@@ -27,6 +27,7 @@ def aggregate_packets_optimized(df):
     # Ensure data is sorted by time for consecutive logic
     df = df.sort_values('Time', ignore_index=True)
 
+    # REMOVED 'SessionID' from the grouping columns
     group_cols = ['Source', 'Destination', 'Protocol', 'SourcePort', 'DestinationPort']
 
     # 1. Identify break points for groups. A new group starts if:
@@ -41,6 +42,7 @@ def aggregate_packets_optimized(df):
     group_ids = (is_different_packet | is_time_gap).cumsum()
 
     # 2. Define the aggregation rules for each column
+    # REMOVED 'SessionID' from the aggregation rules
     agg_rules = {
         'Length': 'sum',
         'Time': 'first',
@@ -61,7 +63,7 @@ def aggregate_packets_optimized(df):
     aggregated_df['processCount'] = df.groupby(group_ids).size()
     
     # Reorder columns to match original output, if desired
-    cols = df.columns.tolist() + ['processCount']
+    cols = [col for col in df.columns if col != 'SessionID'] + ['processCount']
     # A small reordering to place processCount before the last columns
     if 'Payload' in cols:
         cols.remove('processCount')
@@ -141,7 +143,9 @@ def pcap_to_dataframe(pcap_file, base_time_from_filename):
         "-e", "_ws.col.protocol", 
         "-e", "frame.len",        
         "-e", "tcp.flags",        
-        "-e", "_ws.col.Info"      
+        "-e", "_ws.col.Info",
+        "-e", "http.request.uri",
+        "-e", "http.response.code"
     ]
     
     tshark_cmd = [
@@ -186,7 +190,9 @@ def pcap_to_dataframe(pcap_file, base_time_from_filename):
         "_ws.col.protocol": "Protocol",
         "frame.len": "Length",
         "tcp.flags": "Flags_temp",
-        "_ws.col.Info": "Payload"
+        "_ws.col.Info": "Payload",
+        "http.request.uri": "HttpRequestURI",
+        "http.response.code": "HttpResponseCode"
     }
     df.rename(columns=column_map, inplace=True)
 

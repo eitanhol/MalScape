@@ -23,8 +23,10 @@
     window.currentSankeyDimensionsOrder = [...DEFAULT_SANKEY_DIMENSIONS];
     window.sankeyMatchingClusterIds = new Set();
     window.activeSankeyFilter = null;
-
     window.fullTimelineData = null;
+
+    let isHttpFiltered = false;
+    let mainTreeViewBeforeHttpFilter = null;    
 
     const DEFAULT_UNKNOWN_COLOR = '#cccccc';
     const SELECTED_EDGE_COLOR = '#ff0000';
@@ -494,9 +496,15 @@
             'line-color': DEFAULT_UNKNOWN_COLOR,
             'target-arrow-color': DEFAULT_UNKNOWN_COLOR,
             'target-arrow-shape': 'triangle', 'curve-style': 'bezier',
-            'transition-property': 'line-color, target-arrow-color, width, z-index',
+            'transition-property': 'line-color, target-arrow-color, width, z-index, line-style',
             'transition-duration': '0.15s',
             'z-index': 1
+        }},
+        { selector: 'edge[http_status = "out_of_session"]', style: {
+            'line-style': 'dashed',
+            'line-dash-pattern': [6, 3],
+            'line-color': '#e67e22', // A distinct orange color
+            'target-arrow-color': '#e67e22'
         }},
         { selector: 'node[Classification = "Internal"]', style: {
             'shape': 'square'
@@ -649,6 +657,8 @@
                             protocolColorMap[protocol] = randomColor;
                         }
                         const edgeColor = protocolColorMap[protocol] || DEFAULT_UNKNOWN_COLOR;
+                        
+                        // The backend now provides the http_status directly in edge.data
                         return {
                             group: 'edges',
                             data: { ...edge.data, clusterID: stringClusterID },
@@ -1777,6 +1787,79 @@
         const manualEndTimeInput = document.getElementById('manualEndTime');
         const applyManualTimeBtn = document.getElementById('applyManualTimeBtn');
         const applyGranularityBtn = document.getElementById('applyGranularityBtn');
+        const toggleHttpFilterBtn = document.getElementById('toggleHttpFilterBtn');
+
+        if (toggleHttpFilterBtn) {
+            toggleHttpFilterBtn.addEventListener('click', async () => {
+                if (isHttpFiltered) {
+                    // Revert to the original tree
+                    if (mainTreeViewBeforeHttpFilter) {
+                        showLoading();
+                        try {
+                            // Restore the tree data
+                            window.lastTreeData = mainTreeViewBeforeHttpFilter;
+                            window.originalTreeData = structuredClone(mainTreeViewBeforeHttpFilter);
+                            
+                            // Redraw the dendrogram and heatmap
+                            showInlineDendrogram(mainTreeViewBeforeHttpFilter, document.getElementById("inline-dendrogram-container").clientHeight);
+                            await updateHeatmap(); // Recalculate heatmap data from the restored tree
+                            
+                            // Update UI
+                            isHttpFiltered = false;
+                            toggleHttpFilterBtn.textContent = 'Filter HTTP Sessions';
+                            toggleHttpFilterBtn.style.backgroundColor = '#ff9800';
+                            mainTreeViewBeforeHttpFilter = null; // Clear the saved state
+                        } catch (error) {
+                            console.error('Error reverting HTTP filter:', error);
+                            alert(`Failed to revert filter: ${error.message}`);
+                        } finally {
+                            hideLoading();
+                        }
+                    }
+                } else {
+                    // Apply the filter
+                    showLoading();
+                    try {
+                        // Save the current state
+                        mainTreeViewBeforeHttpFilter = structuredClone(window.lastTreeData);
+
+                        const response = await fetch(`${API_BASE_URL}/filter_http_sessions`);
+                        if (!response.ok) {
+                            const errText = await response.text();
+                            throw new Error(`Failed to filter HTTP sessions: ${errText}`);
+                        }
+                        const newTreeData = await response.json();
+
+                        if (newTreeData.error) {
+                            throw new Error(newTreeData.error);
+                        }
+
+                        // Clear any existing selections
+                        clearSidebarVisualization();
+                        updateLegend();
+
+                        // Update the main data and redraw
+                        window.lastTreeData = newTreeData;
+                        window.originalTreeData = structuredClone(newTreeData);
+                        
+                        showInlineDendrogram(newTreeData, document.getElementById("inline-dendrogram-container").clientHeight);
+                        await updateHeatmap();
+
+                        // Update UI
+                        isHttpFiltered = true;
+                        toggleHttpFilterBtn.textContent = 'Revert HTTP Filter';
+                        toggleHttpFilterBtn.style.backgroundColor = '#4caf50'; // Green to indicate active filter
+
+                    } catch (error) {
+                        console.error('Error filtering HTTP sessions:', error);
+                        alert(`Failed to filter HTTP sessions: ${error.message}`);
+                        mainTreeViewBeforeHttpFilter = null; // Clear saved state on error
+                    } finally {
+                        hideLoading();
+                    }
+                }
+            });
+        }
 
         if (applyGranularityBtn) {
             applyGranularityBtn.addEventListener('click', () => {
@@ -5684,7 +5767,9 @@
             document.getElementById('mainFilterGroup').style.display = 'block';
             document.getElementById('showSankeyBtn').style.display = 'inline-block';
             document.getElementById('sidebar-toggle').style.display = 'block';
-            document.getElementById('magnifying-glass-controls').style.display = 'inline-block'; // Show after processing
+            document.getElementById('magnifying-glass-controls').style.display = 'inline-block';
+            // This is the corrected line:
+            document.getElementById('toggleHttpFilterBtn').style.display = 'inline-block';
 
         } catch (error) {
             if (error.name !== 'AbortError') {

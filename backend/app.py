@@ -31,7 +31,25 @@ raw_global_df = None
 full_attack_timeframes_df_cache = None
 full_attack_detail_map_cache = {}
 
-# Expected columns after all processing in app.py, for final global_df
+metrics = [
+    {"label": "Count", "value": "count"},
+    {"label": "Unique IPs", "value": "Unique IPs"},
+    {"label": "Unique Sources", "value": "Unique Sources"},
+    {"label": "Unique Destinations", "value": "Unique Destinations"},
+    {"label": "Packet Length", "value": "Length"},
+    {"label": "Payload Length", "value": "PayloadLength"},
+    {"label": "Payload Size Variance", "value": "Payload Size Variance"},
+    {"label": "Start Time", "value": "Start Time"},
+    {"label": "Duration", "value": "Duration"},
+    {"label": "Average Inter-Arrival Time", "value": "Average Inter-Arrival Time"},
+    {"label": "Packets per Second", "value": "Packets per Second"},
+    {"label": "Total Data Sent", "value": "Total Data Sent"},
+    {"label": "% SYN packets", "value": "% SYN packets"},
+    {"label": "% RST packets", "value": "% RST packets"},
+    {"label": "% ACK packets", "value": "% ACK packets"},
+    {"label": "% PSH packets", "value": "% PSH packets"}
+]
+
 expected_cols = [
     "Time", "Length", "Protocol", "SourcePort", "DestinationPort", "Source", "Destination", "Flags", "processCount",
     "IsSYN", "IsRST", "IsACK", "IsPSH", "IsFIN",
@@ -39,7 +57,7 @@ expected_cols = [
     "No.",
     "NodeWeight", "SourceClassification", "DestinationClassification", "ConnectionID",
     "InterArrivalTime", "BytesPerSecond", "PayloadLength",
-    "BurstID", "ClusterID", "ClusterEntropy",
+    "BurstID", "ClusterID", "ClusterEntropy", "SessionID",
     "Anomaly", "ClusterAnomaly", "AttackType",
     "SourcePort_Group", "DestinationPort_Group", "Len_Group"
 ]
@@ -70,6 +88,66 @@ def classify_ip_vector(ip_str):
         if rmin <= ip_int <= rmax:
             return "Internal"
     return "External"
+
+def aggregate_metric(df, metric_value):
+    """Helper function to aggregate data based on a specific metric."""
+    agg = pd.Series(dtype=float)
+    if not df.empty and "ClusterID" in df.columns:
+        grouped_by_cluster = df.groupby("ClusterID", observed=True)
+        if metric_value == "count":
+            if 'processCount' in df.columns:
+                agg = grouped_by_cluster['processCount'].sum()
+            else:
+                agg = grouped_by_cluster.size()
+        elif metric_value == "% SYN packets" and "IsSYN" in df.columns:
+            agg = grouped_by_cluster["IsSYN"].sum() / grouped_by_cluster.size().replace(0, 1) * 100
+        elif metric_value == "% RST packets" and "IsRST" in df.columns:
+            agg = grouped_by_cluster["IsRST"].sum() / grouped_by_cluster.size().replace(0, 1) * 100
+        elif metric_value == "% ACK packets" and "IsACK" in df.columns:
+            agg = grouped_by_cluster["IsACK"].sum() / grouped_by_cluster.size().replace(0, 1) * 100
+        elif metric_value == "% PSH packets" and "IsPSH" in df.columns:
+            agg = grouped_by_cluster["IsPSH"].sum() / grouped_by_cluster.size().replace(0, 1) * 100
+        elif metric_value == "Unique Destinations" and "Destination" in df.columns:
+            agg = grouped_by_cluster["Destination"].nunique()
+        elif metric_value == "Unique Sources" and "Source" in df.columns:
+            agg = grouped_by_cluster["Source"].nunique()
+        elif metric_value == "Unique IPs" and "Source" in df.columns and "Destination" in df.columns:
+             agg = grouped_by_cluster.apply(lambda g: len(set(g["Source"]).union(set(g["Destination"]))))
+        elif metric_value == "Payload Size Variance" and "PayloadLength" in df.columns:
+             df["PayloadLength"] = pd.to_numeric(df["PayloadLength"], errors="coerce").fillna(0)
+             agg = grouped_by_cluster["PayloadLength"].var(ddof=0)
+        elif metric_value == "Packets per Second" and "Time" in df.columns:
+            df['Time'] = pd.to_datetime(df['Time'], errors='coerce')
+            def packets_per_second(g):
+                if g["Time"].count() < 2 or g["Time"].isnull().all(): return 0.0
+                duration = (g["Time"].max() - g["Time"].min()).total_seconds()
+                return len(g) / duration if duration > 0 else float(len(g))
+            agg = grouped_by_cluster.apply(packets_per_second)
+        elif metric_value == "Total Data Sent" and "Length" in df.columns:
+            df["Length"] = pd.to_numeric(df["Length"], errors='coerce').fillna(0)
+            agg = grouped_by_cluster["Length"].sum()
+        elif metric_value == "Start Time" and "Time" in df.columns:
+            df['Time'] = pd.to_datetime(df['Time'], errors='coerce')
+            overall_min_time = df['Time'].dropna().min()
+            agg_time = grouped_by_cluster["Time"].min()
+            if pd.notna(overall_min_time) and not agg_time.empty:
+                 agg = (agg_time - overall_min_time).dt.total_seconds()
+            else: agg = pd.Series(0, index=agg_time.index, dtype=float) if not agg_time.empty else pd.Series(dtype=float)
+        elif metric_value == "Duration" and "Time" in df.columns:
+            df['Time'] = pd.to_datetime(df['Time'], errors='coerce')
+            agg = (grouped_by_cluster["Time"].max() - grouped_by_cluster["Time"].min()).dt.total_seconds()
+        elif metric_value == "Average Inter-Arrival Time" and "InterArrivalTime" in df.columns:
+            df["InterArrivalTime"] = pd.to_numeric(df["InterArrivalTime"], errors='coerce')
+            agg = grouped_by_cluster["InterArrivalTime"].mean()
+        elif metric_value in df.columns:
+            df[metric_value] = pd.to_numeric(df[metric_value], errors='coerce').fillna(0)
+            agg = grouped_by_cluster[metric_value].sum()
+        else:
+            logging.warning(f"Metric '{metric_value}' not found or not supported. Aggregating by size.")
+            agg = grouped_by_cluster.size()
+        agg = agg.fillna(0.0)
+        agg = agg.replace([np.inf, -np.inf], 0)
+    return agg
 
 def compute_entropy(series):
     """Compute the entropy of a given pandas Series."""
@@ -279,7 +357,7 @@ def prepare_dataframe_from_upload(df: pd.DataFrame):
 
     if df.empty:
         logging.warning("Input DataFrame is empty. Returning empty DataFrame.")
-        return pd.DataFrame(columns=["Time", "No.", "Source", "Destination", "Protocol", "Length", "SourcePort", "DestinationPort", "Flags_temp", "Payload", "processCount", "IsSYN", "IsRST", "IsACK", "IsPSH", "IsFIN", "Flags", "SourceClassification", "DestinationClassification", "ConnectionID", "InterArrivalTime", "BytesPerSecond", "PayloadLength", "NodeWeight", "BurstID", "ClusterID", "ClusterEntropy"])
+        return pd.DataFrame(columns=["Time", "No.", "Source", "Destination", "Protocol", "Length", "SourcePort", "DestinationPort", "Flags_temp", "Payload", "processCount", "IsSYN", "IsRST", "IsACK", "IsPSH", "IsFIN", "Flags", "SourceClassification", "DestinationClassification", "ConnectionID", "InterArrivalTime", "BytesPerSecond", "PayloadLength", "NodeWeight", "BurstID", "ClusterID", "ClusterEntropy", "SessionID"])
 
     current_time_section = time.perf_counter()
     # --- Verify and Coerce Basic Data Types ---
@@ -476,6 +554,32 @@ def prepare_dataframe_from_upload(df: pd.DataFrame):
         df.sort_index(inplace=True)
         logging.info("Set and sorted 'Time' column as the DataFrame index for performance.")
 
+    # --- HTTP Session Identification ---
+    logging.info("PROFILE: Starting HTTP Session Identification...")
+    http_session_start_time = time.perf_counter()
+    
+    df['SessionID'] = -1
+
+    http_mask = (df['DestinationPort'] == 80) | (df['SourcePort'] == 80)
+    http_df = df[http_mask].copy()
+
+    if not http_df.empty:
+        def get_session_key(row):
+            if (row['Source'], row['SourcePort']) < (row['Destination'], row['DestinationPort']):
+                return (row['Source'], row['SourcePort'], row['Destination'], row['DestinationPort'])
+            else:
+                return (row['Destination'], row['DestinationPort'], row['Source'], row['SourcePort'])
+
+        http_df['session_key'] = http_df.apply(get_session_key, axis=1)
+        
+        unique_sessions = http_df['session_key'].unique()
+        session_to_id = {session: i for i, session in enumerate(unique_sessions)}
+        
+        df.loc[http_mask, 'SessionID'] = http_df['session_key'].map(session_to_id)
+
+    logging.info(f"PROFILE: HTTP Session Identification took: {time.perf_counter() - http_session_start_time:.4f} seconds")
+
+
     logging.info(f"PROFILE: Total prepare_dataframe_from_upload took: {time.perf_counter() - overall_start_time:.4f} seconds")
     logging.info(f"DataFrame feature engineering complete. Shape after processing: {df.shape}")
     return df
@@ -576,6 +680,31 @@ def process_uploaded_file_endpoint():
     else:
         return jsonify({"error": "Invalid file type. Please upload a .parquet file."}), 400
 
+@app.route('/filter_http_sessions', methods=['GET'])
+def filter_http_sessions():
+    global global_df
+    if global_df is None or global_df.empty:
+        return jsonify({"error": "No data loaded"}), 400
+
+    logging.info("Filtering out HTTP sessions...")
+    
+    if 'SessionID' not in global_df.columns:
+        logging.warning("SessionID column not found, cannot filter HTTP sessions.")
+        tree_dict = generate_tree_from_df(global_df.copy(), is_subtree=False)
+        return jsonify(tree_dict)
+
+    df_filtered = global_df[global_df['SessionID'] == -1].copy()
+
+    if df_filtered.empty:
+        logging.warning("DataFrame is empty after filtering out HTTP sessions.")
+        return jsonify({"id": "empty_root_no_data_after_filter", "dist": 0, "no_tree": True, "error": "No data remains after filtering HTTP sessions"}), 200
+
+    logging.info(f"Data shape after filtering: {df_filtered.shape}. Generating new tree.")
+
+    tree_dict = generate_tree_from_df(df_filtered, is_subtree=False)
+    
+    return jsonify(tree_dict)
+
 def apply_time_filter(df, request_obj):
     """
     Applies a time filter to a DataFrame based on request arguments, using the DatetimeIndex.
@@ -672,7 +801,6 @@ def filter_and_aggregate():
     logging.info(f"Request data for /filter_and_aggregate: {data}")
 
     # --- Apply Filters ---
-    # (No changes to the filtering logic itself)
     payloadKeyword = data.get("payloadKeyword", "").strip().lower()
     sourceFilter = data.get("sourceFilter", "").strip().lower()
     destinationFilter = data.get("destinationFilter", "").strip().lower()
@@ -709,66 +837,9 @@ def filter_and_aggregate():
         return jsonify([])
 
     # --- Aggregation Logic ---
-    # (No changes to aggregation logic)
-    agg = pd.Series(dtype=float)
-    if not df.empty and "ClusterID" in df.columns: # Ensure ClusterID exists before grouping
-        grouped_by_cluster = df.groupby("ClusterID", observed=True)
-
-        if metric == "count":
-            if 'processCount' in df.columns:
-                agg = grouped_by_cluster['processCount'].sum()
-            else:
-                agg = grouped_by_cluster.size()
-        elif metric == "% SYN packets" and "IsSYN" in df.columns:
-            agg = grouped_by_cluster["IsSYN"].sum() / grouped_by_cluster.size().replace(0, 1) * 100
-        elif metric == "% RST packets" and "IsRST" in df.columns:
-            agg = grouped_by_cluster["IsRST"].sum() / grouped_by_cluster.size().replace(0, 1) * 100
-        elif metric == "% ACK packets" and "IsACK" in df.columns:
-            agg = grouped_by_cluster["IsACK"].sum() / grouped_by_cluster.size().replace(0, 1) * 100
-        elif metric == "% PSH packets" and "IsPSH" in df.columns:
-            agg = grouped_by_cluster["IsPSH"].sum() / grouped_by_cluster.size().replace(0, 1) * 100
-        elif metric == "Unique Destinations" and "Destination" in df.columns:
-            agg = grouped_by_cluster["Destination"].nunique()
-        elif metric == "Unique Sources" and "Source" in df.columns:
-            agg = grouped_by_cluster["Source"].nunique()
-        elif metric == "Unique IPs" and "Source" in df.columns and "Destination" in df.columns:
-             agg = grouped_by_cluster.apply(lambda g: len(set(g["Source"]).union(set(g["Destination"]))))
-        elif metric == "Payload Size Variance" and "PayloadLength" in df.columns:
-             df["PayloadLength"] = pd.to_numeric(df["PayloadLength"], errors="coerce").fillna(0)
-             agg = grouped_by_cluster["PayloadLength"].var(ddof=0)
-        elif metric == "Packets per Second" and "Time" in df.columns:
-            df['Time'] = pd.to_datetime(df['Time'], errors='coerce')
-            def packets_per_second(g):
-                if g["Time"].count() < 2 or g["Time"].isnull().all(): return 0.0
-                duration = (g["Time"].max() - g["Time"].min()).total_seconds()
-                return len(g) / duration if duration > 0 else float(len(g))
-            agg = grouped_by_cluster.apply(packets_per_second)
-        elif metric == "Total Data Sent" and "Length" in df.columns:
-            df["Length"] = pd.to_numeric(df["Length"], errors='coerce').fillna(0)
-            agg = grouped_by_cluster["Length"].sum()
-        elif metric == "Start Time" and "Time" in df.columns:
-            df['Time'] = pd.to_datetime(df['Time'], errors='coerce')
-            overall_min_time = df['Time'].dropna().min()
-            agg_time = grouped_by_cluster["Time"].min()
-            if pd.notna(overall_min_time) and not agg_time.empty:
-                 agg = (agg_time - overall_min_time).dt.total_seconds()
-            else: agg = pd.Series(0, index=agg_time.index, dtype=float) if not agg_time.empty else pd.Series(dtype=float)
-        elif metric == "Duration" and "Time" in df.columns:
-            df['Time'] = pd.to_datetime(df['Time'], errors='coerce')
-            agg = (grouped_by_cluster["Time"].max() - grouped_by_cluster["Time"].min()).dt.total_seconds()
-        elif metric == "Average Inter-Arrival Time" and "InterArrivalTime" in df.columns:
-            df["InterArrivalTime"] = pd.to_numeric(df["InterArrivalTime"], errors='coerce')
-            agg = grouped_by_cluster["InterArrivalTime"].mean()
-        elif metric in df.columns:
-            df[metric] = pd.to_numeric(df[metric], errors='coerce').fillna(0)
-            agg = grouped_by_cluster[metric].sum()
-        else:
-            logging.warning(f"Metric '{metric}' not found or not supported in /filter_and_aggregate. Aggregating by size.")
-            agg = grouped_by_cluster.size()
-
-        agg = agg.fillna(0.0)
-        agg = agg.replace([np.inf, -np.inf], 0)
-    else:
+    agg = aggregate_metric(df, metric)
+    
+    if agg.empty:
         if df.empty: logging.info("DataFrame empty before aggregation.")
         else: logging.warning("ClusterID column not found or no clusters to aggregate. Returning empty list.")
         return jsonify([])
@@ -796,7 +867,7 @@ def filter_and_aggregate():
             "value": processed_value,
             "clusterAnomaly": anomaly_map.get(str_cluster_id_val, "normal"),
             "ClusterAttackTypes": cluster_attack_types_map.get(str_cluster_id_val, []),
-            "anomalousCount": anomalous_counts_map.get(cluster_id_val, 0) # ADD THIS to the response
+            "anomalousCount": anomalous_counts_map.get(cluster_id_val, 0)
         })
     
     logging.info(f"Number of items in filtered_pivot for metric '{metric}': {len(filtered_pivot)}")
@@ -912,7 +983,7 @@ def initialize_main_view():
     NEW ENDPOINT: This performs the heavy processing on the time slice selected by the user.
     """
     global raw_global_df, global_df, global_start_time, global_end_time, global_duration_seconds, \
-           global_backend_csv_processing_time_seconds, attack_detail_map_cache, attack_timeframes_cache, attacking_sources_cache
+           global_backend_csv_processing_time_seconds, attack_detail_map_cache, attack_timeframes_df_cache, attacking_sources_cache
 
     if raw_global_df is None or raw_global_df.empty:
         return jsonify({"error": "No raw data has been loaded. Please upload a file first."}), 400
@@ -949,15 +1020,15 @@ def initialize_main_view():
             global_end_time = max_time.isoformat() if pd.notna(max_time) else None
             global_duration_seconds = (max_time - min_time).total_seconds() if pd.notna(min_time) and pd.notna(max_time) else 0
 
-        attack_detail_map_cache, attack_timeframes_cache, attacking_sources_cache = load_attack_data(
+        attack_detail_map_cache, attack_timeframes_df_cache, attacking_sources_cache = load_attack_data(
             start_time_filter_str=global_start_time, end_time_filter_str=global_end_time
         )
 
         if not df.empty:
             df["AttackType"] = pd.Series(list(zip(df["Source"].astype(str), df["Destination"].astype(str))), index=df.index).map(attack_detail_map_cache).fillna("N/A").astype('category')
             df['Anomaly'] = 'normal'
-            if not attack_timeframes_cache.empty:
-                for _, attack in attack_timeframes_cache.iterrows():
+            if not attack_timeframes_df_cache.empty:
+                for _, attack in attack_timeframes_df_cache.iterrows():
                     if pd.notna(attack['start']) and pd.notna(attack['end']):
                         mask = (df['Source'] == attack['source']) & (df['Destination'] == attack['destination']) & (df['Time'] >= attack['start']) & (df['Time'] <= attack['end'])
                         
@@ -1378,121 +1449,101 @@ def cluster_network():
         logging.error("/cluster_network called without cluster_id.")
         return jsonify({"nodes": [], "edges": [], "error": "cluster_id parameter is missing"}), 400
     
-    # Convert param to string to match DataFrame's ClusterID type (category of strings)
     str_cluster_id_param = str(cluster_id_param)
 
     try:
-        # Ensure required columns exist in global_df
+        # Check for required columns, including SessionID now
         required_cols_for_cluster_net = ["Source", "Destination", "Protocol", "ClusterID", 
                                          "NodeWeight", "SourceClassification", "DestinationClassification", 
-                                         "AttackType", "Length", "processCount"]
+                                         "AttackType", "Length", "processCount", "SourcePort", 
+                                         "DestinationPort", "SessionID"]
         for col_check in required_cols_for_cluster_net:
             if col_check not in global_df.columns:
                 logging.warning(f"Column '{col_check}' missing in global_df for /cluster_network. Results may be incomplete.")
-                # Optionally, add missing columns with default values to prevent crashes
+                # Add default columns if missing to prevent crashes
                 if col_check == "NodeWeight": global_df[col_check] = 0.5
-                elif col_check == "AttackType": global_df[col_check] = "N/A"
-                # Add others as needed
+                elif col_check in ["AttackType", "SourceClassification", "DestinationClassification"]: global_df[col_check] = "N/A"
+                elif col_check == "SessionID": global_df[col_check] = -1
+                else: global_df[col_check] = 0
 
-        # Filter for the specific cluster. Ensure ClusterID in global_df is also string for comparison.
         df_cluster = global_df[global_df["ClusterID"].astype(str) == str_cluster_id_param].copy()
         logging.info(f"df_cluster for {str_cluster_id_param} shape: {df_cluster.shape}")
         
         if df_cluster.empty:
             logging.warning(f"df_cluster is empty for cluster_id: {str_cluster_id_param}. Returning empty network.")
             return jsonify({"nodes": [], "edges": []})
-
-        # --- Prepare Node and Edge Data for Cytoscape ---
-        # Clean and type-cast columns for the cluster subset
+            
+        # --- Node Aggregation (as before) ---
         df_cluster["Source"] = df_cluster["Source"].astype(str).str.strip()
         df_cluster["Destination"] = df_cluster["Destination"].astype(str).str.strip()
         df_cluster["Protocol"] = df_cluster["Protocol"].astype(str).str.strip()
-        if 'NodeWeight' in df_cluster.columns:
-            df_cluster["NodeWeight"] = pd.to_numeric(df_cluster['NodeWeight'], errors='coerce').fillna(0.5)
-        else: df_cluster["NodeWeight"] = 0.5
-        if 'processCount' not in df_cluster.columns: df_cluster['processCount'] = 1
-        else: df_cluster['processCount'] = pd.to_numeric(df_cluster['processCount'], errors='coerce').fillna(1).astype(int)
+        df_cluster["NodeWeight"] = pd.to_numeric(df_cluster['NodeWeight'], errors='coerce').fillna(0.5)
+        df_cluster['processCount'] = pd.to_numeric(df_cluster['processCount'], errors='coerce').fillna(1).astype(int)
 
-
-        # Unique IPs in this specific cluster
         all_ips_in_cluster_series = pd.concat([df_cluster["Source"], df_cluster["Destination"]]).unique()
-        # Filter out "nan" strings or truly empty strings that might have come fromastype(str)
         all_ips_in_cluster = [str(ip).strip() for ip in all_ips_in_cluster_series 
                               if pd.notna(ip) and str(ip).strip() and str(ip).strip().lower() != 'nan']
 
-
-        # Aggregate features for nodes within this cluster
         node_data_agg = {}
         for ip_node_str in all_ips_in_cluster:
             is_source_df = df_cluster[df_cluster["Source"] == ip_node_str]
             is_dest_df = df_cluster[df_cluster["Destination"] == ip_node_str]
             
-            # Combine weights if IP appears as both source and dest
-            weights_series = pd.concat([
-                is_source_df.get("NodeWeight", pd.Series(dtype=float)), 
-                is_dest_df.get("NodeWeight", pd.Series(dtype=float))
-            ]).dropna()
+            weights_series = pd.concat([is_source_df.get("NodeWeight"), is_dest_df.get("NodeWeight")]).dropna()
             avg_weight = weights_series.mean() if not weights_series.empty else 0.5
-
-            # Combine packet counts
-            packet_count_val = is_source_df.get('processCount', pd.Series(dtype=int)).sum() + \
-                   is_dest_df.get('processCount', pd.Series(dtype=int)).sum()
+            packet_count_val = is_source_df.get('processCount').sum() + is_dest_df.get('processCount').sum()
             
-            # Determine classification (take first non-"External" or default to External)
-            classifications = pd.concat([
-                is_source_df.get("SourceClassification", pd.Series(dtype=str)),
-                is_dest_df.get("DestinationClassification", pd.Series(dtype=str)) # Use DestClass if IP is a destination
-            ]).unique()
-            node_classification = "External" # Default
+            classifications = pd.concat([is_source_df.get("SourceClassification"), is_dest_df.get("DestinationClassification")]).unique()
+            node_classification = "External"
             for cls in classifications:
                 if pd.notna(cls) and str(cls) != "External":
                     node_classification = str(cls)
                     break
             
-            # Involved Attack Types
-            involved_attack_types = set()
-            if "AttackType" in df_cluster.columns:
-                src_attacks = is_source_df["AttackType"].astype(str)
-                dst_attacks = is_dest_df["AttackType"].astype(str)
-                all_row_attacks = pd.concat([src_attacks, dst_attacks])
-                unique_node_attacks = all_row_attacks[all_row_attacks.str.upper() != "N/A"].unique()
-                involved_attack_types.update(unique_node_attacks)
+            src_attacks = is_source_df["AttackType"].astype(str)
+            dst_attacks = is_dest_df["AttackType"].astype(str)
+            all_row_attacks = pd.concat([src_attacks, dst_attacks])
+            unique_node_attacks = all_row_attacks[all_row_attacks.str.upper() != "N/A"].unique()
+            involved_attack_types = set(unique_node_attacks)
 
             node_data_agg[ip_node_str] = {
                 "id": ip_node_str, "label": ip_node_str,
-                "Classification": node_classification,
-                "NodeWeight": avg_weight,
-                "packetCount": int(packet_count_val),
-                "InvolvedAttackTypes": list(involved_attack_types),
+                "Classification": node_classification, "NodeWeight": avg_weight,
+                "packetCount": int(packet_count_val), "InvolvedAttackTypes": list(involved_attack_types),
                 "is_attacker": ip_node_str in attacking_sources_cache
             }
 
-        # Aggregate Edge Data
-        # Group by Source, Destination, Protocol for distinct edges
-        edge_agg_cols = {'EdgeWeight': ('Length', 'sum')}
-        if 'processCount' in df_cluster.columns: # Use processCount for edge packet count
-            edge_agg_cols['processCount'] = ('processCount', 'sum')
-        else: # Fallback if processCount isn't there
-            edge_agg_cols['processCount'] = ('Time', 'count') # Using 'Time' as a dummy col to count rows
+        # --- UPDATED Edge Aggregation ---
+        def aggregate_edge_features(group):
+            process_count = group['processCount'].sum()
+            edge_weight = group['Length'].sum()
+            
+            # Determine HTTP status based on ports and SessionID
+            is_http = (group['SourcePort'] == 80).any() or (group['DestinationPort'] == 80).any()
+            if not is_http:
+                http_status = 'not_http'
+            else:
+                # If any packet in the group has a valid SessionID, the whole edge is 'in_session'
+                if (group['SessionID'] > -1).any():
+                    http_status = 'in_session'
+                else:
+                    http_status = 'out_of_session'
+            
+            # Determine AttackType for the edge
+            attack_types = set(group['AttackType'].astype(str).str.upper())
+            attack_types.discard("N/A")
+            attack_type = list(attack_types)[0] if attack_types else "N/A"
 
-
-        edges_grouped = df_cluster.groupby(["Source", "Destination", "Protocol"], observed=True).agg(**edge_agg_cols).reset_index()
-
-        # Add AttackType to edges
-        edge_attack_map = {}
-        if "AttackType" in df_cluster.columns:
-            for _, row in df_cluster.iterrows():
-                edge_key = (row["Source"], row["Destination"], row["Protocol"])
-                attack = str(row["AttackType"])
-                if attack.upper() != "N/A":
-                    if edge_key not in edge_attack_map: edge_attack_map[edge_key] = set()
-                    edge_attack_map[edge_key].add(attack)
+            return pd.Series({
+                'processCount': process_count, 'EdgeWeight': edge_weight,
+                'http_status': http_status, 'AttackType': attack_type
+            })
         
+        # Apply the new aggregation function
+        edges_grouped = df_cluster.groupby(["Source", "Destination", "Protocol"], observed=True).apply(aggregate_edge_features).reset_index()
+
         edges_cytoscape_list = []
         for _, edge_row in edges_grouped.iterrows():
-            edge_key_tuple = (edge_row["Source"], edge_row["Destination"], edge_row["Protocol"])
-            edge_attacks = list(edge_attack_map.get(edge_key_tuple, {"N/A"})) # Default to N/A if no specific attacks
-
             edges_cytoscape_list.append({
                 "data": {
                     "id": f"edge-{edge_row['Source']}-{edge_row['Destination']}-{edge_row['Protocol']}-{np.random.randint(100000)}",
@@ -1500,7 +1551,8 @@ def cluster_network():
                     "Protocol": edge_row["Protocol"],
                     "EdgeWeight": float(edge_row["EdgeWeight"]), 
                     "processCount": int(edge_row["processCount"]),
-                    "AttackType": edge_attacks[0] if edge_attacks else "N/A" # Show first attack type for simplicity
+                    "AttackType": edge_row["AttackType"],
+                    "http_status": edge_row["http_status"] # Pass the new status field
                 }
             })
         
@@ -1508,7 +1560,6 @@ def cluster_network():
         network_data = {"nodes": final_nodes_list_cluster, "edges": edges_cytoscape_list}
 
         logging.info(f"Prepared network data for cluster {str_cluster_id_param}. Nodes: {len(final_nodes_list_cluster)}, Edges: {len(edges_cytoscape_list)}")
-        # convert_nan_to_none is essential for JSON serialization if NaNs are present
         return jsonify(convert_nan_to_none(network_data)) 
 
     except Exception as e:
@@ -1590,8 +1641,12 @@ def timeline_data():
     
     if not bins or bins[-1] <= max_time:
         bins.append(max_time + pd.Timedelta(nanoseconds=1))
+    
+    # Ensure bins are unique
+    bins = pd.to_datetime(bins).unique().tolist()
 
-    df_to_use['time_bin'] = pd.cut(df_to_use['Time'], bins=bins, right=False, labels=bins[:-1])
+
+    df_to_use['time_bin'] = pd.cut(df_to_use['Time'], bins=bins, right=False, labels=bins[:-1], duplicates='drop')
 
     if full_attack_timeframes_df_cache is not None and not full_attack_timeframes_df_cache.empty:
         df_to_use['Time'] = df_to_use['Time'].astype('datetime64[ns, UTC]')
