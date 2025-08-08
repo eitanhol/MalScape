@@ -1,4 +1,4 @@
-See the [Full Changelog](CHANGELOG.md) for all updates.
+See the [Full Changelog](../../blob/main/CHANGELOG.md) for all updates.
 
 ## User-Visible Feature Additions
 
