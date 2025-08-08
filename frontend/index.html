@@ -52,7 +52,7 @@
 
   <button id="sidebar-toggle" title="Open/close cluster detail sidebar" style="display: none;">&#9776;</button>
 
-  <div id="sidebar" title="Shows detailed graph and data for selected heatmap clusters.">
+  <div id="sidebar">
       <div id="sidebar-content">
           <button id="sidebarFullscreenBtn" title="Toggle Sidebar Fullscreen">&#x2922;</button>
 
@@ -74,7 +74,7 @@
           <button id="resetSidebarZoomBtn" title="Reset Graph Zoom">Reset Zoom</button>
 
           <div id="sidebar-cy-loading" style="display: none; text-align: center; margin-top: 5px; color: #6c757d;">Loading graph...</div>
-          <div id="sidebar-cy" title="Interactive graph of selected cluster(s). Click nodes/edges to filter table."></div>
+          <div id="sidebar-cy"></div>
           <div id="sidebar-info" style="margin-top: 10px; font-size: 14px; text-align: center; flex-shrink: 0;">Click a cell on the heatmap to add its cluster. Click nodes or edges in the graph to highlight and filter the table below.</div>
 
           <div id="sidebar-table-search-container" title="Filter sidebar table rows.">
@@ -138,13 +138,10 @@
                     <span class="slider round"></span>
                 </label>
             </div>
-            <button id="downloadProcessedDataBtn" title="Download currently loaded data as CSV." style="display: none;">Download Processed Data (CSV)</button>
+
             <button id="showPacketSimilarityBtn" title="Visualize Louvain IP Communities" style="margin-left: 8px; display: none;">Show Community IP Graph</button>
             <button id="showSankeyBtn" title="Visualize data flows with Sankey diagram" style="margin-left: 8px; display: none;">Show Sankey Diagram</button>
             <button id="toggleTimelineBtn" title="Show/Hide Timeline" style="margin-left: 8px; display: none;">Show Timeline</button>
-
-            <button id="toggleHttpFilterBtn" title="Filter out HTTP sessions and regenerate heatmap" style="display: none; background-color: #ff9800; margin-left: 8px;">Filter HTTP Sessions</button>
-
             <button id="createSubtreeBtn" title="Create a new detailed tree from selected combined clusters" style="display: none; background-color: #ff9800; margin-left: 8px;">Create Sub-Tree from Selection</button>
             <button id="backToMainTreeBtn" title="Return to the main tree view" style="display: none; background-color: #03a9f4; margin-left: 8px;">Back to Main Tree</button>
             
@@ -169,8 +166,7 @@
             <label for="maxDestinationAmtFilter">Max Dst:</label>
             <input type="number" id="maxDestinationAmtFilter" placeholder="Inf" step="1" style="width:60px;" title="Maximum destination appearances.">
             
-            <label for="payloadSearch" style="display:none;">Payload:</label>
-            <input type="text" id="payloadSearch" placeholder="Keyword" style="width:100px; display:none;" title="Filter by payload keyword (disabled for current CSV format).">
+
             
             <label for="sourceFilter">Src IP:</label>
             <input type="text" id="sourceFilter" placeholder="IP" style="width:100px;" title="Filter by source IP/subnet.">
@@ -179,8 +175,7 @@
             <label for="protocolFilter">Proto:</label>
             <input type="text" id="protocolFilter" placeholder="TCP" style="width:60px;" title="Filter by protocol name.">
             
-            <label for="entropyMinFilter" style="display:none;">Min Ent:</label> <input type="number" id="entropyMinFilter" placeholder="0.0" step="0.1" style="width:60px; display:none;" title="Minimum payload entropy.">
-            <label for="entropyMaxFilter" style="display:none;">Max Ent:</label> <input type="number" id="entropyMaxFilter" placeholder="Inf" step="0.1" style="width:60px; display:none;" title="Maximum payload entropy.">
+
             
             <button id="applyFiltersBtn" style="margin-left: 10px;" title="Apply selected filters to heatmap.">Apply Filters</button>
         </div>
@@ -336,8 +331,8 @@
       <button id="goPageBtn">Go</button>
     </div>
     <div style="margin-top: 20px;">
-        <button id="loadMoreBtn" title="Load more data (not implemented).">Load More</button>
-        <button id="refreshNetworkBtn" style="display: none; background-color:#4299e1; color:white; margin-left: 8px;" title="Refresh network graph (not implemented).">Refresh Network</button>
+
+
     </div>
     <div id="cy" title="Main network graph view (not fully implemented)."></div>
   </div>

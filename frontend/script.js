@@ -17,16 +17,13 @@
         { value: "SourcePort_Group", label: "Src Port Grp", defaultChecked: true },
         { value: "DestinationPort_Group", label: "Dst Port Grp", defaultChecked: true },
         { value: "Len_Group", label: "Pkt Len Grp", defaultChecked: true },
-        { value: "Anomaly", label: "Anomaly", defaultChecked: true },
+        { value: "Anomaly", label: "Attack Status", defaultChecked: true },
         { value: "ClusterID", label: "Cluster ID", defaultChecked: false }
     ];
     window.currentSankeyDimensionsOrder = [...DEFAULT_SANKEY_DIMENSIONS];
     window.sankeyMatchingClusterIds = new Set();
     window.activeSankeyFilter = null;
     window.fullTimelineData = null;
-
-    let isHttpFiltered = false;
-    let mainTreeViewBeforeHttpFilter = null;    
 
     const DEFAULT_UNKNOWN_COLOR = '#cccccc';
     const SELECTED_EDGE_COLOR = '#ff0000';
@@ -173,28 +170,6 @@
         layout.run();
     }
 
-    function resetHeatmapHighlights() {
-        // Select all heatmap cells within the dendrogram SVG
-        const cells = d3.selectAll("#inlineDendrogramSvg .heatmap-cell");
-
-        cells.each(function() {
-            const cell = d3.select(this);
-            // Get the original fill color stored when the cell was first drawn
-            const originalFill = cell.attr("data-original-fill");
-            const defaultStrokeColor = '#fff';
-            const defaultStrokeWidth = 0.2;
-
-            if (originalFill) {
-                // Revert to the original color and default stroke
-                cell.transition().duration(150)
-                    .attr("fill", originalFill)
-                    .style("stroke", defaultStrokeColor)
-                    .style("stroke-width", defaultStrokeWidth);
-            }
-        });
-        console.log("Heatmap cell highlights reset on client-side.");
-    }
-
     function toggleSidebar(forceOpen = null) {
         const shouldBeOpen = forceOpen !== null ? forceOpen : !isSidebarOpen;
         // const timelineCard = document.getElementById('timeline-card'); // No longer needed here
@@ -238,14 +213,6 @@
             }
         }
     }
-
-    resetSidebarBtn.addEventListener('click', () => {
-        console.log("Resetting sidebar view and heatmap highlights.");
-        clearSidebarVisualization();
-        updateLegend();
-        selectedNodeId = null;
-        document.getElementById('sidebarLayoutSelect').value = 'cose';
-    });
 
     function showSidebarLoading(isLoadingGraph, isLoadingTable) {
         document.getElementById('sidebar-cy-loading').style.display = isLoadingGraph ? 'block' : 'none';
@@ -438,7 +405,6 @@
         console.log("Sidebar visualization, color map, selections, table, and related highlights cleared.");
     }
 
-    // Helper function to reset main heatmap highlights
     function resetHeatmapHighlights() {
         console.log("Resetting main heatmap cell highlights.");
         d3.selectAll('#heatmap rect.cell').each(function() { // Target only main heatmap cells
@@ -446,24 +412,6 @@
             const originalColor = cell.attr("data-original-fill"); // Read stored original color
             if (originalColor) { cell.attr("fill", originalColor); }
             else { cell.style("fill", null); }
-        });
-    }
-
-    // Helper function to reset main heatmap highlights (called by clearSidebarVisualization)
-    function resetHeatmapHighlights() {
-        console.log("Resetting main heatmap cell highlights.");
-        d3.selectAll('#heatmap rect.cell').each(function() { // Target only main heatmap cells
-            const cell = d3.select(this);
-            const originalColor = cell.attr("data-original-fill"); // Read stored original color
-            if (originalColor) {
-                // Use transition only if desired, direct attr is faster
-                // cell.transition().duration(100)
-                cell.attr("fill", originalColor);
-            } else {
-                // Fallback if original color wasn't stored somehow
-                cell.style("fill", null); // Let CSS/default handle it
-                console.warn(`Missing original fill for heatmap cell: cluster ${cell.attr('data-cluster')}, metric ${cell.attr('data-metric')}`);
-            }
         });
     }
 
@@ -499,12 +447,6 @@
             'transition-property': 'line-color, target-arrow-color, width, z-index, line-style',
             'transition-duration': '0.15s',
             'z-index': 1
-        }},
-        { selector: 'edge[http_status = "out_of_session"]', style: {
-            'line-style': 'dashed',
-            'line-dash-pattern': [6, 3],
-            'line-color': '#e67e22', // A distinct orange color
-            'target-arrow-color': '#e67e22'
         }},
         { selector: 'node[Classification = "Internal"]', style: {
             'shape': 'square'
@@ -1237,6 +1179,42 @@
         }
     }
 
+    function generateDistinctColor(existingColors) {
+        const predefinedPalette = [
+            "#e6194B", "#3cb44b", "#ffe119", "#4363d8", "#f58231", "#911eb4", "#42d4f4",
+            "#f032e6", "#bfef45", "#fabebe", "#469990", "#e6beff", "#9A6324", "#fffac8",
+            "#800000", "#aaffc3", "#808000", "#ffd8b1", "#000075", "#a9a9a9"
+        ];
+
+        const existingSet = new Set(Object.values(existingColors));
+
+        // Try to use a color from the predefined palette first
+        for (const color of predefinedPalette) {
+            if (!existingSet.has(color)) {
+                return color;
+            }
+        }
+
+        // Fallback to generating new colors based on hue rotation
+        let hue = 0;
+        let attempts = 0;
+        const step = 30; // Hue step for distinct colors
+
+        while (attempts < 360 / step) {
+            hue = (hue + (Math.random() * step) + step) % 360;
+            const newColor = `hsl(${hue}, 85%, 60%)`;
+
+            // A simple check to avoid very similar colors (though less likely with hue steps)
+            if (!existingSet.has(newColor)) {
+                return newColor;
+            }
+            attempts++;
+        }
+
+        // Ultimate fallback if all else fails (highly unlikely)
+        return '#' + Math.floor(Math.random() * 0xFFFFFF).toString(16).padStart(6, '0');
+    }
+
     function loadSidebarMultiEdgeTable(edgeList, page, searchQuery = "") {
         if (!edgeList || edgeList.length === 0) {
             updateSidebarTableForSelectedEdges();
@@ -1350,13 +1328,10 @@
 
             protocols.forEach(proto => {
                 if (proto && !protocolColorMap[proto]) {
-                    let randomColor;
-                    do {
-                        randomColor = '#' + Math.floor(Math.random() * 0xFFFFFF).toString(16).padStart(6, '0');
-                    } while (randomColor.toLowerCase() === SELECTED_EDGE_COLOR.toLowerCase());
-                    protocolColorMap[proto] = randomColor;
+                    protocolColorMap[proto] = generateDistinctColor(protocolColorMap);
                 }
             });
+
             if (!protocolColorMap['Unknown']) {
                 protocolColorMap['Unknown'] = DEFAULT_UNKNOWN_COLOR;
             }
@@ -1402,7 +1377,7 @@
             window.heatmapCountSortOrder = [];
 
             const filterParamsBase = {
-                payloadKeyword: document.getElementById('payloadSearch').value.trim().toLowerCase(),
+
                 sourceFilter: document.getElementById('sourceFilter').value.trim().toLowerCase(),
                 destinationFilter: document.getElementById('destinationFilter').value.trim().toLowerCase(),
                 protocolFilter: document.getElementById('protocolFilter').value.trim().toLowerCase(),
@@ -1787,79 +1762,6 @@
         const manualEndTimeInput = document.getElementById('manualEndTime');
         const applyManualTimeBtn = document.getElementById('applyManualTimeBtn');
         const applyGranularityBtn = document.getElementById('applyGranularityBtn');
-        const toggleHttpFilterBtn = document.getElementById('toggleHttpFilterBtn');
-
-        if (toggleHttpFilterBtn) {
-            toggleHttpFilterBtn.addEventListener('click', async () => {
-                if (isHttpFiltered) {
-                    // Revert to the original tree
-                    if (mainTreeViewBeforeHttpFilter) {
-                        showLoading();
-                        try {
-                            // Restore the tree data
-                            window.lastTreeData = mainTreeViewBeforeHttpFilter;
-                            window.originalTreeData = structuredClone(mainTreeViewBeforeHttpFilter);
-                            
-                            // Redraw the dendrogram and heatmap
-                            showInlineDendrogram(mainTreeViewBeforeHttpFilter, document.getElementById("inline-dendrogram-container").clientHeight);
-                            await updateHeatmap(); // Recalculate heatmap data from the restored tree
-                            
-                            // Update UI
-                            isHttpFiltered = false;
-                            toggleHttpFilterBtn.textContent = 'Filter HTTP Sessions';
-                            toggleHttpFilterBtn.style.backgroundColor = '#ff9800';
-                            mainTreeViewBeforeHttpFilter = null; // Clear the saved state
-                        } catch (error) {
-                            console.error('Error reverting HTTP filter:', error);
-                            alert(`Failed to revert filter: ${error.message}`);
-                        } finally {
-                            hideLoading();
-                        }
-                    }
-                } else {
-                    // Apply the filter
-                    showLoading();
-                    try {
-                        // Save the current state
-                        mainTreeViewBeforeHttpFilter = structuredClone(window.lastTreeData);
-
-                        const response = await fetch(`${API_BASE_URL}/filter_http_sessions`);
-                        if (!response.ok) {
-                            const errText = await response.text();
-                            throw new Error(`Failed to filter HTTP sessions: ${errText}`);
-                        }
-                        const newTreeData = await response.json();
-
-                        if (newTreeData.error) {
-                            throw new Error(newTreeData.error);
-                        }
-
-                        // Clear any existing selections
-                        clearSidebarVisualization();
-                        updateLegend();
-
-                        // Update the main data and redraw
-                        window.lastTreeData = newTreeData;
-                        window.originalTreeData = structuredClone(newTreeData);
-                        
-                        showInlineDendrogram(newTreeData, document.getElementById("inline-dendrogram-container").clientHeight);
-                        await updateHeatmap();
-
-                        // Update UI
-                        isHttpFiltered = true;
-                        toggleHttpFilterBtn.textContent = 'Revert HTTP Filter';
-                        toggleHttpFilterBtn.style.backgroundColor = '#4caf50'; // Green to indicate active filter
-
-                    } catch (error) {
-                        console.error('Error filtering HTTP sessions:', error);
-                        alert(`Failed to filter HTTP sessions: ${error.message}`);
-                        mainTreeViewBeforeHttpFilter = null; // Clear saved state on error
-                    } finally {
-                        hideLoading();
-                    }
-                }
-            });
-        }
 
         if (applyGranularityBtn) {
             applyGranularityBtn.addEventListener('click', () => {
@@ -2808,7 +2710,7 @@
                 metaDataParts.push(`Selected Packets: ${totalSelectedPacketCount.toLocaleString()}`);
 
                 if (isAnySelectedClusterAnomalous) {
-                    metaDataParts.push(`Anomalous Packets: ${totalSelectedAnomalousPacketCount.toLocaleString()}`);
+                    metaDataParts.push(`Attack Packets: ${totalSelectedAnomalousPacketCount.toLocaleString()}`);
                 }
             }
 
@@ -3199,7 +3101,7 @@
                         const metricLabel = d_mouseover.feature;
                         const clusterOrGroupId = d_mouseover.cluster_id;
                         const value = d_mouseover.value;
-                        const anomalyStatusCell = d_mouseover.anomaly === 'anomaly' ? 'Anomaly Detected' : 'Normal';
+                        const anomalyStatusCell = d_mouseover.anomaly === 'anomaly' ? 'Attack Detected' : 'Normal';
                         const isGroup = d_mouseover.isGroup;
                         const originalCount = d_mouseover.originalLeavesCount;
                         let displayValue = 'N/A';
@@ -3312,14 +3214,12 @@
             treeControls.style.display = "flex";
             treeControls.style.opacity = '1';
             treeControls.style.pointerEvents = 'auto';
-            treeControls.querySelectorAll('button, input, select').forEach(ctrl => ctrl.disabled = false);
+            treeControls.querySelectorAll('button, input, select')
+                        .forEach(ctrl => (ctrl.disabled = false));
         }
 
-        try {
-            previousClusterCount = leafCount;
-            previousClusterHash = JSON.stringify(data);
-        } catch (e) {}
         highlightTreeClusters(new Set(clusterHighlightColors.keys()));
+
         const initialSlider = document.getElementById('thresholdSlider');
         if (initialSlider && window.lastTreeRoot && svgContent.node()) {
             requestAnimationFrame(() => {
@@ -3328,10 +3228,11 @@
         } else {
             d3.select("#threshold-bar").style("display", "none");
         }
-        
-        updateControlsState();
-        updateSubtreeButtonState();
-    }
+
+                
+                updateControlsState();
+                updateSubtreeButtonState();
+            }
 
     function resetGroupingAndRedraw() {
         console.log("Resetting grouping...");
@@ -4335,7 +4236,7 @@
                 }
                 content += `<br><b>Community:</b> ${data.clusterId || 'N/A'}`;
                 if (data.is_community_anomalous && !data.is_attacker) {
-                    content += ` <strong style="color:orange;">(In Anomalous Community)</strong>`;
+                    content += ` <strong style="color:orange;">(In Attack Community)</strong>`;
                 }
                 content += `<br><b>Class:</b> ${data.classification || 'N/A'}`;
                 content += `<br><b>Total Pkts (Graph):</b> ${data.packet_count || 0}`;
@@ -4543,7 +4444,9 @@
             .attr("height", svgHeight)
             .style("font", "10px sans-serif")
             .on("click", function(event) { // Click on background clears filter
-                if (event.target === this) {
+                if (event.target === this &&
+                    (window.activeSankeyFilter || window.activeSankeyNodeFilter)) {
+                    // Only reset if something was selected
                     window.activeSankeyFilter = null;
                     window.activeSankeyNodeFilter = null; // Also clear the node filter
                     const applyBtn = document.getElementById('applySankeyToHeatmapBtn');
@@ -4659,7 +4562,25 @@
             .attr("class", "node-group")
             .attr("transform", d_node => `translate(${d_node.x0}, ${d_node.y0})`)
             .style("opacity", d => (d.filtered_value > 0 || !window.activeSankeyFilter) ? 1.0 : 0.3) // Dim nodes not in selection
-            .on("click", nodeClickHandler);
+            .style("cursor", "pointer")
+            .on("click", nodeClickHandler)
+            .on("mouseover", function() {
+                d3.select(this).select("rect:nth-child(2)")
+                    .attr("stroke-width", 1.5);
+            })
+            .on("mouseout", function() {
+                d3.select(this).select("rect:nth-child(2)")
+                    .attr("stroke-width", 0.5);
+            });
+
+        // Add invisible hit-box for easier clicking (especially small nodes)
+        nodeGroup.append("rect")
+            .attr("x", -4)
+            .attr("y", -4)
+            .attr("height", d => Math.max(1, d.y1 - d.y0) + 8)
+            .attr("width", d => d.x1 - d.x0 + 8)
+            .attr("fill", "transparent")
+            .style("pointer-events", "all");
 
         // Draw a single rectangle for each node, no splitting.
         nodeGroup.append("rect")
@@ -4668,6 +4589,7 @@
             .attr("fill", d => d.color)
             .attr("stroke", "#333")
             .attr("stroke-width", 0.5)
+            .style("pointer-events", "all")
             .append("title").text(d_title => 
                 `${d_title.name}\n` +
                 `Total Value: ${d_title.value.toLocaleString()}\n`+
@@ -4691,7 +4613,7 @@
             if (window.activeSankeyNodeFilter) {
                 console.log("Active Sankey filter detected, fetching matching cluster IDs...");
                 const mainFilters = {
-                    payloadKeyword: document.getElementById('payloadSearch').value.trim().toLowerCase(),
+    
                     sourceFilter: document.getElementById('sourceFilter').value.trim().toLowerCase(),
                     destinationFilter: document.getElementById('destinationFilter').value.trim().toLowerCase(),
                     protocolFilter: document.getElementById('protocolFilter').value.trim().toLowerCase(),
@@ -4844,7 +4766,7 @@
         const noItemsMessage = document.getElementById('no-saved-items');
         if (!listElement || !noItemsMessage) return;
 
-        listElement.innerHTML = ''; 
+        listElement.innerHTML = '';
 
         if (savedItems.length === 0) {
             noItemsMessage.style.display = 'block';
@@ -4864,6 +4786,25 @@
             itemNameSpan.style.fontWeight = "bold";
             itemNameSpan.style.cursor = 'pointer';
             itemNameSpan.title = `Click to add/focus on ${item.name}`;
+            
+            // Add the missing click event listener
+            itemNameSpan.addEventListener('click', () => {
+                if (item.type === 'cluster-with-details') {
+                    const clusterID = item.data.clusterId;
+                    const isAnomalous = item.data.selectedNodesDetails.some(detail => detail.attackTypes && detail.attackTypes.length > 0);
+
+                    let highlightColor = clusterHighlightColors.get(clusterID);
+                    if (!highlightColor) {
+                        highlightColor = generateUniqueHighlightColor();
+                        clusterHighlightColors.set(clusterID, highlightColor);
+                    }
+                    
+                    visualizeClusterInSidebar(clusterID, highlightColor, isAnomalous).then(() => {
+                        highlightTreeClusters(new Set(clusterHighlightColors.keys()));
+                        updateSubtreeButtonState();
+                    });
+                }
+            });
             
             listItem.appendChild(itemNameSpan);
 
@@ -5296,10 +5237,13 @@
                 let tooltipHtml = `<strong>Time:</strong> ${timeFormat(d.time)} - ${timeFormat(d.endTime)}<br>`;
                 tooltipHtml += `<strong>Total Packets:</strong> ${d.value.toLocaleString()}<br>`;
                 tooltipHtml += `<strong>Status:</strong> <span style="color:${d.isAttack ? 'orange' : 'green'};">${d.isAttack ? 'Attack Detected' : 'Normal'}</span>`;
-
+                
+                const attackingIps = new Set();
                 if (d.isAttack && d.attackDetails && d.attackDetails.length > 0) {
+                    d.attackDetails.forEach(attack => attackingIps.add(attack.Source));
+
                     const attackEntriesHtml = d.attackDetails
-                        .map(attack => `<li>${attack.AttackType}: ${attack.Source}</li>`)
+                        .map(attack => `<li>${attack.AttackType}: ${attack.Source} (${attack.anomalousCount.toLocaleString()} attack pkts)</li>`)
                         .join('');
                     tooltipHtml += `<ul style="margin: 2px 0 0 15px; padding: 0;">${attackEntriesHtml}</ul>`;
                 }
@@ -5307,7 +5251,11 @@
                 if (d.topSources && Object.keys(d.topSources).length > 0) {
                     tooltipHtml += `<hr style="margin: 4px 0;"><strong>Top Sources:</strong>`;
                     const sourcesHtml = Object.entries(d.topSources)
-                        .map(([ip, count]) => `<li>${ip} (${count.toLocaleString()} pkts)</li>`)
+                        .map(([ip, count]) => {
+                            const isAttacker = attackingIps.has(ip);
+                            const style = isAttacker ? 'style="color:orange; font-weight:bold;"' : '';
+                            return `<li><span ${style}>${ip}</span> (${count.toLocaleString()} pkts)</li>`;
+                        })
                         .join('');
                     tooltipHtml += `<ul style="margin: 2px 0 0 15px; padding: 0;">${sourcesHtml}</ul>`;
                 }
@@ -5339,7 +5287,7 @@
         document.getElementById('dendrogramCard').style.display = 'none';
         document.getElementById('packetSimilarityCard').style.display = 'none';
         document.getElementById('sankeyCard').style.display = 'none';
-        document.getElementById('downloadProcessedDataBtn').style.display = 'none';
+
         document.getElementById('initial-dashboard').style.display = 'none';
         document.getElementById('magnifying-glass-controls').style.display = 'none'; // Hide on new file load
         
@@ -5673,7 +5621,7 @@
         document.getElementById('dendrogramCard').style.display = 'none';
         document.getElementById('packetSimilarityCard').style.display = 'none';
         document.getElementById('sankeyCard').style.display = 'none';
-        document.getElementById('downloadProcessedDataBtn').style.display = 'none';
+
         document.getElementById('initial-dashboard').style.display = 'none'; // Hide it initially
         
         const showSankeyBtn = document.getElementById('showSankeyBtn');
@@ -5768,8 +5716,7 @@
             document.getElementById('showSankeyBtn').style.display = 'inline-block';
             document.getElementById('sidebar-toggle').style.display = 'block';
             document.getElementById('magnifying-glass-controls').style.display = 'inline-block';
-            // This is the corrected line:
-            document.getElementById('toggleHttpFilterBtn').style.display = 'inline-block';
+            //document.getElementById('toggleHttpFilterBtn').style.display = 'inline-block';
 
         } catch (error) {
             if (error.name !== 'AbortError') {
@@ -5783,7 +5730,3 @@
         }
     }
 
-    document.getElementById('entropyMinFilter').style.display = 'none';
-    document.getElementById('entropyMaxFilter').style.display = 'none';
-    document.querySelector('label[for="entropyMinFilter"]').style.display = 'none';
-    document.querySelector('label[for="entropyMaxFilter"]').style.display = 'none';

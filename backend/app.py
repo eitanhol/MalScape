@@ -1,15 +1,12 @@
 from flask import Flask, request, Response, jsonify, send_from_directory
 import csv
 import pandas as pd
-from ipaddress import ip_address, ip_network # Used for IP classification
-from io import StringIO, BytesIO # BytesIO for reading uploaded file
-import re
+from ipaddress import ip_address, ip_network
+from io import StringIO, BytesIO
 import networkx as nx
 import community.community_louvain as community_louvain
 import numpy as np
 from flask_cors import CORS
-import argparse
-import sys
 import logging
 import os
 from scipy.cluster.hierarchy import linkage, to_tree
@@ -679,31 +676,6 @@ def process_uploaded_file_endpoint():
             return jsonify({"error": f"An unexpected server error occurred during file load: {str(e)}"}), 500
     else:
         return jsonify({"error": "Invalid file type. Please upload a .parquet file."}), 400
-
-@app.route('/filter_http_sessions', methods=['GET'])
-def filter_http_sessions():
-    global global_df
-    if global_df is None or global_df.empty:
-        return jsonify({"error": "No data loaded"}), 400
-
-    logging.info("Filtering out HTTP sessions...")
-    
-    if 'SessionID' not in global_df.columns:
-        logging.warning("SessionID column not found, cannot filter HTTP sessions.")
-        tree_dict = generate_tree_from_df(global_df.copy(), is_subtree=False)
-        return jsonify(tree_dict)
-
-    df_filtered = global_df[global_df['SessionID'] == -1].copy()
-
-    if df_filtered.empty:
-        logging.warning("DataFrame is empty after filtering out HTTP sessions.")
-        return jsonify({"id": "empty_root_no_data_after_filter", "dist": 0, "no_tree": True, "error": "No data remains after filtering HTTP sessions"}), 200
-
-    logging.info(f"Data shape after filtering: {df_filtered.shape}. Generating new tree.")
-
-    tree_dict = generate_tree_from_df(df_filtered, is_subtree=False)
-    
-    return jsonify(tree_dict)
 
 def apply_time_filter(df, request_obj):
     """
@@ -1513,30 +1485,19 @@ def cluster_network():
                 "is_attacker": ip_node_str in attacking_sources_cache
             }
 
-        # --- UPDATED Edge Aggregation ---
         def aggregate_edge_features(group):
-            process_count = group['processCount'].sum()
-            edge_weight = group['Length'].sum()
-            
-            # Determine HTTP status based on ports and SessionID
-            is_http = (group['SourcePort'] == 80).any() or (group['DestinationPort'] == 80).any()
-            if not is_http:
-                http_status = 'not_http'
-            else:
-                # If any packet in the group has a valid SessionID, the whole edge is 'in_session'
-                if (group['SessionID'] > -1).any():
-                    http_status = 'in_session'
-                else:
-                    http_status = 'out_of_session'
-            
-            # Determine AttackType for the edge
+            process_count = group['processCount'].sum()          # total packets on the edge
+            edge_weight   = group['Length'].sum()                # summed byte length
+
+            # Condense attack labels (ignore “N/A” placeholders)
             attack_types = set(group['AttackType'].astype(str).str.upper())
             attack_types.discard("N/A")
-            attack_type = list(attack_types)[0] if attack_types else "N/A"
+            attack_type = next(iter(attack_types), "N/A")
 
             return pd.Series({
-                'processCount': process_count, 'EdgeWeight': edge_weight,
-                'http_status': http_status, 'AttackType': attack_type
+                "processCount": process_count,
+                "EdgeWeight":   edge_weight,
+                "AttackType":   attack_type
             })
         
         # Apply the new aggregation function
@@ -1552,7 +1513,6 @@ def cluster_network():
                     "EdgeWeight": float(edge_row["EdgeWeight"]), 
                     "processCount": int(edge_row["processCount"]),
                     "AttackType": edge_row["AttackType"],
-                    "http_status": edge_row["http_status"] # Pass the new status field
                 }
             })
         
@@ -1692,20 +1652,24 @@ def timeline_data():
         # --- End of new logic for height normalization ---
 
         attack_details = []
-        if is_attack and 'AttackType' in group.columns:
-            attacks_in_group = group[group['AttackType'] != 'N/A'][['AttackType', 'Source']].copy()
-            unique_attacks = attacks_in_group.drop_duplicates()
-            attack_details = unique_attacks.to_dict('records')
+        if is_attack:
+            anomalous_packets = group[group['Anomaly'] == 'anomaly'].copy()
+            if not anomalous_packets.empty:
+                # Group by AttackType and Source, and sum up the processCount
+                attack_counts = anomalous_packets.groupby(['AttackType', 'Source'])['processCount'].sum().reset_index()
+                attack_counts.rename(columns={'processCount': 'anomalousCount'}, inplace=True)
+                attack_details = attack_counts.to_dict('records')
             
         top_sources = {}
         if not group.empty:
-            top_sources = group['Source'].value_counts().nlargest(3).to_dict()
+            # Correctly sum processCount for each source to find the top ones
+            top_sources = group.groupby('Source')['processCount'].sum().nlargest(3).to_dict()
 
         return pd.Series({
             'value': normalized_value, # Use the normalized value
             'isAttack': is_attack,
             'attackDetails': attack_details,
-            'topSources': top_sources
+            'topSources': {str(k): int(v) for k, v in top_sources.items()} # Ensure keys are strings for JSON
         })
 
     time_series = df_to_use.groupby('time_bin').apply(aggregate_group_details)
@@ -1725,52 +1689,6 @@ def timeline_data():
         })
         
     return jsonify(timeline_json)
-
-@app.route('/get_cluster_rows', methods=['GET'])
-def get_cluster_rows():
-    global global_df
-    if global_df is None or global_df.empty:
-        return jsonify({"rows": [], "total": 0, "error": "No data loaded."}) # Added error message
-    
-    cluster_id_param = request.args.get("cluster_id")
-    if not cluster_id_param:
-        return jsonify({"rows": [], "total": 0, "error": "cluster_id parameter is missing."})
-
-    try:
-        page = int(request.args.get("page", 1))
-        page_size = int(request.args.get("page_size", 50)) # Consistent with HTML
-        if page < 1: page = 1
-        if page_size < 1: page_size = 50
-    except ValueError:
-        return jsonify({"rows": [], "total": 0, "error": "Invalid page or page_size parameter."})
-
-    # Filter for the specific cluster
-    df_cluster = global_df[global_df["ClusterID"].astype(str) == str(cluster_id_param)]
-    total_rows_in_cluster = len(df_cluster)
-    
-    start_index = (page - 1) * page_size
-    end_index = start_index + page_size
-    
-    # Select rows for the current page
-    # Use .iloc for positional indexing after filtering
-    paginated_rows_df = df_cluster.iloc[start_index:end_index]
-    
-    # Convert to dictionary records, replacing NaT/NaN with None for JSON
-    # Also handle Pandas NA (for Int64 nullable types)
-    rows_for_json = []
-    for _, row_series in paginated_rows_df.iterrows():
-        record = {}
-        for col_name, val in row_series.items():
-            if pd.isna(val): # Catches pd.NaT, np.nan, pd.NA
-                record[col_name] = None
-            elif isinstance(val, pd.Timestamp): # Ensure timestamps are ISO format strings
-                 record[col_name] = val.isoformat()
-            else:
-                record[col_name] = val
-        rows_for_json.append(record)
-        
-    return jsonify({"rows": rows_for_json, "total": total_rows_in_cluster})
-
 
 @app.route('/get_cluster_table', methods=['GET'])
 def get_cluster_table():
@@ -1864,6 +1782,13 @@ def sankey_data():
         filter_key = sankey_filter['dimensionKey']
         filter_value = str(sankey_filter['value'])
 
+        # Map display values back to raw values for Attack Status
+        if filter_key == "Anomaly":              # dimension is Attack Status
+            if filter_value.lower() == "attack":
+                filter_value = "anomaly"
+            elif filter_value.lower() == "normal":
+                filter_value = "normal"          # unchanged, here for clarity
+
         # Create a boolean mask for the filter condition
         mask = df_sankey[filter_key].astype(str) == filter_value
         df_filtered = df_sankey[mask]
@@ -1892,8 +1817,17 @@ def sankey_data():
     key_to_label_map = {
         "Protocol": "Protocol", "SourceClassification": "Source Type", "DestinationClassification": "Dest. Type",
         "SourcePort_Group": "Src Port Grp", "DestinationPort_Group": "Dst Port Grp", "Len_Group": "Pkt Len Grp",
-        "Anomaly": "Anomaly", "ClusterID": "Cluster ID"
+        "Anomaly": "Attack Status", "ClusterID": "Cluster ID"
     }
+    
+    # Map data values for display
+    def transform_display_value(key, value):
+        if key == "Anomaly":
+            if str(value) == "anomaly":
+                return "attack"
+            elif str(value) == "normal":
+                return "normal"
+        return str(value)
     
     links_agg = {}
     
@@ -1911,8 +1845,12 @@ def sankey_data():
             source_label = key_to_label_map.get(source_key, source_key)
             target_label = key_to_label_map.get(target_key, target_key)
 
-            source_name = f"{source_label}: {source_val}"
-            target_name = f"{target_label}: {target_val}"
+            # Transform display values
+            source_display_val = transform_display_value(source_key, source_val)
+            target_display_val = transform_display_value(target_key, target_val)
+
+            source_name = f"{source_label}: {source_display_val}"
+            target_name = f"{target_label}: {target_display_val}"
             
             link_tuple = (source_name, target_name)
             if link_tuple not in links_agg:
@@ -1927,6 +1865,10 @@ def sankey_data():
     links_list = []
 
     for (source_name, target_name), values in links_agg.items():
+        # Skip links with zero value
+        if values['value'] <= 0:
+            continue
+            
         if source_name not in nodes_map:
             nodes_map[source_name] = len(nodes_list)
             nodes_list.append({"name": source_name})
@@ -1998,31 +1940,7 @@ def get_time_info():
     })
 
 
-@app.route('/download_processed_data', methods=['GET']) # Renamed endpoint
-def download_processed_data():
-    global global_df
-    if global_df is None or global_df.empty:
-        return jsonify({"error": "No processed data available to download."}), 400
-    
-    # Output as CSV for user convenience
-    csv_io = StringIO()
-    try:
-        # Handle potential NaT in Time column for CSV conversion
-        df_to_download = global_df.copy()
-        if 'Time' in df_to_download.columns and pd.api.types.is_datetime64_any_dtype(df_to_download['Time']):
-             # Format datetime to string, handling NaT gracefully
-            df_to_download['Time'] = df_to_download['Time'].apply(lambda x: x.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3] if pd.notna(x) else '')
-        
-        df_to_download.to_csv(csv_io, index=False, quoting=csv.QUOTE_MINIMAL)
-        csv_io.seek(0)
-        return Response(
-            csv_io.getvalue(), 
-            mimetype='text/csv', 
-            headers={'Content-Disposition': 'attachment;filename=processed_data.csv'}
-        )
-    except Exception as e:
-        logging.error(f"Error generating CSV for download: {e}", exc_info=True)
-        return jsonify({"error": "Failed to generate CSV data for download."}), 500
+
 
 @app.route('/')
 def serve_index():
@@ -2053,51 +1971,7 @@ def convert_nan_to_none(obj):
     elif isinstance(obj, np.bool_): return bool(obj)
     return obj
 
-# --- Get Edge Table (for sidebar, if needed) ---
-# This endpoint might need review if its usage changes significantly
-@app.route('/get_edge_table', methods=['GET'])
-def get_edge_table():
-    global global_df
-    if global_df is None or global_df.empty: return "<p>No data available.</p>"
 
-    source = request.args.get("source")
-    destination = request.args.get("destination")
-    protocol = request.args.get("protocol")
-    if not source or not destination or not protocol: return "<p>Missing source, destination, or protocol.</p>"
-
-    try: page = int(request.args.get("page", 1))
-    except: page = 1
-    try: page_size = int(request.args.get("page_size", 50))
-    except: page_size = 50
-
-    df_filtered = global_df[
-        (global_df["Source"].astype(str) == str(source)) & 
-        (global_df["Destination"].astype(str) == str(destination)) & 
-        (global_df["Protocol"].astype(str) == str(protocol))
-    ]
-    total = len(df_filtered)
-    start = (page - 1) * page_size
-    end = start + page_size
-    
-    rows_for_html_edge = []
-    for _, row_series in df_filtered.iloc[start:end].iterrows():
-        record = {}
-        for col_name, val in row_series.items():
-            if pd.isna(val): record[col_name] = ""
-            elif isinstance(val, pd.Timestamp): record[col_name] = val.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
-            else: record[col_name] = str(val)
-        rows_for_html_edge.append(record)
-
-    if not rows_for_html_edge: return "<p>No rows found for this edge.</p>"
-    columns = list(rows_for_html_edge[0].keys())
-    # (HTML generation logic as before)
-    html = "<table style='width:100%; border-collapse: collapse; border:1px solid #ddd;'>"
-    html += "<thead><tr>" + "".join(f"<th style='padding:8px; border:1px solid #ddd; text-align:left;'>{col}</th>" for col in columns) + "</tr></thead><tbody>"
-    for row_item_edge in rows_for_html_edge:
-        html += "<tr>" + "".join(f"<td style='padding:8px; border:1px solid #ddd;'>{row_item_edge.get(col, '')}</td>" for col in columns) + "</tr>"
-    html += "</tbody></table>"
-    html += f"<p id='table-summary' data-total='{total}'>Showing rows {start + 1} to {min(end, total)} of {total}.</p>"
-    return html
 
 @app.route('/get_multi_edge_table', methods=['POST'])
 def get_multi_edge_table():
@@ -2164,29 +2038,7 @@ def get_multi_edge_table():
 
     return jsonify({"rows": rows_for_json, "total": total})
 
-@app.route('/attack_timeframes', methods=['GET'])
-def get_attack_timeframes():
-    """
-    Provides a list of attack timeframes with start and stop times.
-    """
-    global attack_timeframes_cache
-    if not attack_timeframes_cache:
-        return jsonify([])
 
-    # Convert datetime objects to JSON-serializable ISO strings
-    try:
-        serializable_timeframes = []
-        for attack in attack_timeframes_cache:
-            serializable_timeframes.append({
-                "source": attack.get("source"),
-                "destination": attack.get("destination"),
-                "start": attack["start"].isoformat() if pd.notna(attack.get("start")) else None,
-                "stop": attack["stop"].isoformat() if pd.notna(attack.get("stop")) else None
-            })
-        return jsonify(serializable_timeframes)
-    except Exception as e:
-        logging.error(f"Error serializing attack timeframes: {e}", exc_info=True)
-        return jsonify({"error": "Failed to prepare attack data"}), 500
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))

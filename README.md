@@ -1,322 +1,109 @@
-# Changelog
-
-## [2025-07-24]
-### Added
-- "Filter HTTP Sessions" button: reclusters using all out-of-session HTTP data and redraws heatmap and tree with those new clusters
-
-## [2025-07-23]
-### Updated
-- Pconverter to make Parquet files include raw data required to define sessions
-- Program to define HTTP sessions
-
-## [2025-07-22]
-### Changed
-- Timeline selection before full file processing is now default
-- Renamed "Select timeframe manually" switch to "Skip timeline selection"
-
-## [2025-07-21]
-### Fixed
-- Magnifying glass behavior
-- Magnifying glass now hidden until after file processing
-
-## [2025-07-16]
-### Added
-- Dashboard of important information before processing file  
-  - Lists total packets, data volume, number of source and destination IPs, and top 3 protocols by percentage
-
-## [2025-07-15]
-### Added
-- Reset zoom button to sidebar visualization and fullscreen view
-
-### Changed
-- Moved timeline granularity input box and Apply button to bottom right of timeline window
-
-## [2025-07-14]
-### Fixed
-- Sankey "Apply to heatmap" button not working with new selection functionality from 6/23
-- Holding Control before starting timeline window drag not working
-- Timeline tooltips not showing
-
-### Added
-- Option to choose timeline block granularity in milliseconds, with an "Apply" button
-
-### Improved
-- Alignment on timeline input boxes
-
-## [2025-07-10]
-### Fixed
-- "Create sub tree from selection" button not hiding after clicking "Reset node selection"
-- Listing of packets from selected clusters not hiding after clicking "Reset node selection"
-- Timeline input boxes being empty before making a change
-
-### Added
-- Caching to timeline data to optimize visualization speed
-
-### Improved
-- Can now hold Control while dragging the timeline window to lock onto edges of timeline blocks (does not yet work if Control is held before dragging)
-
-## [2025-07-09]
-### Added
-- Listing of total anomalous packets from selected clusters
-
-### Fixed
-- Heatmap cell colors after "Create sub tree from selection"
-
-## [2025-07-08]
-### Added
-- List number of packets from all selected clusters
-
-### Changed
-- Sidebar only opens if there are no previous clusters selected
-
-## [2025-07-07]
-### Added
-- Toggle magnifying glass button
-- Input box for magnifying glass zoom
-
-## [2025-07-04]
-### Fixed
-- Timeline tooltips going off screen
-
-### Changed
-- Timeline edge blocks now have variable width, and their height is proportional to the amount of data taking their length into account
-
-### Improved
-- Timeline tooltips are hidden while dragging timeline selection
-
-## [2025-07-03]
-### Fixed
-- Issue with heatmap cell colors after reset grouping
-
-### Added
-- Transparent border to processed timeframe on timeline
-
-## [2025-07-01]
-### Fixed
-- Show Sankey diagram being enabled after processing a new file
-- Only processed timeline section showing after processing
-- Attacks not showing on timeline after processing
-
-## [2025-06-30]
-### Fixed
-- Timeline input box "Apply" button not staying grayed out with invalid inputs
-
-## [2025-06-27]
-### Improved
-- Accuracy of anomaly detection on timeline
-
-### Added
-- Timeline tooltips
-
-### Fixed
-- File processing bug
-
-## [2025-06-26]
-### Fixed
-- Completed fix of anomaly detection not working for some files
-
-### Improved
-- Show more accurate attack times on timeline after file processing
-
-## [2025-06-25]
-### Attempted
-- Attempted to fix anomaly detection with certain files
-
-## [2025-06-24]
-### Added
-- Input boxes for manual timeline selection
-- "Reset timeline selection" button before file processing
-
-### Fixed
-- "Apply manual time" button remains grayed out until a valid change is made
-- Timeline reset button behavior after file processing
-- Number of packets displayed not updating after timeline selection change
-- "Show Sankey diagram" and "Show timeline" buttons not hiding after uploading a second file
-- "Apply manual time" button not graying out after uploading second file
-
-## [2025-06-23]
-### Added
-- Functionality for the Sankey diagram to visually represent the proportion of traffic in each link that relates to a user's selection
-
-## [2025-06-19]
-### Added
-- "Load demo file" button to allow users without a Parquet file to test the app
-- Button to show/hide timeline
-- Placeholder to max node size input box when no cluster is selected
-
-### Fixed
-- Timeline resize after closing sidebar
-- Max node size shown in input box not resetting when cluster is deselected
-- All nodes in anomalous cluster having red outline in combined cluster
-- Visual bugs applying timeline threshold after file processing
-
-### Changed
-- Separated `malscapedev.html` into `index.html`, `styles.css`, and `script.js`
-- Timeline colors adjusted for better visibility
-
-### Improved
-- Timeline now maintains selected threshold after file processing
-- Timeline auto-hides after file processing
-- Timeline give orange color to sections with attacks
-- Sidebar hide button now hidden before file is processed
-
-## [2025-06-18]
-### Added
-- Functionality to select timeline before processing file
-- Title to timeline Y-axis
-- Switch to let user select whether to process entire file or a specific timeframe
-
-### Changed
-- Timeline data preview adjusted to show more granular time intervals
-
-### Improved
-- UI Filters and buttons hidden before file is processed
-
-## [2025-06-17]
-### Added
-- Functionality to view new tree and heatmap of all clusters from inside a combined cluster
-
-## [2025-06-16]
-### Fixed
-- New heatmap clusters having no color and missing tooltip data
-- Timeline sizing issues when opening sidebar
-
-### Updated
-- Display data on top of tree card when changing timeline
-
-## [2025-06-12]
-### Added
-- Adjustable timeline of uploaded data
-
-## [2025-06-11]
-### Added
-- Max node size input box now controls max node size in visualization
-
-### Fixed
-- Tooltips not showing in sidebar fullscreen mode
-- Sidebar table search now searches all pages
-- Red bar placement corrected after applying threshold
-
-## [2025-06-10]
-### Fixed
-- Heatmap cell colors after applying threshold
-- Combined cluster nodes not showing original cluster colors
-- Reorder heatmap resetting cluster grouping
-
-### Added
-- Heatmap cell tooltips for combined clusters now list number of original clusters
-- Anomalous nodes now have proportional red outlines for better visibility on large nodes
-
-### In Progress
-- Show on Sankey diagram selection how much is selected in all other sections
-
-## [2025-06-09]
-### Changed
-- Converter tool now creates Parquet files with a `count` column that combines identical packets occurring consecutively within 1 second
-
-## [2025-06-05]
-### Fixed
-- Parquet version compatibility issues
-
-### Improved
-- Sankey filters
-- Sankey diagram selections now reflected on heatmap
-
-## [2025-06-04]
-### Added
-- Implementation started for optimized CSV reading
-- Packet count and process time display
-- Tool to convert PCAP to Parquet
-
-### Changed
-- Top-level tree diagram info
-
-### Created
-- Parquet-compatible version with faster processing and much smaller file sizes
-
-## [2025-06-03]
-### Added
-- Reorganize arrows to Sankey diagram
-
-### In Progress
-- Highlight heatmap clusters that are selected in Sankey diagram
-- Added button to apply selected clusters
-
-## [2025-06-02]
-### Attempted
-- Optimization of CSV processing
-
-## [2025-06-01]
-### Changed
-- Sankey diagram now shows all dimensions
-
-### Fixed
-- Issue where anomaly infromation between heatmap and cluster view were inconsistent with large csv
-
-## [2025-05-29]
-### Changed
-- Sankey diagram updates
-
-## [2025-05-28]
-### Added
-- Started Sankey diagram
-
-## [2025-05-27]
-### Fixed
-- Anomaly detection now considers the timeframe of the uploaded CSV
-
-### Added
-- Cancel button to loading screen
-
-### Changed
-- IP graph now uses PCA
-
-## [2025-05-25]
-### Added
-- Started IP node graph
-
-## [2025-05-24]
-### Changed
-- Node radius is now equal to square root of number of packets
-
-## [2025-05-22]
-### Fixed
-- Sidebar table issue
-- Saved items list behavior
-
-## [2025-05-21]
-### Added
-- Functionality to save selected nodes to list
-
-
-## [2025-05-18]
-### Added
-- Working deployment for small CSVs.
-
-### Changed
-- Slight optimizations to CSV processing for faster handling.
-
-## [2025-05-16]
-### Fixed
-- New heatmap cells (previously gray with no metric data) now display correct metrics when high Louvain resolution is applied.
-
-### Added
-- Highlights for new clusters on the heatmap.
-- Button to hide new cluster highlights.
-
-### Changed
-- Initial deployment setup started (some issues remain).
-
-## [2025-05-15]
-### Added
-- Display of attack type in tooltips.
-- Deselect functionality in the cluster view by clicking on empty space.
-- Handling of new connections between nodes when combining clusters using threshold.
-
-### Fixed
-- Fullscreen toggle behavior.
-- Multi-node selection in the network visualization.
-
-### Changed
-- Removed unhelpful filters.
-- Grayed out "Order Cells by Filter" option when not applicable.
+See the [Full Changelog](CHANGELOG.md) for all updates.
+
+## User-Visible Feature Additions
+
+
+### Pre-processing Dashboard
+- **How it works**: Right after a file upload, the app requests capture-wide stats and populates the cards in `#initial-dashboard` (total packets, data volume, unique IPs, top protocols).
+- **Why it matters**: Gives a quick “size & shape” snapshot before picking a timeline window or doing heavier analysis.
+- **Implementation notes**: Backend route in **`app.py`** (`/summary_stats`). Markup in **`index.html`** (`#initial-dashboard` and `#stat-*` IDs). Client code in **`script.js`** (`showInitialDashboard()` + the upload flow).
+
+### Reset Zoom Controls
+- **How it works**: Two buttons reset zoom/pan: **Sidebar graph** (`#resetSidebarZoomBtn`) and **inline tree/heatmap** (`#resetInlineZoomBtn`).
+- **Why it matters**: Prevents users from getting “lost” after aggressive zoom/pan in dense visuals.
+- **Implementation notes**: Handlers and helpers in **`script.js`** (`resetSidebarZoom()` and `resetInlineZoom()`). Buttons declared in **`index.html`** next to the respective visual headers.
+
+### Packet & Attack Counters on Selection
+- **How it works**: When clusters are selected, the app totals both their packet counts and attack-packet counts and shows them in the tree metadata line.
+- **Why it matters**: Gives a quick sense of overall and attack-specific volumes without opening the packet table.
+- **Implementation notes**: Uses `aggregatedLeafData` in **`script.js`** to compute totals; rendered by the metadata update routine for the inline tree/heatmap.
+
+### Magnifying Glass (Loupe)
+- **How it works**: Toggleable loupe overlays a circular zoomed view anywhere in the program. Zoom factor is adjustable via an input next to the toggle.
+- **Why it matters**: Inspect congested or detailed areas without losing global context.
+- **Implementation notes**: Implemented in **`script.js`** (creation/toggle + zoom input). Controls are in **`index.html`** (`#magnifyingGlassBtn`, `#magnifyingGlassZoom`).
+
+### Variable-Width Timeline Edge Blocks
+- **How it works**: Only the first and last timeline blocks adjust their width to match their shorter duration, while all other blocks remain uniform.
+- **Why it matters**: Correctly represents partial-duration edge blocks instead of misleadingly showing them as equal in time.
+- **Implementation notes**: Drawn in **`script.js`** by the timeline renderer.
+
+### Processed-Range Marker
+- **How it works**: A semi-transparent outline marks the processed interval on the timeline.
+- **Why it matters**: Shows exactly what slice is currently analysed, even if you move the selection window without reprocessing.
+- **Implementation notes**: Part of the timeline render/update logic in **`script.js`**.
+
+### Timeline Tooltips (Enhanced)
+- **How it works**: Hovering a timeline block shows packet count, number of attack packets, top talkers, and whether attacks are present. If an attack IP is in the top 3, it is colored orange.
+- **Why it matters**: Gives richer at-a-glance context for each timeline block.
+- **Implementation notes**: Tooltip template + show/hide logic in the timeline code path in **`script.js`**.
+
+### Manual Timeline Inputs, Reset & Validation
+- **How it works**: Start/End inputs allow precise windows. “Apply” stays disabled until inputs are valid; “Reset” clears to defaults.
+- **Why it matters**: Enables pin-point forensics and prevents off-by-one errors from drag-selections.
+- **Implementation notes**: Inputs and buttons in **`index.html`** (timeline card). Validation/apply/reset handlers in **`script.js`**.
+
+### Sankey → Heatmap Selection Sync (Improved)
+- **How it works**: Selecting nodes or links in the Sankey and applying highlights marks all heatmap clusters carrying that traffic; a revert clears highlights. Sankey nodes with value of 0 are hidden, and small nodes are easier to select.
+- **Why it matters**: Connects flow analysis in the Sankey to anomaly/cluster views while improving clarity and usability.
+- **Implementation notes**: UI buttons in **`index.html`**. Client logic in **`script.js`** (tracks `currentSankeyDimensionsOrder`, collects selected nodes/links, calls the server to resolve matching ClusterIDs, then highlights those heatmap cells). Server endpoints in **`app.py`** (`/sankey_dimensions_meta`, `/sankey_data`, `/get_sankey_matching_clusters`).
+
+### Show/Hide Timeline Toggle
+- **How it works**: A button collapses/expands the timeline card with a smooth transition.
+- **Why it matters**: Frees vertical space on smaller screens once a window is chosen.
+- **Implementation notes**: Toggle button and card live in **`index.html`**; event handler in **`script.js`**.
+
+### Demo File Loader
+- **How it works**: "Load Demo File" uploads a bundled real-world sample in the correct format without needing to locate or convert a file.
+- **Why it matters**: Saves setup time. Normally you’d have to use a separate conversion tool to prepare a file; this lets you explore/test immediately.
+- **Implementation notes**: Button in **`index.html`**; handler in **`script.js`**; sample file path referenced in the handler.
+
+### Pre-processing Timeline Selection Workflow
+- **How it works**: Upload → adjust/confirm timeline window → process. A **Skip Timeline Selection** toggle processes the entire file instead.
+- **Why it matters**: Slashes processing time on large captures, while keeping a one-click path.
+- **Implementation notes**: Toggle and inputs in **`index.html`** (`#skipTimelineSelectionToggle`). Upload flow and parameter passing in **`script.js`** (`handleFileUpload` → adds start/end params when present).
+
+### Cluster Drill-Down (Sub-Tree) View
+- **How it works**: Select combined-cluster cells and click **Create Sub-Tree from Selection**. A focused tree/heatmap view is generated for just those leaves. **Back to Main Tree** restores the original view.
+- **Why it matters**: Enables multi-level exploration without cluttering the main canvas.
+- **Implementation notes**: Buttons in **`index.html`** (`#createSubtreeBtn`, `#backToMainTreeBtn`). Client logic in **`script.js`** (sub-tree generation & state swaps). Tree data comes from **`app.py`** (`/hierarchical_clusters`).
+
+### Adjustable Timeline Window
+- **How it works**: Drag the selection window on the timeline header to refine bounds; you must reprocess to apply the new window.
+- **Why it matters**: Allows iterative narrowing to suspect periods, with new processing runs for each change.
+- **Implementation notes**: Timeline selection/drag code lives in **`script.js`**.
+
+### Max Node Size (Main Graph)
+- **How it works**: Numeric inputs set min/max node radius and edge width in the **main** Cytoscape graph; there’s no default hardcoded max—users must enter one to apply a limit.
+- **Why it matters**: Prevents “elephant” nodes/edges from dwarfing the scene in sparse captures.
+- **Implementation notes**: Controls in **`index.html`** (main graph sizing inputs). Logic in **`script.js`** (`applySizeControls()` for the main graph; `applySidebarSizeControls()` for the sidebar graph).
+
+### Configurable Multi-Dimension Sankey
+- **How it works**: The Sankey can be built from multiple categorical dimensions (Protocol, Source/Dest Type, Port Groups, Packet Length Group, Attack status, optional Cluster ID). Checkboxes/toggles control which layers appear and in what order.
+- **Why it matters**: Avoids hard-coded diagrams and supports future dimensions.
+- **Implementation notes**: Dimension metadata fetched from the server; UI state kept in `currentSankeyDimensionsOrder` in **`script.js`**; graph data from `/sankey_data` in **`app.py`**.
+
+### Initial Sankey Diagram
+- **How it works**: First D3 Sankey rendering showing flows across selected dimensions.
+- **Why it matters**: Provides a holistic flow view that complements the cluster-centric heatmap.
+- **Implementation notes**: Built and updated entirely from **`script.js`**.
+
+### Node-Radius Scaling (Sidebar Graph)
+- **How it works**: In the **sidebar** graph, node diameter scales to √(packet count), clamped by user min/max inputs; attacker nodes get proportionally thicker borders.
+- **Why it matters**: Keeps dense side-graphs readable while still conveying magnitude.
+- **Implementation notes**: Logic in **`script.js`** (`applySidebarSizeControls()`); inputs live in **`index.html`** (Sidebar Graph Sizing panel).
+
+### Saved Items List
+- **How it works**: A “Save Selection” button bookmarks the current selection of clusters/IPs to a **Saved Items** list. The list persists between sessions.
+- **Why it matters**: Lets analysts queue items to revisit without re-searching.
+- **Implementation notes**: Markup in **`index.html`** (Saved Items section in the legend). CRUD and persistence in **`script.js`** (localStorage + render/update helpers). “Reset Node Selection” clears both highlights and related table state.
+
+### New-Cluster Highlighter
+- **How it works**: After reclustering (e.g., changing Louvain resolution), clusters with new IDs are temporarily highlighted on the heatmap and fade on interaction.
+- **Why it matters**: Makes reclassification effects instantly visible.
+- **Implementation notes**: Implemented in **`script.js`** as part of the heatmap refresh path.
+
+### Attack Tooltips & Multi-Select
+- **How it works**: Heatmap cells show attack category in a tooltip; selecting multiple is done with repeated left-clicks, and clicking again deselects.
+- **Why it matters**: Richer context and smoother UX during exploratory analysis.
+- **Implementation notes**: Tooltip assembly and selection handling live with the heatmap code in **`script.js`**.
