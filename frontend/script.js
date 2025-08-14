@@ -1762,6 +1762,24 @@
         const manualEndTimeInput = document.getElementById('manualEndTime');
         const applyManualTimeBtn = document.getElementById('applyManualTimeBtn');
         const applyGranularityBtn = document.getElementById('applyGranularityBtn');
+        const resetTimelineBtn = document.getElementById('resetTimelineBtn'); // Get the reset button
+
+
+        if (resetTimelineBtn) {
+            resetTimelineBtn.addEventListener('click', () => {
+                const brushGroup = d3.select("#timeline-container .brush");
+                // This button should only be enabled if a selection has been applied, so we can rely on lastAppliedTimeSelection
+                if (!brushGroup.empty() && window.timelineBrush && window.timelineXScale && window.lastAppliedTimeSelection) {
+                    const targetDomain = [window.lastAppliedTimeSelection.startTime, window.lastAppliedTimeSelection.endTime];
+                    const targetRange = [window.timelineXScale(targetDomain[0]), window.timelineXScale(targetDomain[1])];
+                    
+                    // Programmatically move the brush to cover the last processed range
+                    brushGroup.call(window.timelineBrush.move, targetRange);
+                } else {
+                    console.warn("Could not reset timeline brush: brush, scale, or last applied selection not ready.");
+                }
+            });
+        }
 
         if (applyGranularityBtn) {
             applyGranularityBtn.addEventListener('click', () => {
@@ -1823,10 +1841,15 @@
 
         if (loadDemoBtn) {
             loadDemoBtn.addEventListener('click', async () => {
-                const localProcessingTimeDiv = document.getElementById('csvProcessTime');
-                if (localProcessingTimeDiv) localProcessingTimeDiv.style.display = 'none';
+            const localProcessingTimeDiv = document.getElementById('csvProcessTime');
+            if (localProcessingTimeDiv) localProcessingTimeDiv.style.display = 'none';
 
-                showLoading();
+            showLoading();
+
+            // close sidebar & hide tab immediately on demo load
+            try { toggleSidebar(false); } catch (e) {}
+            const sidebarToggle = document.getElementById('sidebar-toggle');
+            if (sidebarToggle) sidebarToggle.style.display = 'none';
 
                 try {
                     const processResponse = await fetch(`${API_BASE_URL}/load_demo_file`, {
@@ -1866,8 +1889,14 @@
                         event.target.value = null;
                         return;
                     }
-                    
+
                     showLoading();
+
+                    // close sidebar & hide tab immediately on upload
+                    try { toggleSidebar(false); } catch (e) {}
+                    const sidebarToggle = document.getElementById('sidebar-toggle');
+                    if (sidebarToggle) sidebarToggle.style.display = 'none';
+
                     const formData = new FormData();
                     formData.append('file', file);
 
@@ -2035,7 +2064,7 @@
                 if (window.lastTreeData) {
                     showLoading();
                     try {
-                        showInlineDendrogram(window.lastTreeData, document.getElementById("inline-dendrogram-container").clientHeight, currentNewClusterIds);
+                        showInlineDendrogram(window.lastTreeData, getStableDendroHeight(), currentNewClusterIds);
                         highlightTreeClusters(new Set(clusterHighlightColors.keys()));
                         const localThresholdSlider = document.getElementById('thresholdSlider');
                         requestAnimationFrame(() => {
@@ -2055,7 +2084,7 @@
                 if (metricSelect.value !== 'Default' && window.lastTreeData) {
                     showLoading();
                     try {
-                        showInlineDendrogram(window.lastTreeData, document.getElementById("inline-dendrogram-container").clientHeight, currentNewClusterIds);
+                        showInlineDendrogram(window.lastTreeData, getStableDendroHeight(), currentNewClusterIds);
                         highlightTreeClusters(new Set(clusterHighlightColors.keys()));
                         const localThresholdSlider = document.getElementById('thresholdSlider');
                         requestAnimationFrame(() => {
@@ -2074,7 +2103,7 @@
                 if (window.lastTreeData) {
                     showLoading();
                     try {
-                        showInlineDendrogram(window.lastTreeData, document.getElementById("inline-dendrogram-container").clientHeight, currentNewClusterIds);
+                        showInlineDendrogram(window.lastTreeData, getStableDendroHeight(), currentNewClusterIds);
                         highlightTreeClusters(new Set(clusterHighlightColors.keys()));
                         const localThresholdSlider = document.getElementById('thresholdSlider');
                         requestAnimationFrame(() => {
@@ -2146,7 +2175,7 @@
                 acknowledgeBtn.style.display = 'none';
                 currentNewClusterIds.clear();
                 if (window.lastTreeData) {
-                    showInlineDendrogram(window.lastTreeData, document.getElementById("inline-dendrogram-container").clientHeight, currentNewClusterIds);
+                    showInlineDendrogram(window.lastTreeData, getStableDendroHeight(), currentNewClusterIds);
                 }
             });
         }
@@ -2221,27 +2250,31 @@
             });
         }
         if (revertSankeyFilterBtn) {
-            revertSankeyFilterBtn.addEventListener('click', async () => {
-                showLoading();
-                try {
-                    window.activeSankeyNodeFilter = null;
-                    window.sankeyMatchingClusterIds.clear();
-                    await loadInlineDendrogram();
-                    revertSankeyFilterBtn.disabled = true;
-                    if (applySankeyToHeatmapBtn) {
-                        applySankeyToHeatmapBtn.disabled = true;
-                        applySankeyToHeatmapBtn.style.backgroundColor = "#6c757d";
-                    }
-                    const sankeySVG = d3.select("#sankey-diagram-container svg");
-                    if (!sankeySVG.empty()) {
-                        sankeySVG.dispatch('click');
-                    }
-                } catch (error) {
-                    console.error("Error during Sankey filter revert:", error);
-                    alert("An error occurred while reverting the filter.");
-                } finally {
-                    hideLoading();
+            revertSankeyFilterBtn.addEventListener('click', () => {
+                // No showLoading() — this should be instant.
+                window.activeSankeyNodeFilter = null;
+                window.sankeyMatchingClusterIds.clear();
+
+                // Redraw from cached tree data (fast) instead of refetching.
+                const container = document.getElementById("inline-dendrogram-container");
+                const h = container ? container.clientHeight : undefined;
+                if (window.lastTreeData) {
+                    showInlineDendrogram(window.lastTreeData, h, currentNewClusterIds);
+                } else {
+                    // Fallback only if nothing is cached.
+                    loadInlineDendrogram();
                 }
+
+                // Reset buttons/UI
+                revertSankeyFilterBtn.disabled = true;
+                if (applySankeyToHeatmapBtn) {
+                    applySankeyToHeatmapBtn.disabled = true;
+                    applySankeyToHeatmapBtn.style.backgroundColor = "#6c757d";
+                }
+
+                // Clear any node highlight in the Sankey diagram
+                const sankeySVG = d3.select("#sankey-diagram-container svg");
+                if (!sankeySVG.empty()) sankeySVG.dispatch('click');
             });
         }
         if (createSubtreeBtn) createSubtreeBtn.addEventListener('click', handleCreateSubtree);
@@ -2255,9 +2288,15 @@
                 const reclusterMessageDiv = document.getElementById('reclusterMessage');
                 if (reclusterMessageDiv) {
                     reclusterMessageDiv.textContent = "Operation cancelled by user.";
-                    reclusterMessageDiv.style.color = "#757575";
+                    reclusterMessageDiv.style.color = "#75757d";
                 }
                 if (cancelLoadingBtn) cancelLoadingBtn.disabled = true;
+
+                // Add this new part to notify the backend
+                fetch(`${API_BASE_URL}/cancel_operation`, { method: 'POST' })
+                    .then(response => response.json())
+                    .then(data => console.log(data.message))
+                    .catch(error => console.error('Error cancelling operation on backend:', error));
             });
         }
 
@@ -3639,9 +3678,6 @@
             loadInlineDendrogram(); // Load data if it wasn't loaded before
         } else {
             console.log("Showing existing dendrogram.");
-            // You could potentially redraw or fit view here if desired
-            // showInlineDendrogram(window.lastTreeData, document.getElementById("inline-dendrogram-container").clientHeight);
-            // resetInlineZoom();
         }
     }
     
@@ -3681,6 +3717,12 @@
         } else {
             console.warn("Cannot reset zoom, zoom behavior not initialized.");
         }
+    }
+
+    function getStableDendroHeight() {
+        const el = document.getElementById('inline-dendrogram-container');
+        const h = el ? el.offsetHeight : null;  // includes borders
+        return (h && h > 0 ? h : (window.currentDendrogramHeight || 400));
     }
 
     function loadInlineDendrogram() {
@@ -4650,7 +4692,7 @@
             }
             
             if (window.lastTreeData) {
-                showInlineDendrogram(window.lastTreeData, document.getElementById("inline-dendrogram-container").clientHeight, currentNewClusterIds);
+                showInlineDendrogram(window.lastTreeData, getStableDendroHeight(), currentNewClusterIds);
             } else {
                 // Fallback to a full load if for some reason there's no data to draw.
                 console.warn("No tree data available. Performing a full load.");
@@ -4904,47 +4946,38 @@
 
     function updateTimelineButtonStates() {
         const processBtn = document.getElementById('processTimelineSelectionBtn');
-        const applyBtn = document.getElementById('applyTimelineBtn');
         const resetBtn = document.getElementById('resetTimelineBtn');
 
-        if (!applyBtn || !resetBtn || !processBtn || !window.timelineXScale) return;
+        if (!resetBtn || !processBtn || !window.timelineXScale) return;
 
         const isViewInitialized = window.lastTreeData && !window.lastTreeData.no_tree;
+        const currentSelection = window.currentTimeSelection;
+
+        processBtn.style.display = 'inline-block';
+        resetBtn.style.display = 'inline-block';
+
+        if (!currentSelection) {
+            processBtn.disabled = true;
+            resetBtn.disabled = true;
+            return;
+        }
+
+        // Helper to compare two selections, allowing for minor floating point discrepancies
+        const isDifferent = (sel1, sel2) => {
+            if (!sel1 || !sel2) return true; // Treat null/undefined as different
+            return Math.abs(sel1.startTime.getTime() - sel2.startTime.getTime()) > 10 ||
+                Math.abs(sel1.endTime.getTime() - sel2.endTime.getTime()) > 10;
+        };
 
         if (!isViewInitialized) {
-            // State before initial processing is done
-            applyBtn.style.display = 'none';
-            resetBtn.style.display = 'inline-block'; // Changed to make reset button visible
-            processBtn.style.display = 'inline-block';
-            
-            const brushGroup = d3.select("#timeline-container .brush");
-            const selection = brushGroup.empty() ? null : d3.brushSelection(brushGroup.node());
-            processBtn.disabled = !selection;
-
+            processBtn.disabled = false;
+            resetBtn.disabled = true;
         } else {
-            // State AFTER initial processing is done
-            processBtn.style.display = 'none';
-            applyBtn.style.display = 'inline-block';
-            resetBtn.style.display = 'inline-block';
-
-            const fullDomain = window.timelineXScale.domain();
-            const currentSelection = window.currentTimeSelection;
             const appliedSelection = window.lastAppliedTimeSelection;
-
-            if (!currentSelection || !appliedSelection) {
-                applyBtn.disabled = true;
-                resetBtn.disabled = true;
-                return;
-            }
-
-            const currentIsDifferentFromApplied = Math.abs(currentSelection.startTime.valueOf() - appliedSelection.startTime.valueOf()) > 1 ||
-                                                Math.abs(currentSelection.endTime.valueOf() - appliedSelection.endTime.valueOf()) > 1;
+            const isSelectionDifferentFromApplied = isDifferent(currentSelection, appliedSelection);
             
-            const appliedIsDifferentFromFull = Math.abs(appliedSelection.startTime.valueOf() - fullDomain[0].valueOf()) > 1 ||
-                                                Math.abs(appliedSelection.endTime.valueOf() - fullDomain[1].valueOf()) > 1;
-
-            applyBtn.disabled = !currentIsDifferentFromApplied;
-            resetBtn.disabled = !appliedIsDifferentFromFull;
+            processBtn.disabled = !isSelectionDifferentFromApplied;
+            resetBtn.disabled = !isSelectionDifferentFromApplied;
         }
     }
 
@@ -5279,60 +5312,6 @@
         });
     }
 
-    async function handleSuccessfulFileLoad(responseData) {
-        console.log("File loaded on backend. Resetting UI for new file.", responseData);
-
-        // Hide controls on new file upload
-        document.getElementById('mainFilterGroup').style.display = 'none';
-        document.getElementById('dendrogramCard').style.display = 'none';
-        document.getElementById('packetSimilarityCard').style.display = 'none';
-        document.getElementById('sankeyCard').style.display = 'none';
-
-        document.getElementById('initial-dashboard').style.display = 'none';
-        document.getElementById('magnifying-glass-controls').style.display = 'none'; // Hide on new file load
-        
-        const showSankeyBtn = document.getElementById('showSankeyBtn');
-        if (showSankeyBtn) showSankeyBtn.style.display = 'none';
-        
-        const showPacketSimilarityBtn = document.getElementById('showPacketSimilarityBtn');
-        if (showPacketSimilarityBtn) showPacketSimilarityBtn.style.display = 'none';
-
-        document.getElementById('toggleTimelineBtn').style.display = 'none';
-        document.getElementById('createSubtreeBtn').style.display = 'none';
-        document.getElementById('backToMainTreeBtn').style.display = 'none';
-        
-        const applyManualTimeBtn = document.getElementById('applyManualTimeBtn');
-        if(applyManualTimeBtn) applyManualTimeBtn.disabled = true;
-
-        clearSidebarVisualization();
-        window.lastTreeData = null;
-        window.fullTimelineData = null;
-
-        let skipTimelineSelection = false;
-        const skipToggle = document.getElementById('skipTimelineSelectionToggle');
-        if (skipToggle) {
-            skipTimelineSelection = skipToggle.checked;
-        } else {
-            console.warn("skipTimelineSelectionToggle not found, defaulting to manual selection.");
-        }
-
-        if (skipTimelineSelection) {
-            if (responseData.start_time && responseData.end_time) {
-                document.getElementById('topControls').style.display = 'block';
-                await initializeAndLoadVisuals(responseData.start_time, responseData.end_time);
-            } else {
-                throw new Error("Backend did not return a valid time range for automatic processing.");
-            }
-        } else {
-            document.getElementById('topControls').style.display = 'block';
-            const timelineCard = document.getElementById('timeline-card');
-            if(timelineCard) timelineCard.style.display = 'block';
-            
-            await showInitialDashboard(); // Show the new dashboard
-            await drawTimeline();
-        }
-    }
-
     function formatDateTimeForInput(date) {
         if (!date || isNaN(date.getTime())) return "";
 
@@ -5560,13 +5539,8 @@
 
     function resetSidebarZoom() {
         if (sidebarCy) {
-            // Re-apply the currently selected layout to reset positions
-            const layoutConfig = sidebarLayoutOptions[document.getElementById('sidebarLayoutSelect').value];
-            sidebarCy.layout(layoutConfig).run();
-
-            // Fit the graph to the viewport with default padding
             sidebarCy.fit(null, 30);
-            console.log("Sidebar zoom and layout reset.");
+            console.log("Sidebar zoom reset.");
         }
     }
 
@@ -5617,25 +5591,36 @@
     async function handleSuccessfulFileLoad(responseData) {
         console.log("File loaded on backend. Resetting UI for new file.", responseData);
 
+        // Always close sidebar and hide its tab when a new file is loaded
+        try { toggleSidebar(false); } catch (e) {}
+        const sidebarToggle = document.getElementById('sidebar-toggle');
+        if (sidebarToggle) {
+            sidebarToggle.style.display = 'none';      // keep hidden until visuals initialize
+            sidebarToggle.innerHTML = '&#9776;';       // reset to hamburger
+            sidebarToggle.style.left = '0px';
+        }
+
+        // Hide controls on new file upload (existing)
         document.getElementById('mainFilterGroup').style.display = 'none';
         document.getElementById('dendrogramCard').style.display = 'none';
         document.getElementById('packetSimilarityCard').style.display = 'none';
         document.getElementById('sankeyCard').style.display = 'none';
 
-        document.getElementById('initial-dashboard').style.display = 'none'; // Hide it initially
-        
+        document.getElementById('initial-dashboard').style.display = 'none';
+        document.getElementById('magnifying-glass-controls').style.display = 'none';
+
         const showSankeyBtn = document.getElementById('showSankeyBtn');
         if (showSankeyBtn) showSankeyBtn.style.display = 'none';
-        
+
         const showPacketSimilarityBtn = document.getElementById('showPacketSimilarityBtn');
         if (showPacketSimilarityBtn) showPacketSimilarityBtn.style.display = 'none';
 
         document.getElementById('toggleTimelineBtn').style.display = 'none';
         document.getElementById('createSubtreeBtn').style.display = 'none';
         document.getElementById('backToMainTreeBtn').style.display = 'none';
-        
+
         const applyManualTimeBtn = document.getElementById('applyManualTimeBtn');
-        if(applyManualTimeBtn) applyManualTimeBtn.disabled = true;
+        if (applyManualTimeBtn) applyManualTimeBtn.disabled = true;
 
         clearSidebarVisualization();
         window.lastTreeData = null;
@@ -5659,18 +5644,14 @@
         } else {
             document.getElementById('topControls').style.display = 'block';
             const timelineCard = document.getElementById('timeline-card');
-            if(timelineCard) timelineCard.style.display = 'block';
-            
-            await showInitialDashboard(); // Show the new dashboard
+            if (timelineCard) timelineCard.style.display = 'block';
+
+            await showInitialDashboard();
             await drawTimeline();
         }
     }
 
     async function initializeAndLoadVisuals(startTime, endTime) {
-        // Hide the dashboard when processing starts
-        const dashboard = document.getElementById('initial-dashboard');
-        if (dashboard) dashboard.style.display = 'none';
-        
         showLoading();
         try {
             globalAbortController = new AbortController();
@@ -5700,6 +5681,10 @@
             
             await drawTimeline(); 
             
+            // Hide the dashboard now that loading is complete and new visuals are ready.
+            const dashboard = document.getElementById('initial-dashboard');
+            if (dashboard) dashboard.style.display = 'none';
+
             const timelineCard = document.getElementById('timeline-card');
             const toggleTimelineBtn = document.getElementById('toggleTimelineBtn');
             if (timelineCard) timelineCard.style.display = 'none';
@@ -5729,4 +5714,3 @@
             }
         }
     }
-

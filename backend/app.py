@@ -27,6 +27,7 @@ global_backend_csv_processing_time_seconds = None
 raw_global_df = None
 full_attack_timeframes_df_cache = None
 full_attack_detail_map_cache = {}
+CANCEL_OPERATION = False
 
 metrics = [
     {"label": "Count", "value": "count"},
@@ -349,13 +350,15 @@ def prepare_dataframe_from_upload(df: pd.DataFrame):
     The input DataFrame should have columns like:
     Time, No., Source, Destination, Protocol, Length, SourcePort, DestinationPort, Flags_temp, Payload
     """
+    global CANCEL_OPERATION
     logging.info(f"Initial DataFrame shape from uploaded Parquet: {df.shape}")
     overall_start_time = time.perf_counter()
 
     if df.empty:
         logging.warning("Input DataFrame is empty. Returning empty DataFrame.")
         return pd.DataFrame(columns=["Time", "No.", "Source", "Destination", "Protocol", "Length", "SourcePort", "DestinationPort", "Flags_temp", "Payload", "processCount", "IsSYN", "IsRST", "IsACK", "IsPSH", "IsFIN", "Flags", "SourceClassification", "DestinationClassification", "ConnectionID", "InterArrivalTime", "BytesPerSecond", "PayloadLength", "NodeWeight", "BurstID", "ClusterID", "ClusterEntropy", "SessionID"])
-
+    
+    if CANCEL_OPERATION: return None
     current_time_section = time.perf_counter()
     # --- Verify and Coerce Basic Data Types ---
     if "Time" not in df.columns:
@@ -390,6 +393,7 @@ def prepare_dataframe_from_upload(df: pd.DataFrame):
         else:
             df[col_str] = df[col_str].astype(str).fillna("" if col_str != "Protocol" else "Unknown")
     logging.info(f"PROFILE: Type Coercion took: {time.perf_counter() - current_time_section:.4f} seconds")
+    if CANCEL_OPERATION: return None
     current_time_section = time.perf_counter()
 
     # --- Feature Engineering ---
@@ -398,6 +402,7 @@ def prepare_dataframe_from_upload(df: pd.DataFrame):
     else:
         df['processCount'] = pd.to_numeric(df['processCount'], errors='coerce').fillna(1).astype(int)
     logging.info(f"PROFILE: processCount setup took: {time.perf_counter() - current_time_section:.4f} seconds")
+    if CANCEL_OPERATION: return None
     current_time_section = time.perf_counter()
 
     df["IsSYN"] = ((df["Flags_temp"] & 2) > 0)
@@ -424,6 +429,7 @@ def prepare_dataframe_from_upload(df: pd.DataFrame):
     df["IsFIN"] = df["IsFIN"].astype(np.uint8)
 
     logging.info(f"PROFILE: Flag Parsing (Advanced Vectorized) took: {time.perf_counter() - current_time_section:.4f} seconds")
+    if CANCEL_OPERATION: return None
     current_time_section = time.perf_counter()
 
     df['Source'] = df['Source'].astype(str).str.strip()
@@ -437,12 +443,14 @@ def prepare_dataframe_from_upload(df: pd.DataFrame):
     df["SourceClassification"] = df["Source"].map(classification_map).fillna("External").astype('category')
     df["DestinationClassification"] = df["Destination"].map(classification_map).fillna("External").astype('category')
     logging.info(f"PROFILE: IP Classification took: {time.perf_counter() - current_time_section:.4f} seconds")
+    if CANCEL_OPERATION: return None
     current_time_section = time.perf_counter()
 
     df["ConnectionID"] = (df["Source"] + ":" + df["SourcePort"].astype(str).replace('<NA>', 'N/A') + "-" +
                           df["Destination"] + ":" + df["DestinationPort"].astype(str).replace('<NA>', 'N/A'))
     df["ConnectionID"] = df["ConnectionID"].astype('category')
     logging.info(f"PROFILE: ConnectionID Generation took: {time.perf_counter() - current_time_section:.4f} seconds")
+    if CANCEL_OPERATION: return None
     current_time_section = time.perf_counter()
 
     if pd.api.types.is_datetime64_any_dtype(df["Time"]) and not df["Time"].isnull().all():
@@ -457,6 +465,7 @@ def prepare_dataframe_from_upload(df: pd.DataFrame):
     df["BytesPerSecond"] = df["BytesPerSecond"].replace([np.inf, -np.inf], 0) 
     df["BytesPerSecond"] = df["BytesPerSecond"].fillna(0.0)
     logging.info(f"PROFILE: InterArrivalTime & BytesPerSecond took: {time.perf_counter() - current_time_section:.4f} seconds")
+    if CANCEL_OPERATION: return None
     current_time_section = time.perf_counter()
 
     df["PayloadLength"] = df["Length"] 
@@ -482,6 +491,7 @@ def prepare_dataframe_from_upload(df: pd.DataFrame):
     else:
         df["NodeWeight"] = 0.5
     logging.info(f"PROFILE: PayloadLength & NodeWeight took: {time.perf_counter() - current_time_section:.4f} seconds")
+    if CANCEL_OPERATION: return None
     current_time_section = time.perf_counter()
 
     if "InterArrivalTime" in df.columns and "ConnectionID" in df.columns:
@@ -489,6 +499,7 @@ def prepare_dataframe_from_upload(df: pd.DataFrame):
     else:
         df["BurstID"] = 0
     logging.info(f"PROFILE: BurstID took: {time.perf_counter() - current_time_section:.4f} seconds")
+    if CANCEL_OPERATION: return None
     current_time_section = time.perf_counter()
 
     logging.info("PROFILE: Starting ClusterID computation (Louvain)...")
@@ -506,6 +517,7 @@ def prepare_dataframe_from_upload(df: pd.DataFrame):
     else:
         df["ClusterID"] = pd.Series(dtype='category')
     logging.info(f"PROFILE: ClusterID (Louvain) computation took: {time.perf_counter() - current_time_section:.4f} seconds")
+    if CANCEL_OPERATION: return None
     current_time_section = time.perf_counter()
 
     cluster_entropy_map = {}
@@ -525,6 +537,7 @@ def prepare_dataframe_from_upload(df: pd.DataFrame):
                 cluster_entropy_map[cluster_id_val] = np.mean(valid_entropies) if valid_entropies else 0.0
     df["ClusterEntropy"] = df["ClusterID"].map(cluster_entropy_map).fillna(0.0)
     logging.info(f"PROFILE: ClusterEntropy took: {time.perf_counter() - current_time_section:.4f} seconds")
+    if CANCEL_OPERATION: return None
     
     logging.info("PROFILE: Starting Sankey pre-computation...")
     sankey_precompute_start = time.perf_counter()
@@ -543,6 +556,7 @@ def prepare_dataframe_from_upload(df: pd.DataFrame):
                              labels=["0-59 B", "60-99 B", "100-199 B", "200-499 B", "500-999 B", "1000-1499 B", "1500+ B"],
                              right=True).astype(str).fillna('N/A').astype('category')
     logging.info(f"PROFILE: Sankey pre-computation took: {time.perf_counter() - sankey_precompute_start:.4f} seconds")
+    if CANCEL_OPERATION: return None
     
     if 'Time' in df.columns and pd.api.types.is_datetime64_any_dtype(df["Time"]):
         if isinstance(df.index, pd.MultiIndex):
@@ -606,7 +620,11 @@ def process_uploaded_file_endpoint():
     It also populates a separate, full attack data cache for the timeline view.
     """
     global raw_global_df, global_df, attack_detail_map_cache, attack_timeframes_df_cache, attacking_sources_cache
-    global full_attack_detail_map_cache, full_attack_timeframes_df_cache
+    global full_attack_detail_map_cache, full_attack_timeframes_df_cache, CANCEL_OPERATION
+
+    CANCEL_OPERATION = False # Reset the cancellation flag on a new file upload
+    logging.info("Reset CANCEL_OPERATION flag to False for new file upload.")
+
 
     if 'file' not in request.files:
         return jsonify({"error": "No file part in the request."}), 400
@@ -955,7 +973,11 @@ def initialize_main_view():
     NEW ENDPOINT: This performs the heavy processing on the time slice selected by the user.
     """
     global raw_global_df, global_df, global_start_time, global_end_time, global_duration_seconds, \
-           global_backend_csv_processing_time_seconds, attack_detail_map_cache, attack_timeframes_df_cache, attacking_sources_cache
+           global_backend_csv_processing_time_seconds, attack_detail_map_cache, attack_timeframes_df_cache, attacking_sources_cache, CANCEL_OPERATION
+
+    CANCEL_OPERATION = False # Reset the cancellation flag for a new processing job
+    logging.info("Reset CANCEL_OPERATION flag to False for new time selection processing.")
+
 
     if raw_global_df is None or raw_global_df.empty:
         return jsonify({"error": "No raw data has been loaded. Please upload a file first."}), 400
@@ -1071,6 +1093,13 @@ def summary_stats():
         "unique_dests": int(unique_dests),
         "top_protocols": top_protocols
     })
+
+@app.route('/cancel_operation', methods=['POST'])
+def cancel_operation():
+    global CANCEL_OPERATION
+    CANCEL_OPERATION = True
+    logging.info("Cancellation request received. Setting CANCEL_OPERATION flag to True.")
+    return jsonify({"message": "Cancellation signal sent."})
 
 @app.route('/create_subtree', methods=['POST'])
 def create_subtree():

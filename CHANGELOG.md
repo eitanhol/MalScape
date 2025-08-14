@@ -1,5 +1,19 @@
 # Changelog
 
+## [2025-08-13]
+### Fixed
+- Data summary hiding when loading screen starts; now only hides after finished loading.
+- Sidebar visualization reset zoom button changing node positions.
+- Reset timeline button.
+- Sidebar staying open when loading new file.
+- Resizing error when reordering heatmap/tree.
+
+### Changed
+- Cancel button now stops backend instead of just hiding loading screen on frontend.
+
+### Improved
+- Revert Sankey filter button optimized.
+
 ## [2025-08-07]
 ### Improved
 - Protocol coloring for better visual distinction.
