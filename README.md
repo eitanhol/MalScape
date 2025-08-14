@@ -2,108 +2,125 @@ See the [Full Changelog](../../blob/main/CHANGELOG.md) for all updates.
 
 ## User-Visible Feature Additions
 
+### File Upload (.parquet) & Demo Loader
+- **How it works**: Upload a `.parquet` capture to initialize the app. Optionally, click **Load Demo File** to load a bundled example with the correct schema.
+- **Why it matters**: Guarantees a fast, known-good path to explore the UI and verify visuals without hunting for data.
+- **Implementation notes**: Frontend controls in **`index.html`** (`#fileInput`, `#loadDemoBtn`); handlers in **`script.js`** (upload flow, demo loader). Backend endpoints in **`app.py`**: `POST /process_uploaded_file`, `POST /load_demo_file`.
 
 ### Pre-processing Dashboard
-- **How it works**: Right after a file upload, the app requests capture-wide stats and populates the cards in `#initial-dashboard` (total packets, data volume, unique IPs, top protocols).
-- **Why it matters**: Gives a quick “size & shape” snapshot before picking a timeline window or doing heavier analysis.
-- **Implementation notes**: Backend route in **`app.py`** (`/summary_stats`). Markup in **`index.html`** (`#initial-dashboard` and `#stat-*` IDs). Client code in **`script.js`** (`showInitialDashboard()` + the upload flow).
+- **How it works**: Immediately after a successful upload, the dashboard summarizes **total packets**, **data volume**, **unique sources/destinations**, and **top protocols**.
+- **Why it matters**: Quick “size & shape” snapshot before choosing a time window or heavier analysis.
+- **Implementation notes**: UI in **`index.html`** (`#initial-dashboard`), populated by **`script.js`** (`showInitialDashboard()` in the upload flow). Data from **`app.py`** `GET /summary_stats`.
 
-### Reset Zoom Controls
-- **How it works**: Two buttons reset zoom/pan: **Sidebar graph** (`#resetSidebarZoomBtn`) and **inline tree/heatmap** (`#resetInlineZoomBtn`).
-- **Why it matters**: Prevents users from getting “lost” after aggressive zoom/pan in dense visuals.
-- **Implementation notes**: Handlers and helpers in **`script.js`** (`resetSidebarZoom()` and `resetInlineZoom()`). Buttons declared in **`index.html`** next to the respective visual headers.
+### Timeline: Selection Window
+- **How it works**: A draggable selection window lets you choose the time slice to process. You can type **manual start/end** and **apply**; **reset** returns to the initial bounds.
+- **Why it matters**: Focus processing on the period of interest (large captures stay responsive).
+- **Implementation notes**: Controls in **`index.html`** (`#timeline-card`, `#applyManualTimeBtn`, `#resetTimelineBtn`). Rendering & drag logic in **`script.js`**. Data from **`app.py`** `GET /timeline_data`.
 
-### Packet & Attack Counters on Selection
-- **How it works**: When clusters are selected, the app totals both their packet counts and attack-packet counts and shows them in the tree metadata line.
-- **Why it matters**: Gives a quick sense of overall and attack-specific volumes without opening the packet table.
-- **Implementation notes**: Uses `aggregatedLeafData` in **`script.js`** to compute totals; rendered by the metadata update routine for the inline tree/heatmap.
+### Timeline: Variable-Width First/Last Blocks
+- **How it works**: Only the first and last timeline blocks shrink to reflect partial durations; inner blocks remain uniform.
+- **Why it matters**: Prevents misreading partial intervals as full-duration blocks.
+- **Implementation notes**: Drawn by the timeline renderer in **`script.js`**.
 
-### Magnifying Glass (Loupe)
-- **How it works**: Toggleable loupe overlays a circular zoomed view anywhere in the program. Zoom factor is adjustable via an input next to the toggle.
-- **Why it matters**: Inspect congested or detailed areas without losing global context.
-- **Implementation notes**: Implemented in **`script.js`** (creation/toggle + zoom input). Controls are in **`index.html`** (`#magnifyingGlassBtn`, `#magnifyingGlassZoom`).
+### Timeline: Processed-Range Marker
+- **How it works**: A translucent outline indicates the **exact** processed interval, even if the selection window later moves.
+- **Why it matters**: Keeps analysis context tied to the data actually processed.
+- **Implementation notes**: Part of the timeline update path in **`script.js`**. Processed time metadata from **`app.py`** `GET /time_info`.
 
-### Variable-Width Timeline Edge Blocks
-- **How it works**: Only the first and last timeline blocks adjust their width to match their shorter duration, while all other blocks remain uniform.
-- **Why it matters**: Correctly represents partial-duration edge blocks instead of misleadingly showing them as equal in time.
-- **Implementation notes**: Drawn in **`script.js`** by the timeline renderer.
+### Timeline: Tooltips
+- **How it works**: Hovering a block shows packet counts and top talkers for that interval; attack-related items are highlighted.
+- **Why it matters**: At-a-glance density and activity cues without leaving the timeline.
+- **Implementation notes**: Tooltip template & show/hide logic in **`script.js`** using `GET /timeline_data`.
 
-### Processed-Range Marker
-- **How it works**: A semi-transparent outline marks the processed interval on the timeline.
-- **Why it matters**: Shows exactly what slice is currently analysed, even if you move the selection window without reprocessing.
-- **Implementation notes**: Part of the timeline render/update logic in **`script.js`**.
+### Timeline: Granularity Control & Show/Hide
+- **How it works**: Set the interval size (seconds) and **Apply**; optionally **Show/Hide Timeline** to get more canvas space.
+- **Why it matters**: Match binning to the duration you’re inspecting; free screen real estate when you don’t need the timeline.
+- **Implementation notes**: Controls in **`index.html`** (`#timelineGranularityInput`, `#applyGranularityBtn`, `#toggleTimelineBtn`). Backend respects `interval_ms` in `GET /timeline_data`.
 
-### Timeline Tooltips (Enhanced)
-- **How it works**: Hovering a timeline block shows packet count, number of attack packets, top talkers, and whether attacks are present. If an attack IP is in the top 3, it is colored orange.
-- **Why it matters**: Gives richer at-a-glance context for each timeline block.
-- **Implementation notes**: Tooltip template + show/hide logic in the timeline code path in **`script.js`**.
+### Skip Timeline Selection (Process Entire File)
+- **How it works**: Toggle **Skip Timeline Selection** to process the entire upload in one go.
+- **Why it matters**: One-click path when you want a whole-capture overview.
+- **Implementation notes**: Toggle in **`index.html`** (`#skipTimelineSelectionToggle`); upload/initialize flow in **`script.js`**; processing in **`app.py`** `POST /initialize_main_view`.
 
-### Manual Timeline Inputs, Reset & Validation
-- **How it works**: Start/End inputs allow precise windows. “Apply” stays disabled until inputs are valid; “Reset” clears to defaults.
-- **Why it matters**: Enables pin-point forensics and prevents off-by-one errors from drag-selections.
-- **Implementation notes**: Inputs and buttons in **`index.html`** (timeline card). Validation/apply/reset handlers in **`script.js`**.
+---
 
-### Sankey → Heatmap Selection Sync (Improved)
-- **How it works**: Selecting nodes or links in the Sankey and applying highlights marks all heatmap clusters carrying that traffic; a revert clears highlights. Sankey nodes with value of 0 are hidden, and small nodes are easier to select.
-- **Why it matters**: Connects flow analysis in the Sankey to anomaly/cluster views while improving clarity and usability.
-- **Implementation notes**: UI buttons in **`index.html`**. Client logic in **`script.js`** (tracks `currentSankeyDimensionsOrder`, collects selected nodes/links, calls the server to resolve matching ClusterIDs, then highlights those heatmap cells). Server endpoints in **`app.py`** (`/sankey_dimensions_meta`, `/sankey_data`, `/get_sankey_matching_clusters`).
+### Inline Dendrogram + Heatmap (Main View)
+- **How it works**: The app generates a hierarchical tree over clusters and renders an attached heatmap. Leaves correspond to clusters; features display as heatmap rows.
+- **Why it matters**: Combines structure (tree) with detail (heatmap) to reveal related traffic patterns and where activity concentrates.
+- **Implementation notes**: Container & controls in **`index.html`** (`#dendrogramCard`, `#treeControls`, `#inlineDendrogramSvg`). Data from **`app.py`** `GET /hierarchical_clusters`.
 
-### Show/Hide Timeline Toggle
-- **How it works**: A button collapses/expands the timeline card with a smooth transition.
-- **Why it matters**: Frees vertical space on smaller screens once a window is chosen.
-- **Implementation notes**: Toggle button and card live in **`index.html`**; event handler in **`script.js`**.
+### Dendrogram: Resolution & Reclustering
+- **How it works**: Enter a **Resolution** and **Apply** to recluster; recently created clusters are temporarily highlighted so you can see what changed.
+- **Why it matters**: Lets you tune community detection granularity and immediately view the impact.
+- **Implementation notes**: Controls in **`index.html`** (`#resolutionInput`, `#applyResolutionBtn`, `#acknowledgeNewClustersBtn`). Frontend in **`script.js`**; backend uses Louvain-based clustering in **`app.py`** (`compute_clusters()` called from `GET /hierarchical_clusters?resolution=`).
 
-### Demo File Loader
-- **How it works**: "Load Demo File" uploads a bundled real-world sample in the correct format without needing to locate or convert a file.
-- **Why it matters**: Saves setup time. Normally you’d have to use a separate conversion tool to prepare a file; this lets you explore/test immediately.
-- **Implementation notes**: Button in **`index.html`**; handler in **`script.js`**; sample file path referenced in the handler.
+### Dendrogram: Reorder & Sorting
+- **How it works**: **Reorder Tree Structure** toggles a metric-driven ordering; the **Sort Metric** and **Row Order** selectors adjust leaf order without altering the grouping.
+- **Why it matters**: Reduces visual crossing and improves pattern readability in crowded trees.
+- **Implementation notes**: Controls in **`index.html`** (`#reorderTreeCheckbox`, `#dendrogramSortMetricSelect`, `#rowOrderSelect`). Handlers in **`script.js`**.
 
-### Pre-processing Timeline Selection Workflow
-- **How it works**: Upload → adjust/confirm timeline window → process. A **Skip Timeline Selection** toggle processes the entire file instead.
-- **Why it matters**: Slashes processing time on large captures, while keeping a one-click path.
-- **Implementation notes**: Toggle and inputs in **`index.html`** (`#skipTimelineSelectionToggle`). Upload flow and parameter passing in **`script.js`** (`handleFileUpload` → adds start/end params when present).
+### Dendrogram: Threshold Grouping (Cut)
+- **How it works**: Set a displayed-percentage **Threshold** and **Apply** to collapse minor branches; **Reset Grouping** restores the full tree.
+- **Why it matters**: De-clutters the canvas so salient groups stand out.
+- **Implementation notes**: Controls in **`index.html`** (`#applyThresholdBtn`, `#resetGroupingBtn`); grouping logic in **`script.js`**.
 
-### Cluster Drill-Down (Sub-Tree) View
-- **How it works**: Select combined-cluster cells and click **Create Sub-Tree from Selection**. A focused tree/heatmap view is generated for just those leaves. **Back to Main Tree** restores the original view.
-- **Why it matters**: Enables multi-level exploration without cluttering the main canvas.
-- **Implementation notes**: Buttons in **`index.html`** (`#createSubtreeBtn`, `#backToMainTreeBtn`). Client logic in **`script.js`** (sub-tree generation & state swaps). Tree data comes from **`app.py`** (`/hierarchical_clusters`).
+### Cluster Drill-Down (Subtree)
+- **How it works**: Select combined-cluster cells and click **Create Subtree** to generate a focused tree/heatmap for those items; **Back to Main Tree** returns.
+- **Why it matters**: Multi-level exploration without losing the main context.
+- **Implementation notes**: Controls in **`index.html`** (`#createSubtreeBtn`, `#backToMainTreeBtn`); data from **`app.py`** `POST /create_subtree`.
 
-### Adjustable Timeline Window
-- **How it works**: Drag the selection window on the timeline header to refine bounds; you must reprocess to apply the new window.
-- **Why it matters**: Allows iterative narrowing to suspect periods, with new processing runs for each change.
-- **Implementation notes**: Timeline selection/drag code lives in **`script.js`**.
+### Heatmap: Selection, Multi-Select, & Tooltips
+- **How it works**: Click heatmap cells to select clusters (multi-select is supported by repeat clicks). Tooltips show the attack category when applicable.
+- **Why it matters**: Fast target selection with immediate context for what’s flagged.
+- **Implementation notes**: Selection & tooltip logic in **`script.js`**; attack labels originate from **`app.py`** (`/initialize_main_view`, `/filter_and_aggregate`).
 
-### Max Node Size (Main Graph)
-- **How it works**: Numeric inputs set min/max node radius and edge width in the **main** Cytoscape graph; there’s no default hardcoded max—users must enter one to apply a limit.
-- **Why it matters**: Prevents “elephant” nodes/edges from dwarfing the scene in sparse captures.
-- **Implementation notes**: Controls in **`index.html`** (main graph sizing inputs). Logic in **`script.js`** (`applySizeControls()` for the main graph; `applySidebarSizeControls()` for the sidebar graph).
+### Metadata Line: Packet & Attack Counters
+- **How it works**: The header line above the tree/heatmap shows totals for selected clusters, including anomalous (attack) packet counts.
+- **Why it matters**: Quantifies impact without opening tables.
+- **Implementation notes**: Computed in **`script.js`** using aggregated selection state.
+
+---
+
+### Sidebar Cluster Network, Protocol Legend & Table
+- **How it works**: Selecting clusters opens the sidebar network for that selection. Nodes represent endpoints; edges represent flows with size driven by packet count or bytes. Selecting nodes or edges filters the **Sidebar Table** below. Multiple edges can be selected to load a combined table. The **Protocol Legend** in the sidebar lists each protocol, its assigned color, and its percentage share in the currently processed time range—helping you interpret edge colors and traffic composition.
+- **Why it matters**: Lets you pivot from cluster-level patterns to concrete flow endpoints and inspect underlying packets. The protocol legend ties edge coloring directly to protocol identities, improving the ability to read the graph at a glance.
+- **Implementation notes**: Sidebar container and controls in **`index.html`** (`#sidebar`, `#sidebar-cy`, `#sidebar-table-container`, `#legend`). Frontend logic in **`script.js`** (`visualizeClusterInSidebar()`, `bindSidebarGraphEvents()`, `loadSidebarMultiEdgeTable()`); backend data from **`app.py`** `GET /cluster_network`, `POST /get_multi_edge_table`, and `GET /protocol_percentages`.
+
+### Sidebar Graph: Layout, Sizing, Reset, Fullscreen
+- **How it works**: Choose a **layout**; adjust **node/edge size** ranges; **reset zoom** to re-center; switch the sidebar to **fullscreen**.
+- **Why it matters**: Maintains readability as selections vary in size and complexity.
+- **Implementation notes**: Controls in **`index.html`** (`#sidebarLayoutSelect`, `#sidebarNodeSizeMin`, `#sidebarNodeSizeMax`, `#sidebarEdgeWidthMin`, `#sidebarEdgeWidthMax`, `#resetSidebarZoomBtn`, `#sidebarFullscreenBtn`). Behavior in **`script.js`** (`applySidebarLayout()`, `applySidebarSizeControls()`).
+
+### Sidebar Table: Search & Pagination
+- **How it works**: The table supports **search** and **pagination**; clicking a row highlights the corresponding element(s) in the sidebar graph.
+- **Why it matters**: Makes large flow subsets navigable and links records back to the visualization.
+- **Implementation notes**: UI in **`index.html`** (`#sidebarTableSearchInput`, pagination controls). Frontend in **`script.js`**; rows come from **`app.py`** `POST /get_multi_edge_table`.
+
+### Saved Items
+- **How it works**: **Save Selection** stores the current cluster/group selection (including selected nodes) in the **Saved Items** list for quick return during the session.
+- **Why it matters**: Bookmarks interesting findings while you continue exploring.
+- **Implementation notes**: List UI in **`index.html`** (`#saved-items-list`, `#no-saved-items`). Managed in **`script.js`**.
+
+---
 
 ### Configurable Multi-Dimension Sankey
-- **How it works**: The Sankey can be built from multiple categorical dimensions (Protocol, Source/Dest Type, Port Groups, Packet Length Group, Attack status, optional Cluster ID). Checkboxes/toggles control which layers appear and in what order.
-- **Why it matters**: Avoids hard-coded diagrams and supports future dimensions.
-- **Implementation notes**: Dimension metadata fetched from the server; UI state kept in `currentSankeyDimensionsOrder` in **`script.js`**; graph data from `/sankey_data` in **`app.py`**.
+- **How it works**: Build a Sankey diagram from multiple dimensions (e.g., **Protocol**, **Source/Destination Type**, **Src/Dst Port Group**, **Packet Length Group**, **Attack Status**, **Cluster ID**). Nodes represent categories within each chosen dimension, arranged in columns. Flows (links) between columns are weighted by packet count, visually showing how traffic moves from one category to another. You can click a node to filter the diagram to flows passing through it, and optionally **Apply to Heatmap** to highlight all clusters that match the filtered flow. A **Revert** button clears the Sankey filter and restores the full heatmap.
+- **Why it matters**: Connects categorical attributes to each other and to cluster structure, making it easy to see relationships like “Which protocol and port group combinations are most common for attack traffic?” or “Which destination types carry the largest flows?” It allows analysts to spot unusual category pairings that may indicate suspicious or novel behaviors.
+- **Implementation notes**: UI in **`index.html`** (`#sankeyCard`, `#sankeyDimensionCheckboxes`, `#showSankeyBtn`, `#applySankeyToHeatmapBtn`, `#revertSankeyFilterBtn`). Frontend in **`script.js`** (`buildSankeyDiagram()`, `applySankeySelectionToHeatmap()`); backend in **`app.py`** `POST /sankey_data` and `POST /get_sankey_matching_clusters`.
 
-### Initial Sankey Diagram
-- **How it works**: First D3 Sankey rendering showing flows across selected dimensions.
-- **Why it matters**: Provides a holistic flow view that complements the cluster-centric heatmap.
-- **Implementation notes**: Built and updated entirely from **`script.js`**.
+---
 
-### Node-Radius Scaling (Sidebar Graph)
-- **How it works**: In the **sidebar** graph, node diameter scales to √(packet count), clamped by user min/max inputs; attacker nodes get proportionally thicker borders.
-- **Why it matters**: Keeps dense side-graphs readable while still conveying magnitude.
-- **Implementation notes**: Logic in **`script.js`** (`applySidebarSizeControls()`); inputs live in **`index.html`** (Sidebar Graph Sizing panel).
+### Main Filters & Metrics (Heatmap Input)
+- **How it works**: Global filters include **Payload keyword**, **Source/Destination/Protocol** contains, **Cluster entropy** min/max, and **unique endpoints per cluster** min/max. The **Metric** selector controls what the heatmap aggregates (e.g., **count**, **% SYN/RST/ACK/PSH packets**, **Unique Destinations/Sources/IPs**, **Payload Size Variance**, **Packets per Second**).
+- **Why it matters**: Shapes the heatmap to surface clusters that matter for your task (volume, volatility, signaling, or fan-out).
+- **Implementation notes**: Controls in **`index.html`** (`#mainFilterGroup` and related inputs). Frontend submits via **`script.js`**; aggregation in **`app.py`** `POST /filter_and_aggregate` (see `aggregate_metric()` for supported metrics).
 
-### Saved Items List
-- **How it works**: A “Save Selection” button bookmarks the current selection of clusters/IPs to a **Saved Items** list. The list persists between sessions.
-- **Why it matters**: Lets analysts queue items to revisit without re-searching.
-- **Implementation notes**: Markup in **`index.html`** (Saved Items section in the legend). CRUD and persistence in **`script.js`** (localStorage + render/update helpers). “Reset Node Selection” clears both highlights and related table state.
+### Magnifying Glass (Loupe)
+- **How it works**: Toggle the loupe to display a circular zoomed-in view that follows the cursor. Adjust **zoom** with the numeric input.
+- **Why it matters**: Inspect dense regions without losing global context or changing the current zoom.
+- **Implementation notes**: Controls in **`index.html`** (`#magnifyingGlassBtn`, `#magnifyingGlassZoom`, `#magnifying-glass-controls`). Implemented in **`script.js`**.
 
-### New-Cluster Highlighter
-- **How it works**: After reclustering (e.g., changing Louvain resolution), clusters with new IDs are temporarily highlighted on the heatmap and fade on interaction.
-- **Why it matters**: Makes reclassification effects instantly visible.
-- **Implementation notes**: Implemented in **`script.js`** as part of the heatmap refresh path.
-
-### Attack Tooltips & Multi-Select
-- **How it works**: Heatmap cells show attack category in a tooltip; selecting multiple is done with repeated left-clicks, and clicking again deselects.
-- **Why it matters**: Richer context and smoother UX during exploratory analysis.
-- **Implementation notes**: Tooltip assembly and selection handling live with the heatmap code in **`script.js`**.
+### Reset Zoom Controls
+- **How it works**: Dedicated buttons reset pan/zoom for both the **sidebar network** and the **inline tree/heatmap**.
+- **Why it matters**: Prevents getting “lost” after heavy navigation.
+- **Implementation notes**: Buttons in **`index.html`** (`#resetSidebarZoomBtn`, `#resetInlineZoomBtn`); handlers in **`script.js`**.
