@@ -3,3 +3,5 @@ tools/Combine/
 other/
 parquet/
 .venv/
+.vscode/*
+!.vscode/settings.json
