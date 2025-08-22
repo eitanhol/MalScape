@@ -1,5 +1,14 @@
 # Changelog
 
+## [2025-08-21]
+### Fixed
+- New clusters on heatmap from applying new Louvain resolution not being colored based on their metric value.
+- Definition of new clusters from applying new Louvain resolution.
+- Sidebar visualization table not appearing for attack clusters after applying new Louvain resolution.
+
+### Changed
+- "Create subtree from selection" button now hidden when only one cluster is selected.
+
 ## [2025-08-13]
 ### Fixed
 - Data summary hiding when loading screen starts; now only hides after finished loading.

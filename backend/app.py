@@ -157,7 +157,7 @@ def compute_entropy(series):
     return -np.sum(probabilities * np.log2(probabilities)) # Using log base 2 for bits
 
 
-def compute_clusters(df, resolution=2.5):
+def compute_clusters(df, resolution=2.5, old_partition=None):
     """Compute clusters using Louvain community detection."""
     G = nx.Graph()
     # Filter out self-connections and rows with NaN in Source/Destination
@@ -201,13 +201,16 @@ def compute_clusters(df, resolution=2.5):
                 if node_in_g not in partition:
                     partition[str(node_in_g)] = 'N/A_Error'
     
+    if old_partition:
+        partition = remap_cluster_ids(old_partition, partition)
+
+
     # Ensure all nodes from the original DataFrame get a cluster ID, even if 'N/A'
     final_partition = {
         str(node): str(partition.get(node, 'N/A_Isolated')) # Use specific N/A for isolated nodes
         for node in all_nodes_in_df if pd.notna(node)
     }
     return final_partition
-
 
 def load_attack_data(filename: str = "GroundTruth.csv", start_time_filter_str: str = None, end_time_filter_str: str = None) -> tuple[dict, pd.DataFrame, set]:
     """
@@ -343,6 +346,62 @@ def generate_tree_from_df(df_input, resolution=2.5, is_subtree=False):
             return {"id": f"Internal_{node.id}_dist{node.dist:.2f}", "dist": float(node.dist), "children": children}
             
     return node_to_dict_local(root_node_obj)
+
+def remap_cluster_ids(old_partition, new_partition, threshold=0.4):
+    """
+    Remaps new cluster IDs to old cluster IDs based on Jaccard similarity, with detailed logging.
+    """
+    logging.info("--- Starting Cluster ID Remapping ---")
+    
+    # Create a reverse map from cluster ID to a set of nodes for both old and new partitions
+    old_clusters = {}
+    for node, cluster_id in old_partition.items():
+        old_clusters.setdefault(cluster_id, set()).add(node)
+
+    new_clusters = {}
+    for node, cluster_id in new_partition.items():
+        new_clusters.setdefault(cluster_id, set()).add(node)
+
+    logging.info(f"Old partition has {len(old_clusters)} unique clusters.")
+    logging.info(f"New partition has {len(new_clusters)} unique clusters.")
+
+    id_map = {}
+    used_old_ids = set()
+    
+    # Determine the next available ID for truly new clusters
+    # This ensures that new IDs don't clash with old ones
+    existing_numeric_ids = [int(c) for c in old_partition.values() if c.isdigit()]
+    next_new_id = max(existing_numeric_ids) + 1 if existing_numeric_ids else 1
+
+
+    # For each new cluster, find the best matching old cluster
+    for new_id, new_nodes in new_clusters.items():
+        best_match_old_id = None
+        max_similarity = -1
+
+        for old_id, old_nodes in old_clusters.items():
+            intersection = len(new_nodes.intersection(old_nodes))
+            union = len(new_nodes.union(old_nodes))
+            similarity = intersection / union if union > 0 else 0
+
+            if similarity > max_similarity:
+                max_similarity = similarity
+                best_match_old_id = old_id
+        
+        # If the best match is good enough and the old ID hasn't been taken yet, use it
+        if max_similarity >= threshold and best_match_old_id not in used_old_ids:
+            id_map[new_id] = best_match_old_id
+            used_old_ids.add(best_match_old_id)
+            logging.info(f"REMAPPED: New cluster {new_id} ({len(new_nodes)} nodes) matched with Old cluster {best_match_old_id} ({len(old_clusters.get(best_match_old_id, set()))} nodes). Similarity: {max_similarity:.4f}")
+        else:
+            # Otherwise, assign a fresh, unused ID
+            id_map[new_id] = str(next_new_id)
+            logging.info(f"NEW ID: New cluster {new_id} ({len(new_nodes)} nodes) did not find a suitable match. Best attempt was Old {best_match_old_id} with similarity {max_similarity:.4f}. Assigning new ID {next_new_id}.")
+            next_new_id += 1
+            
+    final_partition = {node: id_map[cluster_id] for node, cluster_id in new_partition.items()}
+    logging.info("--- Cluster ID Remapping Complete ---")
+    return final_partition
 
 def prepare_dataframe_from_upload(df: pd.DataFrame):
     """
@@ -760,6 +819,20 @@ def filter_and_aggregate():
     # Apply time filter first from the POST body
     df = apply_time_filter(global_df.copy(), request)
 
+    data = request.get_json()
+    logging.info(f"Request data for /filter_and_aggregate: {data}")
+
+    resolution = data.get("resolution")
+    if resolution is not None:
+        try:
+            resolution = float(resolution)
+            logging.info(f"Applying resolution {resolution} before aggregation.")
+            node_cluster_map = compute_clusters(df[['Source', 'Destination', 'processCount']], resolution=resolution)
+            df['ClusterID'] = df['Source'].astype(str).map(node_cluster_map).fillna('N/A')
+        except (ValueError, TypeError):
+            logging.warning(f"Invalid resolution '{resolution}' in filter_and_aggregate. Using default clustering.")
+
+
     # Anomaly and Attack Type maps for clusters
     anomaly_map = {}
     cluster_attack_types_map = {}
@@ -787,8 +860,7 @@ def filter_and_aggregate():
                 else:
                     anomalous_counts_map = anomalous_df.groupby('ClusterID', observed=True).size().to_dict()
 
-    data = request.get_json()
-    logging.info(f"Request data for /filter_and_aggregate: {data}")
+    metric = data.get("metric", "count") # Default to 'count'
 
     # --- Apply Filters ---
     payloadKeyword = data.get("payloadKeyword", "").strip().lower()
@@ -801,7 +873,6 @@ def filter_and_aggregate():
     try: entropyMax = float(data.get("entropyMax", float('inf')))
     except (ValueError, TypeError): entropyMax = float('inf')
     
-    metric = data.get("metric", "count") # Default to 'count'
 
     min_source_amt = int(data["minSourceAmt"]) if data.get("minSourceAmt","").strip() else 0
     max_source_amt = int(data["maxSourceAmt"]) if data.get("maxSourceAmt","").strip() else float('inf')
@@ -1444,13 +1515,27 @@ def cluster_network():
         return jsonify({"nodes": [], "edges": [], "error": "No data loaded"}), 500
 
     cluster_id_param = request.args.get("cluster_id")
-    logging.info(f"Processing /cluster_network for cluster_id: {cluster_id_param}")
+    resolution_param = request.args.get("resolution") # <-- Add this
+    logging.info(f"Processing /cluster_network for cluster_id: {cluster_id_param} with resolution: {resolution_param}")
 
     if not cluster_id_param:
         logging.error("/cluster_network called without cluster_id.")
         return jsonify({"nodes": [], "edges": [], "error": "cluster_id parameter is missing"}), 400
     
     str_cluster_id_param = str(cluster_id_param)
+    
+    df_for_network = global_df.copy() # <-- Work on a copy
+
+    # Re-compute clusters if a resolution is provided
+    if resolution_param:
+        try:
+            resolution = float(resolution_param)
+            logging.info(f"Re-computing clusters for network view with resolution: {resolution}")
+            cols_for_clustering = ['Source', 'Destination', 'processCount']
+            node_cluster_map = compute_clusters(df_for_network[cols_for_clustering], resolution=resolution)
+            df_for_network['ClusterID'] = df_for_network["Source"].astype(str).map(node_cluster_map).fillna('N/A')
+        except (ValueError, TypeError) as e:
+            logging.warning(f"Invalid resolution '{resolution_param}' provided to /cluster_network: {e}. Using default clustering.")
 
     try:
         # Check for required columns, including SessionID now
@@ -1459,15 +1544,15 @@ def cluster_network():
                                          "AttackType", "Length", "processCount", "SourcePort", 
                                          "DestinationPort", "SessionID"]
         for col_check in required_cols_for_cluster_net:
-            if col_check not in global_df.columns:
+            if col_check not in df_for_network.columns:
                 logging.warning(f"Column '{col_check}' missing in global_df for /cluster_network. Results may be incomplete.")
                 # Add default columns if missing to prevent crashes
-                if col_check == "NodeWeight": global_df[col_check] = 0.5
-                elif col_check in ["AttackType", "SourceClassification", "DestinationClassification"]: global_df[col_check] = "N/A"
-                elif col_check == "SessionID": global_df[col_check] = -1
-                else: global_df[col_check] = 0
+                if col_check == "NodeWeight": df_for_network[col_check] = 0.5
+                elif col_check in ["AttackType", "SourceClassification", "DestinationClassification"]: df_for_network[col_check] = "N/A"
+                elif col_check == "SessionID": df_for_network[col_check] = -1
+                else: df_for_network[col_check] = 0
 
-        df_cluster = global_df[global_df["ClusterID"].astype(str) == str_cluster_id_param].copy()
+        df_cluster = df_for_network[df_for_network["ClusterID"].astype(str) == str_cluster_id_param].copy()
         logging.info(f"df_cluster for {str_cluster_id_param} shape: {df_cluster.shape}")
         
         if df_cluster.empty:
@@ -1733,14 +1818,24 @@ def get_cluster_table():
         page = int(request.args.get("page", 1))
         page_size = int(request.args.get("page_size", 30))
         search_query = request.args.get("search", "").strip().lower()
+        resolution = request.args.get("resolution")
     except (ValueError, TypeError):
         return jsonify({"rows": [], "total": 0, "error": "Invalid parameters."}), 400
 
-    df_cluster = global_df[global_df["ClusterID"].astype(str) == str(cluster_id_param)].copy()
+    df_with_time_col = global_df.reset_index()
+    
+    if resolution:
+        try:
+            resolution = float(resolution)
+            node_cluster_map = compute_clusters(df_with_time_col[['Source', 'Destination', 'processCount']], resolution=resolution)
+            df_with_time_col['ClusterID'] = df_with_time_col['Source'].astype(str).map(node_cluster_map).fillna('N/A')
+        except (ValueError, TypeError):
+            pass
 
-    # --- UPDATED: Expanded column list for display ---
+    df_cluster = df_with_time_col[df_with_time_col["ClusterID"].astype(str) == str(cluster_id_param)].copy()
+
     display_cols = ['No.', 'Time', 'Source', 'SourcePort', 'Destination', 'DestinationPort', 'Protocol', 'Length', 'Flags', 'processCount', 'InterArrivalTime', 'BytesPerSecond', 'AttackType']
-    cols_to_search = display_cols  # Search the columns that are being displayed
+    cols_to_search = display_cols
 
     if search_query and not df_cluster.empty:
         search_series = pd.Series([''] * len(df_cluster), index=df_cluster.index, dtype=str)
@@ -2020,19 +2115,20 @@ def get_multi_edge_table():
     if not edges_to_filter:
         return jsonify({"rows": [], "total": 0})
 
-    combined_mask = pd.Series([False] * len(global_df), index=global_df.index)
+    df_with_time_col = global_df.reset_index()
+    combined_mask = pd.Series([False] * len(df_with_time_col), index=df_with_time_col.index)
     for edge_filter_item in edges_to_filter:
         try:
             condition = (
-                (global_df["Source"].astype(str) == str(edge_filter_item["source"])) &
-                (global_df["Destination"].astype(str) == str(edge_filter_item["destination"])) &
-                (global_df["Protocol"].astype(str) == str(edge_filter_item["protocol"]))
+                (df_with_time_col["Source"].astype(str) == str(edge_filter_item["source"])) &
+                (df_with_time_col["Destination"].astype(str) == str(edge_filter_item["destination"])) &
+                (df_with_time_col["Protocol"].astype(str) == str(edge_filter_item["protocol"]))
             )
             combined_mask |= condition
         except KeyError:
             continue
 
-    filtered_df = global_df[combined_mask].copy()
+    filtered_df = df_with_time_col[combined_mask].copy()
     
     # --- UPDATED: Expanded column list for display ---
     display_cols = ['No.', 'Time', 'Source', 'SourcePort', 'Destination', 'DestinationPort', 'Protocol', 'Length', 'Flags', 'processCount', 'InterArrivalTime', 'BytesPerSecond', 'AttackType']
@@ -2066,8 +2162,6 @@ def get_multi_edge_table():
         rows_for_json.append(record)
 
     return jsonify({"rows": rows_for_json, "total": total})
-
-
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))

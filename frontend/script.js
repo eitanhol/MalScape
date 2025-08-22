@@ -560,7 +560,15 @@
             sidebarInfoDiv.innerHTML = `Loading network for Cluster ${stringClusterID}...`;
             sidebarInfoDiv.style.display = 'block';
 
-            fetch(`${API_BASE_URL}/cluster_network?cluster_id=${stringClusterID}`)
+            const resolutionInput = document.getElementById('resolutionInput');
+            const resolution = resolutionInput ? resolutionInput.value : null;
+            let url = `${API_BASE_URL}/cluster_network?cluster_id=${stringClusterID}`;
+            if (resolution && resolution.trim() !== "") {
+                url += `&resolution=${resolution}`;
+            }
+
+
+            fetch(url)
                 .then(response => {
                     if (!response.ok) throw new Error(`Network error (${response.status}) for Cluster ${stringClusterID}`);
                     return response.json();
@@ -600,7 +608,6 @@
                         }
                         const edgeColor = protocolColorMap[protocol] || DEFAULT_UNKNOWN_COLOR;
                         
-                        // The backend now provides the http_status directly in edge.data
                         return {
                             group: 'edges',
                             data: { ...edge.data, clusterID: stringClusterID },
@@ -1370,7 +1377,7 @@
         });
     }
 
-    function updateHeatmap() {
+    function updateHeatmap(resolution = null) {
         return new Promise((resolve, reject) => {
             window.fullHeatmapData = {};
             window.heatmapSortOrders = {};
@@ -1397,6 +1404,9 @@
 
             Promise.all(metrics.map(m => {
                 const filterParams = { ...filterParamsBase, metric: m.value };
+                if (resolution !== null) {
+                    filterParams.resolution = resolution;
+                }
 
                 return fetch(`${API_BASE_URL}/filter_and_aggregate`, {
                         method: "POST",
@@ -1458,7 +1468,12 @@
         sidebarSearchContainer.style.display = 'block';
 
         const searchParam = searchQuery ? `&search=${encodeURIComponent(searchQuery)}` : "";
-        const url = `${API_BASE_URL}/get_cluster_table?cluster_id=${clusterID}&page=${page}&page_size=${TABLE_PAGE_SIZE}${searchParam}`;
+        const resolutionInput = document.getElementById('resolutionInput');
+        const resolution = resolutionInput ? resolutionInput.value : null;
+        let url = `${API_BASE_URL}/get_cluster_table?cluster_id=${clusterID}&page=${page}&page_size=${TABLE_PAGE_SIZE}${searchParam}`;
+        if (resolution && resolution.trim() !== "") {
+            url += `&resolution=${resolution}`;
+        }
 
         fetch(url)
             .then(response => response.ok ? response.json() : Promise.reject(`Failed to fetch cluster table (${response.status})`))
@@ -3960,7 +3975,7 @@
             const newOriginalRoot = d3.hierarchy(window.originalTreeData);
             window.originalLeafCount = newOriginalRoot.leaves().length;
 
-            await updateHeatmap();
+            await updateHeatmap(resolution);
 
             if (globalAbortController.signal.aborted) {
                 throw new DOMException("Operation aborted by user.", "AbortError");
@@ -5436,8 +5451,29 @@
             backBtn.style.display = 'inline-block';
         } else {
             backBtn.style.display = 'none';
-            // Show the create button only if there are clusters selected
-            createBtn.style.display = clusterHighlightColors.size > 0 ? 'inline-block' : 'none';
+            
+            let shouldShow = false;
+            const selectedClusterIds = Array.from(clusterHighlightColors.keys());
+
+            if (selectedClusterIds.length > 1) {
+                // Case 1: More than one cluster is selected, so always show the button.
+                shouldShow = true;
+            } else if (selectedClusterIds.length === 1) {
+                // Case 2: Exactly one cluster is selected.
+                const singleClusterId = selectedClusterIds[0];
+                if (window.lastTreeRoot) {
+                    // Find the selected cluster in the current dendrogram data.
+                    const leaves = window.lastTreeRoot.leaves();
+                    const selectedLeaf = leaves.find(leaf => String(leaf.data.cluster_id) === String(singleClusterId));
+                    
+                    // Check if the selected item is a 'group' (a combination of other clusters).
+                    if (selectedLeaf && selectedLeaf.data.isGroup) {
+                        shouldShow = true;
+                    }
+                }
+            }
+            
+            createBtn.style.display = shouldShow ? 'inline-block' : 'none';
         }
     }
 
